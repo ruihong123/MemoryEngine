@@ -138,8 +138,8 @@ namespace DSMEngine {
         }
         bool isOffsetInValidRing(GlobalAddress gaddr)
         {
-            uint64_t & head = inner_section->head_;
-            uint64_t & tail = inner_section->tail_;
+            const uint64_t & head = inner_section->head_;
+            const uint64_t & tail = inner_section->tail_;
             long offset = gaddr.offset - seg_addr_.offset - STRUCT_OFFSET(DeltaSection, local_seg_addr_);
             assert(offset >= 0);
             // Case 1: The buffer is not wrapped

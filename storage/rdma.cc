@@ -314,7 +314,7 @@ size_t RDMA_Manager::GetComputeNodeNum() {
     uint64_t RDMA_Manager::GetTimestamp() {
         ibv_mr* local_cas_buffer = Get_local_CAS_mr();
         //THis RDMA read may have some lag with the RDMA faa, BUT this should be fine.
-        RDMA_Read(timestamp_oracle, 1, local_cas_buffer, 8, IBV_SEND_SIGNALED, 1);
+        RDMA_Read(timestamp_oracle,  local_cas_buffer, 8, IBV_SEND_SIGNALED, 1, 1);
         assert(*(uint64_t *)local_cas_buffer->addr <0x700d2c00cbe9);
         return *(uint64_t *)local_cas_buffer->addr;
     }
@@ -2365,8 +2365,8 @@ End of socket operations
         return rc;
 }
 // return 0 means success
-    int RDMA_Manager::RDMA_Read(ibv_mr *remote_mr, uint16_t target_node_id, ibv_mr *local_mr, size_t msg_size,
-                                size_t send_flag, int poll_num,
+    int RDMA_Manager::RDMA_Read(ibv_mr *remote_mr,  ibv_mr *local_mr, size_t msg_size,
+                                size_t send_flag, int poll_num, uint16_t target_node_id,
                                 std::string qp_type) {
 //#ifdef GETANALYSIS
 //  auto start = std::chrono::high_resolution_clock::now();

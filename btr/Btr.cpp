@@ -242,7 +242,7 @@ namespace DSMEngine {
         *(GlobalAddress*)(local_mr->addr) = GlobalAddress::Null();
         // The first compute node may not have written the root ptr to root_ptr_ptr, we need to keep polling.
         while (*(GlobalAddress*)(local_mr->addr) == GlobalAddress::Null()) {
-            rdma_mg->RDMA_Read(&remote_mr, 1, local_mr, sizeof(GlobalAddress), IBV_SEND_SIGNALED, 1);
+            rdma_mg->RDMA_Read(&remote_mr,  local_mr, sizeof(GlobalAddress), IBV_SEND_SIGNALED, 1, 1);
         }
         assert(*(GlobalAddress*)local_mr->addr != GlobalAddress::Null());
         GlobalAddress root_ptr = *(GlobalAddress*)local_mr->addr;

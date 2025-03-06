@@ -646,8 +646,8 @@ class RDMA_Manager {
                                     uint16_t target_node_id);  // Only called by client.
     int RDMA_Read(GlobalAddress remote_ptr, ibv_mr *local_mr, size_t msg_size, size_t send_flag, int poll_num,
                   Chunk_type pool_name, std::string qp_type = "default");
-  int RDMA_Read(ibv_mr *remote_mr, uint16_t target_node_id, ibv_mr *local_mr, size_t msg_size, size_t send_flag,
-                int poll_num,   std::string qp_type = "default");
+  int RDMA_Read(ibv_mr *remote_mr,  ibv_mr *local_mr, size_t msg_size, size_t send_flag,
+                int poll_num,  uint16_t target_node_id, std::string qp_type = "default");
     // TODO: implement this kind of RDMA operation for every primitive.
     int RDMA_Write(GlobalAddress remote_ptr, ibv_mr *local_mr, size_t msg_size, size_t send_flag, int poll_num,
                    Chunk_type pool_name, std::string qp_type = "default");
