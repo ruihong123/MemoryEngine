@@ -4,7 +4,7 @@
 
 #ifndef SELCC_DDSM_H
 #define SELCC_DDSM_H
-#include "DSMEngine/cache.h"
+#include "cache.h"
 #include "storage/page.h"
 #include <libmemcached/memcached.h>
 namespace DSMEngine {
@@ -42,7 +42,7 @@ namespace DSMEngine {
 #ifndef NDEBUG
                 assert(STRUCT_OFFSET(InternalPage<uint64_t >, global_lock) == STRUCT_OFFSET(LeafPage<uint64_t>, global_lock));
                 if (page->hdr.p_type == P_Internal_P){
-                    printf("Internal page is being destroyed %p\n", handle->gptr);
+//                    printf("Internal page is being destroyed %p\n", handle->gptr);
                 }
 #endif
                 assert(page->hdr.this_page_g_ptr == GlobalAddress::Null() || page->hdr.this_page_g_ptr == handle->gptr);
@@ -172,7 +172,7 @@ namespace DSMEngine {
             return index_id.fetch_add(1);
         }
     private:
-        std::atomic<uint64_t > target_node_counter = {0};
+//        std::atomic<uint64_t > target_node_counter = {0};
     };
     class SELCC_Guard{
     public:

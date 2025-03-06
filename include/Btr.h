@@ -3,7 +3,7 @@
 
 
 #include "storage/rdma.h"
-#include "DSMEngine/cache.h"
+#include "cache.h"
 #include "DDSM.h"
 #include "storage/page.h"
 #include <atomic>
@@ -216,6 +216,7 @@ namespace DSMEngine {
         static thread_local size_t round_robin_cur;
         static thread_local std::shared_mutex *lock_coupling_memo[define::kMaxLevelOfTree];
         static thread_local SearchResult<Key> *search_result_memo;
+        std::vector<LocalLockNode *> local_locks;
 //        std::vector<LocalLockNode *> local_locks;
         Cache *page_cache;
         DDSM* ddms_ = nullptr;

@@ -62,7 +62,7 @@ int main(int argc, char* argv[]) {
 //    WORKLOAD_PATTERN == PARTITION_SOURCE
     if (TWOPHASECOMMIT){
         auto func = std::bind(&TpccExecutor::ProcessQueryThread_2PC_Participant,  (void*)&storage_manager, std::placeholders::_1);
-        default_gallocator->rdma_mg->Set_message_handling_func(func);
+        default_gallocator->rdma_mg->Set_message_handling_func(func, "2PC");
     }
   // generate workload
   IORedirector redirector(gThreadCount);

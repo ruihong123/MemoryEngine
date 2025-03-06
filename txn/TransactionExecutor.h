@@ -48,7 +48,8 @@ class TransactionExecutor {
   PerfStatistics &GetPerfStatistics() {
     return perf_statistics_;
   }
-  static void ProcessQueryThread_2PC_Participant(void* storage_ptr, uint32_t handler_id) {
+  static void ProcessQueryThread_2PC_Participant(void* storage_ptr, void* id_p) {
+        uint32_t handler_id = *((uint32_t*)id_p);
         uint32_t dummy_thread_id = 0;
         bindCore(dummy_thread_id);
         StorageManager* storage_manager_ = (StorageManager*)storage_ptr;
@@ -144,6 +145,7 @@ class TransactionExecutor {
 
 
             success = true;
+            delete (uint32_t *)id_p;
 //            communication_queue->command = invalid_command_;
         }
 

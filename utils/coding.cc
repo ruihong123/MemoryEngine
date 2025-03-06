@@ -10,7 +10,7 @@
 #include "utils/coding.h"
 
 #include <algorithm>
-#include "DSMEngine//slice.h"
+#include "Tools//slice.h"
 //#include "DSMEngine/slice_transform.h"
 
 namespace DSMEngine {

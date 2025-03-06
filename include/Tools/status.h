@@ -16,8 +16,8 @@
 #include <algorithm>
 #include <string>
 
-#include "DSMEngine/export.h"
-#include "DSMEngine/slice.h"
+#include "Tools/export.h"
+#include "Tools/slice.h"
 
 namespace DSMEngine {
 

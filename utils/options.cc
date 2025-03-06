@@ -2,10 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
 
-#include "DSMEngine/options.h"
+#include "Tools/options.h"
 
-#include "DSMEngine/comparator.h"
-#include "DSMEngine/env.h"
+#include "Tools/comparator.h"
+#include "Tools/env.h"
 
 namespace DSMEngine {
 

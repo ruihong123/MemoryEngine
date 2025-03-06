@@ -12,10 +12,14 @@ namespace DSMEngine{
 		class GlobalTimestamp{
 		public:
 			///////////////////////
-			static uint64_t GetMonotoneTimestamp(){
+			static uint64_t FetchAddMonotoneTimestamp(){
                 static RDMA_Manager* rdma_mg = RDMA_Manager::Get_Instance();
-				return rdma_mg->GetNextTimestamp();
+				return rdma_mg->FetchAddNextTimestamp();
 			}
+            static uint64_t GetMonotoneTimestamp(){
+                static RDMA_Manager* rdma_mg = RDMA_Manager::Get_Instance();
+                return rdma_mg->GetTimestamp();
+            }
 
 //			static uint64_t GetBatchMonotoneTimestamp(){
 //				return monotone_timestamp_.fetch_add(kBatchTsNum, std::memory_order_relaxed);
@@ -57,7 +61,7 @@ namespace DSMEngine{
 
 		public:
             static RDMA_Manager* rdma_mg;
-			static std::atomic<uint64_t> monotone_timestamp_;
+//			static std::atomic<uint64_t> monotone_timestamp_;
             static GlobalAddress time_stamp_gaddr;
 //			static std::atomic<uint64_t> *thread_timestamp_[kMaxThreadNum];
 			static size_t thread_count_;

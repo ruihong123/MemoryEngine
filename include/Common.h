@@ -243,12 +243,27 @@ public:
     operator uint64_t() {
         return val;
     }
+//    bool operator==(const GlobalAddress &other) const
+//    { return (nodeID == other.nodeID
+//              && offset == other.offset);
+//    }
+
     //The memory node ID is odd number not including 0.
     static GlobalAddress Null() {
         static GlobalAddress zero{0, 0};
         return zero;
     };
 } __attribute__((packed));
+template <>
+struct std::hash<GlobalAddress>
+{
+    std::size_t operator()(const GlobalAddress& k) const
+    {
+        uint64_t val = k.val;
+        return std::hash<uint64_t>()(val);
+    }
+};
+
 [[maybe_unused]]static GlobalAddress TOPAGE(GlobalAddress addr){
     GlobalAddress ret = addr;
     size_t bulk_granularity = define::CHUNK_SIZE;
@@ -281,6 +296,22 @@ inline bool operator==(const GlobalAddress &lhs, const GlobalAddress &rhs) {
 
 inline bool operator!=(const GlobalAddress &lhs, const GlobalAddress &rhs) {
     return !(lhs == rhs);
+}
+// redefine other operators
+inline bool operator<(const GlobalAddress &lhs, const GlobalAddress &rhs) {
+    return (lhs.nodeID < rhs.nodeID) || (lhs.nodeID == rhs.nodeID && lhs.offset < rhs.offset);
+}
+
+inline bool operator>(const GlobalAddress &lhs, const GlobalAddress &rhs) {
+    return (lhs.nodeID > rhs.nodeID) || (lhs.nodeID == rhs.nodeID && lhs.offset > rhs.offset);
+}
+
+inline bool operator<=(const GlobalAddress &lhs, const GlobalAddress &rhs) {
+    return !(lhs > rhs);
+}
+
+inline bool operator>=(const GlobalAddress &lhs, const GlobalAddress &rhs) {
+    return !(lhs < rhs);
 }
 
 inline std::ostream &operator<<(std::ostream &os, const GlobalAddress &obj) {

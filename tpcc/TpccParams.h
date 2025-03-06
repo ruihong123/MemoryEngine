@@ -12,10 +12,10 @@
 // 2. whether the generated workload is sharded, whether a single node only receive txn for a specific warehouse rather than radomly distributed.
 // 3. for a specific txn, wther it contain product from other warehouse. this will result in cross-shard txn for sharded workload.
 // NOte: never make Partitioned true with workload as random source.
-#define LOGGING true
-#define TWOPHASECOMMIT true
-#define WORKLOAD_PATTERN SourceType::PARTITION_SOURCE
-//#define WORKLOAD_PATTERN SourceType::RANDOM_SOURCE
+#define LOGGING false
+#define TWOPHASECOMMIT false
+//#define WORKLOAD_PATTERN SourceType::PARTITION_SOURCE
+#define WORKLOAD_PATTERN SourceType::RANDOM_SOURCE
 namespace DSMEngine {
 namespace TpccBenchmark {
 struct TpccScaleParams {

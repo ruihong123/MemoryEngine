@@ -13,7 +13,7 @@
 #include "utils/ThreadPool.h"
 //#include "db/log_writer.h"
 //#include "db/version_set.h"
-#include "DSMEngine/options.h"
+#include "Tools/options.h"
 
 namespace DSMEngine {
 

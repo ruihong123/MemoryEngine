@@ -9,8 +9,8 @@
 #include <cstdlib>
 #include <limits>
 
-#include "DSMEngine/env.h"
-#include "DSMEngine/slice.h"
+#include "Tools/env.h"
+#include "Tools/slice.h"
 
 namespace DSMEngine {
 

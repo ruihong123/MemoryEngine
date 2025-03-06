@@ -7,7 +7,7 @@
 #define MEMORYENGINE_PAGE_H
 #include "Common.h"
 #include "rdma.h"
-#include "DSMEngine/slice.h"
+#include "Tools/slice.h"
 #include "storage/ColumnInfo.h"
 #include "RecordSchema.h"
 #include "Record.h"

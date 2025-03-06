@@ -16,7 +16,7 @@ namespace DSMEngine {
     extern int num_txn;
     extern int num_core;  // number of cores utilized in a single numa node.
 
-    extern size_t cache_size;
+    extern uint64_t cache_size;
     extern std::string my_host_name;
     extern unsigned int conn_port;
     extern std::string config_filename;
@@ -102,6 +102,8 @@ namespace DSMEngine {
                 num_txn = atoi(&argv[i][2]);
             } else if (argv[i][1] == 'd') {
                 dist_ratio = atoi(&argv[i][2]);
+            } else if (argv[i][1] == 'c' && argv[i][2] == 's') {
+                cache_size = atoi(&argv[i][3]) * 1024LLU * 1024LLU* 1024LLU;
             } else if (argv[i][1] == 'c') {
                 num_core = atoi(&argv[i][2]);
                 gThreadCount = num_core;
@@ -127,6 +129,7 @@ namespace DSMEngine {
                 gStandard = false;
             } else if (argv[i][1] == 'n' && argv[i][2] == 'i' && argv[i][3] == 'd') {
                 RDMA_Manager::node_id = atoi(&argv[i][4]);
+
             } else if (argv[i][1] == 'h') {
                 PrintUsage();
                 exit(0);

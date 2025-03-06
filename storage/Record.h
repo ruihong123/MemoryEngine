@@ -6,6 +6,8 @@
 //#include "CharArray.h"
 //#include "Meta.h"
 #include "RecordSchema.h"
+#include "DeltaRecord.h"
+#include <set>
 //#include "Cache.h"
 
 namespace DSMEngine {
@@ -56,18 +58,26 @@ public:
 //        printf("Memcpy to %p from %p size %lu\n", data_ptr_ + schema_ptr_->GetColumnOffset(column_id), data, schema_ptr_->GetColumnSize(column_id));
 //        fflush(stdout);
         memcpy(data_ptr_ + schema_ptr_->GetColumnOffset(column_id), data, schema_ptr_->GetColumnSize(column_id));
+        if (dirty_col_ids.count(column_id) == 0){
+            dirty_col_ids.insert(column_id);
+        }
     }
-
     // rename.
     void UpdateColumn(const size_t &column_id, void*data){
         memcpy(data_ptr_ + schema_ptr_->GetColumnOffset(column_id), data, schema_ptr_->GetColumnSize(column_id));
+        if (dirty_col_ids.count(column_id) == 0){
+            dirty_col_ids.insert(column_id);
+        }
     }
 
     // set column. type must be varchar.
     void SetColumn(const size_t &column_id, void* data, size_t size){
         assert(schema_ptr_->GetColumnType(column_id) == ValueType::VARCHAR && schema_ptr_->GetColumnSize(column_id) >= size);
         memcpy(data_ptr_ + schema_ptr_->GetColumnOffset(column_id), data, size);
-    }
+        if (dirty_col_ids.count(column_id) == 0){
+            dirty_col_ids.insert(column_id);
+        }
+  }
 
 
 //    // set column. type must be varchar.
@@ -80,6 +90,9 @@ public:
     void SetColumn(const size_t &column_id, const std::string &data){
         assert(schema_ptr_->GetColumnType(column_id) == ValueType::VARCHAR && schema_ptr_->GetColumnSize(column_id) >= data.size());
         memcpy(data_ptr_ + schema_ptr_->GetColumnOffset(column_id), data.c_str(), data.size());
+        if (dirty_col_ids.count(column_id) == 0){
+            dirty_col_ids.insert(column_id);
+        }
     }
     void ReSetRecord(const char* &data, size_t size){
         assert(schema_ptr_->GetSchemaSize() >= size);
@@ -207,20 +220,30 @@ public:
             SetColumn(meta_col_id, &meta_col);
         }
 #endif
-#if defined(TO) || defined(OCC)
+#if defined(TO) || defined(OCC) || defined(MVOCC)
         [[nodiscard]] uint64_t GetWTS() const {
             size_t meta_col_id = schema_ptr_->GetMetaColumnId();
             MetaColumn meta_col;
             GetColumn(meta_col_id, &meta_col);
             return meta_col.Wts_;
         }
+        [[nodiscard]] MetaColumn GetMeta() const {
+            size_t meta_col_id = schema_ptr_->GetMetaColumnId();
+            MetaColumn meta_col;
+            GetColumn(meta_col_id, &meta_col);
+            return meta_col;
+        }
         void PutWTS(uint64_t wts) {
             const size_t meta_col_id = schema_ptr_->GetMetaColumnId();
             MetaColumn meta_col;
             GetColumn(meta_col_id, &meta_col);
-            assert(wts <0x700d2c00cbe9);
+            assert(wts <0x700d2c00cbe9 || wts == UINT64_MAX);
             meta_col.Wts_ = wts;
             SetColumn(meta_col_id, &meta_col);
+        }
+        void PutMeta(MetaColumn meta) {
+            const size_t meta_col_id = schema_ptr_->GetMetaColumnId();
+            SetColumn(meta_col_id, &meta);
         }
 #endif
         void SetVisible(bool val) {
@@ -230,6 +253,26 @@ public:
             meta_col.is_visible_ = val;
             this->SetColumn(meta_col_id, &meta_col);
         }
+        void roll_back(DeltaRecord *delta_record){
+            // roll back the record to the previous version.
+            char* start = delta_record->data_;
+            char* end = start + delta_record->current_record_size_;
+            while (start < end){
+                size_t column_id = *(size_t*)start;
+                start += sizeof(size_t);
+                size_t column_size = *(size_t*)start;
+                start += sizeof(size_t);
+                memcpy(data_ptr_ + schema_ptr_->GetColumnOffset(column_id), start, column_size);
+                start += column_size;
+            }
+            // Also roll back the metadata.
+            MetaColumn meta = GetMeta();
+            meta.Wts_ = delta_record->Wts_;
+            meta.prev_delta_ = delta_record->prev_delta_gaddr;
+            PutMeta(meta);
+
+        }
+
 
 private:
     Record(const Record&);
@@ -243,6 +286,7 @@ public:
   size_t data_size_;
     bool is_visible_;
     void * handle_ = nullptr;
+    std::set<uint64_t> dirty_col_ids;
 };
 
 

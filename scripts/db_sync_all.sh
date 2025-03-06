@@ -100,6 +100,8 @@ function run_bench() {
     ssh -o StrictHostKeyChecking=no $node "rm $home_dir/scripts/log*" &
     ssh -o StrictHostKeyChecking=no $node "rm $home_dir/debug/logdump.txt" &
     ssh -o StrictHostKeyChecking=no $node "rm $home_dir/release/logdump.txt" &
+    ssh -o StrictHostKeyChecking=no $node "rm $core_dump_dir/core*"
+
 #    ssh ${ssh_opts} $node "sudo mkdir /mnt/core_dump && sudo mkfs.ext4 /dev/sda4 && sudo mount /dev/sda4 /mnt/core_dump"
 
     ssh ${ssh_opts} $node "echo '$core_dump_dir/core$compute' | sudo tee /proc/sys/kernel/core_pattern" &
@@ -124,6 +126,7 @@ function run_bench() {
     ssh -o StrictHostKeyChecking=no $node "rm $home_dir/scripts/log*" &
     ssh -o StrictHostKeyChecking=no $node "rm $home_dir/debug/logdump.txt" &
     ssh -o StrictHostKeyChecking=no $node "rm $home_dir/release/logdump.txt" &
+    ssh -o StrictHostKeyChecking=no $node "rm $core_dump_dir/core*"
 #    ssh ${ssh_opts} $node "sudo mkdir /mnt/core_dump && sudo mkfs.ext4 /dev/sda4 && sudo mount /dev/sda4 /mnt/core_dump"
 
     ssh ${ssh_opts} $node "echo '$core_dump_dir/core$compute' | sudo tee /proc/sys/kernel/core_pattern" &

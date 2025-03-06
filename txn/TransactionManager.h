@@ -16,6 +16,7 @@
 #include "Profiler.h"
 #include "env_posix.h"
 #include "TpccParams.h"
+#include "DeltaSection.h"
 //#include "TpccConstants.h"
 //#include "log.h"
 #define TWO_PHASE_COMMIT
@@ -48,12 +49,34 @@ class TransactionManager {
           }
 
       }
+#if defined(MVOCC)
+      auto rdma_mg = default_gallocator->rdma_mg;
+      if (rdma_mg->message_handling_funcs_map.count("DeltaCreate") == 0){
+//          auto func = std::bind(&TransactionManager::ProcessDeltaCreate,  std::placeholders::_1);
+          rdma_mg->Set_message_handling_func(ProcessDeltaCreate, "DeltaCreate");
+          rdma_mg->Set_message_handling_func(ProcessDeltaPull, "DeltaPull");
+          rdma_mg->Set_message_handling_func(ProcessDeltaPull, "SnapshotSync");
+      }
+
+      uint8_t target_node_id = 2*((rdma_mg->node_id/2) % rdma_mg->GetMemoryNodeNum()) +1;
+      GlobalAddress remote_addr = rdma_mg->Allocate_Remote_RDMA_Slot(Chunk_type::DeltaChunk, target_node_id);
+      ibv_mr* local_mr = new ibv_mr{};
+      rdma_mg->Allocate_Local_RDMA_Slot(*local_mr, DeltaChunk);
+      ds_for_write= new DeltaSectionWrap(rdma_mg->node_id, remote_addr, rdma_mg->delta_section_size, local_mr);
+      std::unique_lock<std::shared_mutex> lck(delta_map_mtx);
+      delta_sections.insert(std::make_pair(remote_addr, ds_for_write));
+
+      // todo: sync the delta sections to the other nodes.
+      rdma_mg->Sync_Create_Delta_Section_RPC(remote_addr, rdma_mg->node_id);
+
+#endif
 
   }
   ~TransactionManager() {
         if(log_enabled_){
             delete log_file;
         }
+        //todo: exit the delta GC thread.
   }
 //    static void Two_phase_commit_worker(uint16_t targe){
 //        TransactionManager *txn_manager = new TransactionManager(nullptr, 0, 0);
@@ -154,6 +177,9 @@ class TransactionManager {
                          CharArray& ret_str);
     bool CoordinatorPrepare();
     void WritePrepareLog(){
+        //TODO: WE can accumulate the REDO log in thread local buffer and then allocate a log buffer
+        // by CPU fetch_and_add, and then write the log to the file. After that the thread will wait
+        // for the commit signal. For more details: https://catkang.github.io/2020/02/27/mysql-redo.html
         if (log_enabled_){
             std::string ret_str_temp("Prepare\n");
             Slice log_record = Slice(ret_str_temp.c_str(), ret_str_temp.size());
@@ -200,7 +226,23 @@ class TransactionManager {
   StorageManager* storage_manager_;
     Env* env_;
     static WritableFile* log_file;
- protected:
+#if defined(MVOCC)
+    static std::shared_mutex delta_map_mtx;
+    static std::map<GlobalAddress, DeltaSectionWrap*, std::greater<GlobalAddress>> delta_sections;
+    static SpinMutex pin_sp_mtx;
+    static std::map<uint64_t, uint16_t> pined_snapshot_this_node; // <snapshotid, count>
+//    static uint64_t last_broadcasted_sp;
+    static SpinMutex c_l_mtx;
+    static std::map<uint16_t, uint64_t> cluster_least_sp_; // <node id, least snapshot id>
+    void GetSnapshot();
+    void ReleaseSnapshot();
+//    static std::thread *gc_thread_;
+    static void ProcessDeltaCreate(void* args);
+    static void ProcessDeltaPull(void* args);
+    static void GarbageCollection();
+
+#endif
+protected:
 //  Env* env_;
   size_t thread_id_;
   size_t thread_count_;
@@ -214,6 +256,7 @@ class TransactionManager {
     int warehouse_bit = 0;
     int num_warehouse_per_par_ = 0;
     std::set<uint16_t> participants;
+
 //    std::map<uint64_t, Access*> access_list_;
 #if defined(TO)
   uint64_t start_timestamp_ = 0;
@@ -221,8 +264,17 @@ class TransactionManager {
   std::map<uint64_t , std::pair<Cache::Handle*, int>> locked_handles_;
 #endif
   // lock handles shall also be used for non-lock based algorithm to avoid acquire the same latch twice during the execution.
-#if defined(LOCK) || defined(OCC)
+#if defined(LOCK) || defined(OCC) || defined(MVOCC)
   std::unordered_map<uint64_t , std::pair<Cache::Handle*, AccessType>> locked_handles_;
+
+#endif
+
+#if defined(MVOCC)
+  uint64_t snapshot_ts = 0;
+  bool is_first_access_ = true;
+  bool pure_read_txn = true;
+  DeltaSectionWrap* ds_for_write = nullptr;
+
 
 #endif
 

@@ -47,7 +47,7 @@ struct PerfStatistics {
         hit_valid_num = cache_hit_valid[i][0] + hit_valid_num;
         miss_num = cache_miss[i][0] + miss_num;
     }
-      printf("cache invalidation messages are %lu, cache hit numbers are %lu, cache miss numbers are %lu, avg latency is %lu\n", invalidation_num, hit_valid_num, miss_num, agg_thread_count_/agg_throughput_);
+      printf("cache invalidation messages are %lu, cache hit numbers are %lu, cache miss numbers are %lu, avg latency is %lf\n", invalidation_num, hit_valid_num, miss_num, agg_thread_count_/agg_throughput_); //agg_thread_count_/agg_throughput_
     /*std::cout << "agg_total_count=" << agg_total_count_ <<", agg_total_abort_count=" << agg_total_abort_count_ <<", abort_rate=" << abort_rate << std::endl;
      std::cout << "per node elapsed time=" << agg_elapsed_time_ * 1.0 / agg_node_num_ << "ms." << std::endl;
      std::cout << "total throughput=" << agg_throughput_ << "K tps,per node throughput=" 

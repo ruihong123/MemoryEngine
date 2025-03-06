@@ -19,7 +19,8 @@
 #include <string.h>
 #include <string>
 
-#include "DSMEngine/write_batch.h"
+//#include "DSMEngine/write_batch.h"
+#include "Tools/slice.h"
 #include "port/port.h"
 
 // Some processors does not allow unaligned access to memory

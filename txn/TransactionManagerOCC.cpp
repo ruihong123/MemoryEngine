@@ -200,13 +200,8 @@ namespace DSMEngine{
                     assert((tuple_gaddr.offset - handle->gptr.offset) > STRUCT_OFFSET(DataPage, data_));
                     tuple_buffer = (char*)page_buff + (tuple_gaddr.offset - handle->gptr.offset);
                     access->access_global_record_->ReSetRecordBuff(tuple_buffer, access->access_global_record_->GetRecordSize(), false);
-//                    access->access_global_record_->CopyFrom(access->txn_local_tuple_);
-//                    access->access_global_record_->PutWTS(commit_ts);
                     locked_handles_.insert({page_gaddr, {handle, access_type}});
-                    if (access->access_global_record_->GetWTS() > access->txn_local_tuple_->GetWTS()){
-                        AbortTransaction();
-                        return false;
-                    }
+
                 }else{
                     handle = locked_handles_.at(page_gaddr).first;
                     //TODO: update the hierachical lock atomically, if the lock is shared lock
@@ -224,12 +219,15 @@ namespace DSMEngine{
                     assert(page_gaddr!=GlobalAddress::Null());
                     assert(access_type <= READ_WRITE);
                     access->access_global_record_->ReSetRecordBuff(tuple_buffer, access->access_global_record_->GetRecordSize(), false);
-                    if (access->access_global_record_->GetWTS() > access->txn_local_tuple_->GetWTS()){
-                        AbortTransaction();
-                        return false;
-                    }
 
                 }
+                if (access->access_global_record_->GetWTS() > access->txn_local_tuple_->GetWTS()){
+                    AbortTransaction();
+                    return false;
+                }
+                // THE updates are conducted concentrately in the commit stage. no need to update the record here.
+//                access->access_global_record_->CopyFrom(access->txn_local_tuple_);
+//                access->access_global_record_->PutWTS(commit_ts);
 
             }else {
                 if (locked_handles_.find(page_gaddr) == locked_handles_.end()){
@@ -240,10 +238,7 @@ namespace DSMEngine{
                     tuple_buffer = (char*)page_buff + (tuple_gaddr.offset - handle->gptr.offset);
                     access->access_global_record_->ReSetRecordBuff(tuple_buffer, access->access_global_record_->GetRecordSize(), false);
                     locked_handles_.insert({page_gaddr, {handle, access_type}});
-                    if (access->access_global_record_->GetWTS() > access->txn_local_tuple_->GetWTS()){
-                        AbortTransaction();
-                        return false;
-                    }
+
                 }else{
                     handle = locked_handles_.at(page_gaddr).first;
                     //TODO: update the hierachical lock atomically, if the lock is shared lock
@@ -257,10 +252,10 @@ namespace DSMEngine{
                     assert(page_gaddr!=GlobalAddress::Null());
                     assert(access_type <= READ_WRITE);
                     access->access_global_record_->ReSetRecordBuff(tuple_buffer, access->access_global_record_->GetRecordSize(), false);
-                    if (access->access_global_record_->GetWTS() > access->txn_local_tuple_->GetWTS()){
-                        AbortTransaction();
-                        return false;
-                    }
+                }
+                if (access->access_global_record_->GetWTS() > access->txn_local_tuple_->GetWTS()){
+                    AbortTransaction();
+                    return false;
                 }
             }
 
@@ -330,7 +325,9 @@ namespace DSMEngine{
             PROFILE_TIME_END(thread_id_, CC_ABORT);
 
         }
-
+    bool TransactionManager::CoordinatorPrepare() {
+        return false;
+    }
     bool TransactionManager::AcquireLatchForTuple(char*& tuple_buffer,GlobalAddress tuple_gaddr, AccessType access_type){
             GlobalAddress page_gaddr = TOPAGE(tuple_gaddr);
             assert(page_gaddr.offset - tuple_gaddr.offset > STRUCT_OFFSET(DataPage, data_));
@@ -378,6 +375,8 @@ namespace DSMEngine{
 //                assert(access_type <= READ_WRITE);
 //            }
     }
+
+
 }
 
 #endif

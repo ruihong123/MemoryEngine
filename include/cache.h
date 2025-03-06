@@ -21,8 +21,8 @@
 //#define LOCAL_LOCK_DEBUG
 #include <cstdint>
 #include <set>
-#include "DSMEngine/export.h"
-#include "DSMEngine/slice.h"
+#include "Tools/export.h"
+#include "Tools/slice.h"
 //#include <shared_mutex>
 #include <boost/thread.hpp>
 #include <stack>

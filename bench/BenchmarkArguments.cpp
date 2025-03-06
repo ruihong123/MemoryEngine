@@ -10,7 +10,7 @@ namespace DSMEngine {
     int num_txn = -1;
     int num_core = -1;  // number of cores utilized in a single numa node.
 
-    size_t cache_size = 16 * 1024LLU * 1024LLU* 1024LLU;
+    size_t cache_size = 8 * 1024LLU * 1024LLU* 1024LLU;
     std::string my_host_name;
     unsigned int conn_port = -1;
     std::string config_filename = "../connection.conf";

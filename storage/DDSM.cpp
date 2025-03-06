@@ -488,8 +488,9 @@ namespace DSMEngine {
 
     GlobalAddress DDSM::Allocate_Remote(Chunk_type pool_name) {
         if (rdma_mg) {
-            uint8_t target_node = target_node_counter.fetch_add(1) % rdma_mg->memory_nodes.size();
-            auto ret = rdma_mg->Allocate_Remote_RDMA_Slot(pool_name, 2*target_node+1);
+            uint64_t& target_node_counter = rdma_mg->round_robin_cur;
+            uint8_t target_node = 2*(target_node_counter++ % rdma_mg->memory_nodes.size()) +1;
+            auto ret = rdma_mg->Allocate_Remote_RDMA_Slot(pool_name, target_node);
             return ret;
         } else {
             assert(false);

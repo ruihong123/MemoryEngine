@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 17)
 
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DROCKSDB_SUPPORT_THREAD_LOCAL -DLOCK -DBACKOFF -Wall -Wextra  -pthread -ggdb") #-fsanitize=address -fsanitize=leak -fstack-protector
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DROCKSDB_SUPPORT_THREAD_LOCAL -DMVOCC -DBACKOFF -Wall -Wextra  -pthread -ggdb") #-fsanitize=address -fsanitize=leak -fstack-protector
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused -Wno-format -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits ")
 #-DLOCK
 #add_compile_options(-fsanitize=address)
@@ -43,10 +43,10 @@ target_sources(DSMEngine
         "utils/coding.h"
         "storage/Common.cpp"
         "utils/comparator.cc"
-        "utils/crc32c.cc"
-        "utils/crc32c.h"
+#        "utils/crc32c.cc"
+#        "utils/crc32c.h"
         "utils/fastrange.h"
-        "utils/filter_policy.cc"
+#        "utils/filter_policy.cc"
         "utils/hash.cc"
         "utils/hash.h"
         "utils/logging.cc"
@@ -71,7 +71,7 @@ target_sources(DSMEngine
         "utils/env.cc"
         "utils/status.h"
         "test/zipf.h"
-        "include/DSMEngine/env.h"
+        "include/Tools/env.h"
 
         # Only CMake 3.3+ supports PUBLIC sources in targets exported by "install".
         $<$<VERSION_GREATER:CMAKE_VERSION,3.2>:PUBLIC>
@@ -118,7 +118,6 @@ add_executable(second_btree_bench test/benchmark_btree_secondary.cpp)
 add_executable(micro_bench test/benchmark_micro.cpp)
 
 file(GLOB TPCC_DEPENDENCY
-
         "${PROJECT_SOURCE_DIR}/storage/*.h"
         "${PROJECT_SOURCE_DIR}/storage/*.cpp"
         "${PROJECT_SOURCE_DIR}/bench/*.h"

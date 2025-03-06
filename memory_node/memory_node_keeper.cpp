@@ -26,12 +26,13 @@ DSMEngine::Memory_Node_Keeper::Memory_Node_Keeper(bool use_sub_compaction, uint3
     assert(config.node_id%2 == 1);
     //  size_t write_block_size = 4*1024*1024;
     //  size_t read_block_size = 4*1024;
-    size_t table_size = 16*1024;
+//    size_t table_size = 16*1024;
+    size_t table_size = kLeafPageSize;
     rdma_mg = std::make_shared<RDMA_Manager>(config, table_size); //set memory server node id as 1.
 //    rdma_mg = new RDMA_Manager(config, table_size);
-    rdma_mg->Mempool_initialize(FlushBuffer, RDMA_WRITE_BLOCK, 0);
-    rdma_mg->Mempool_initialize(FilterChunk, FILTER_BLOCK, 0);
-    rdma_mg->Mempool_initialize(IndexChunk, INDEX_BLOCK, 0);
+//    rdma_mg->Mempool_initialize(FlushBuffer, RDMA_WRITE_BLOCK, 0);
+//    rdma_mg->Mempool_initialize(FilterChunk, FILTER_BLOCK, 0);
+//    rdma_mg->Mempool_initialize(IndexChunk, INDEX_BLOCK, 0);
     //TODO: actually we don't need Prefetch buffer.
 //    rdma_mg->Mempool_initialize(std::string("Prefetch"), RDMA_WRITE_BLOCK);
     //TODO: add a handle function for the option value to get the non-default bloombits.

@@ -14,9 +14,9 @@
 #include <sys/types.h>
 #include "utils/TimeMeasurer.h"
 #include <unistd.h>
-#include "DSMEngine/env.h"
-#include "DSMEngine/slice.h"
-#include "DSMEngine/status.h"
+#include "Tools/env.h"
+#include "Tools/slice.h"
+#include "Tools/status.h"
 #include "utils/mutexlock.h"
 //#include "DSMEngine/env.h"
 //#include "TimberSaw/options.h"

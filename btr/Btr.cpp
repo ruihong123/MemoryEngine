@@ -242,7 +242,7 @@ namespace DSMEngine {
         *(GlobalAddress*)(local_mr->addr) = GlobalAddress::Null();
         // The first compute node may not have written the root ptr to root_ptr_ptr, we need to keep polling.
         while (*(GlobalAddress*)(local_mr->addr) == GlobalAddress::Null()) {
-            rdma_mg->RDMA_Read(&remote_mr, local_mr, sizeof(GlobalAddress), IBV_SEND_SIGNALED, 1, 1);
+            rdma_mg->RDMA_Read(&remote_mr, 1, local_mr, sizeof(GlobalAddress), IBV_SEND_SIGNALED, 1);
         }
         assert(*(GlobalAddress*)local_mr->addr != GlobalAddress::Null());
         GlobalAddress root_ptr = *(GlobalAddress*)local_mr->addr;
@@ -988,7 +988,13 @@ namespace DSMEngine {
             DEBUG_PRINT_CONDITION("back off for search\n");
             goto next;
         } else {
+            if (result.slibing != GlobalAddress::Null()) { // turn right
+                p = result.slibing;
+                assert(result.val.data()!= nullptr);
+                goto leaf_next;
+            }
 #ifndef NDEBUG
+            assert(iter.Valid());
             Key k;
             char buff[16];
             iter.Get(k,buff);
@@ -1206,9 +1212,9 @@ namespace DSMEngine {
                     isroot = false;
                     handle = nullptr;
 //                printf("Right turn from Page nodeid %lu, offset %lu\n", page_addr.nodeID, page_addr.offset);
-                    return internal_page_search(sib_ptr, k, result, level, isroot, handle);
-                } else {
-                    nested_retry_counter = 0;
+                return internal_page_search(sib_ptr, k, result, level, isroot, handle);
+            }else{
+                nested_retry_counter = 0;
 #ifndef NDEBUG
                     printf("retry over two times place 1, key is %d, highest is %d, this level is %d\n", k,
                            page->hdr.highest, level);
@@ -1220,7 +1226,6 @@ namespace DSMEngine {
         }
 
         if (k < page->hdr.lowest) {
-            assert(false);
             if(!skip_cache){
                 ddms_->SELCC_Shared_UnLock(page_addr, handle);
             }else{
@@ -1346,7 +1351,6 @@ namespace DSMEngine {
 
         nested_retry_counter = 0;
         if ((k < page->hdr.lowest)) { // cache is stale
-            assert(false);
             // erase the upper node from the cache and refetch the upper node to continue.
             int last_level = 1;
             if (path_stack[last_level] != GlobalAddress::Null()){
@@ -1358,11 +1362,6 @@ namespace DSMEngine {
         }
 
         page->leaf_page_search(k, result, page_addr, scheme_ptr);
-#ifndef NDEBUG
-        if(k == page->hdr.highest){
-            assert(page->hdr.highest == page->hdr.lowest);
-        }
-#endif
         assert(result.val.data()!= nullptr);
     returntrue:
         assert(handle);
@@ -1493,6 +1492,7 @@ namespace DSMEngine {
         page = (LeafPage<Key> *)page_buffer;
         result.Reset();
         assert(page->hdr.this_page_g_ptr = page_addr);
+
         result.is_leaf = header->level == 0;
         result.level = header->level;
         level = result.level;
@@ -1588,6 +1588,7 @@ namespace DSMEngine {
         ibv_mr* page_mr;
         void * page_buffer;
         InternalPage<Key>* page;
+        bool skip_cache = false;
         Cache::Handle* handle = nullptr;
         ddms_->SELCC_Exclusive_Lock(page_buffer, page_addr, handle);
         assert(handle != nullptr);
@@ -1692,8 +1693,6 @@ namespace DSMEngine {
             assert(m >0);
 
             split_key = page->records[m].key;
-            // TODO: similar to the leaf node, the split key should be the first duplicated key, unless the lowest key equals to this key / the whole node only contains one key.
-            // besides, we need to make sure the insertion should be inserted at the first duplicated key in the leaf node
             assert(split_key > page->hdr.lowest);
             assert(split_key < page->hdr.highest);
             page->hdr.last_index -= (cnt - m); // this is correct. because we extract the split key to upper layer

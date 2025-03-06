@@ -7,9 +7,9 @@
 
 #include <string>
 
-#include "DSMEngine/env.h"
-#include "DSMEngine/export.h"
-#include "DSMEngine/status.h"
+#include "Tools/env.h"
+#include "Tools/export.h"
+#include "Tools/status.h"
 
 namespace DSMEngine {
 
