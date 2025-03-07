@@ -9,9 +9,9 @@ port=$((10000+RANDOM%1000))
 bin=`dirname "$0"`
 bin=`cd "$bin"; pwd`
 SRC_HOME=$bin/..
-BIN_HOME=$bin/../release
+BIN_HOME=$bin/../debug
 core_dump_dir="/ssd_root/wang4996"
-github_repo="https://github.com/ruihong123/SELCC"
+github_repo="https://github.com/ruihong123/MemoryEngine"
 gitbranch="reserved_branch1"
 function run_bench() {
   communication_port=()

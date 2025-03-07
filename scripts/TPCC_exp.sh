@@ -25,10 +25,10 @@ conf_file="../connection.conf"
 #    }' "$conf_file_all" > "$conf_file"
 
 # specify your directory for log files
-output_dir="/users/Ruihong/SELCC/scripts/data"
+output_dir="/users/Ruihong/MemoryEngine/scripts/data"
 core_dump_dir="/mnt/core_dump"
 # working environment
-proj_dir="/users/Ruihong/SELCC"
+proj_dir="/users/Ruihong/MemoryEngine"
 bin_dir="${proj_dir}/release"
 script_dir="${proj_dir}/database/scripts"
 ssh_opts="-o StrictHostKeyChecking=no"
