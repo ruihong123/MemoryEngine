@@ -160,6 +160,7 @@ namespace DSMEngine{
         record = new Record(schema_ptr);
         record->CopyFrom(access->access_global_record_);
         uint64_t ts = record->GetWTS();
+        // todo: for serializable isolation level, a larger tuple timestamps means that we need to abort this txn.
         while (ts > snapshot_ts){
             // TODO: ROll back old version of the data.
             MetaColumn meta = record->GetMeta();
@@ -167,9 +168,8 @@ namespace DSMEngine{
             assert(prev_delta != GlobalAddress::Null());
             // implement a mechanism to detect whether the local copy of delta section is up to date.
             // if not, we need to fetch the latest version of the delta section.
-//            record->roll_back()
+
             DeltaSectionWrap* delta_section = nullptr;
-//            uint64_t largest_ds_timestamp = 0;
             uint64_t ds_head = 0;
             uint64_t ds_tail = 0;
             uint64_t ds_epoch = 0;
@@ -513,7 +513,7 @@ namespace DSMEngine{
             }
             if (least_sp_this_node != last_broadcasted_sp){
                 // todo: implement the garbage collection broadcast.
-                BroadCastLeastSP(least_sp_this_node);
+//                BroadCastLeastSP(least_sp_this_node);
                 last_broadcasted_sp = least_sp_this_node;
 
             }

@@ -79,8 +79,10 @@ namespace DSMEngine {
             std::unique_lock<std::shared_mutex> lck(ds_mtx_);
             // The code below could be buggy, take care!
             if ((seg_real_size_ - inner_section->tail_) < delta_size) {
+                // todo: make here waiting for the garbage collection.
                 // if the tail is very close to the end of the buffer, we need to wrap the tail to
                 // the beginning of the buffer.
+//                do it here
                 delta_size_padding = seg_real_size_ - inner_section->tail_ + delta_size;
             }
             uint64_t  old_head = inner_section->head_;
