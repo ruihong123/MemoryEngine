@@ -27,7 +27,7 @@ function run_bench() {
   n=0
   while [ $n -lt $nmemory ]
   do
-    memory_server+=("192.168.100.$i")
+    memory_server+=("10.145.21.$((i+33))")
     i=$((i+1))
     n=$((n+1))
   done
@@ -36,7 +36,7 @@ function run_bench() {
   while [ $n -lt $ncompute ]
   do
 
-    compute_server+=("192.168.100.$i")
+    compute_server+=("10.145.21.$((i+33))")
     i=$((i-1))
     n=$((n+1))
   done
