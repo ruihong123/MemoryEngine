@@ -7108,7 +7108,7 @@ GlobalAddress RDMA_Manager::Allocate_Remote_RDMA_Slot(Chunk_type pool_name, uint
         // begginning.
         std::unique_lock<std::shared_mutex> mem_write_lock(remote_mem_mutex);
         if (Bitmap_map->at(target_node_id)->empty()) {
-            Remote_Memory_Register(1 * 1024 * 1024 * 1024ull, target_node_id, pool_name);
+            Remote_Memory_Register(define::CHUNK_SIZE, target_node_id, pool_name);
           //      fs_meta_save();
         }
         mem_write_lock.unlock();
