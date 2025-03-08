@@ -790,11 +790,12 @@ ibv_mr * RDMA_Manager::Preregister_Memory(size_t gb_number) {
     }
     local_mem_regions.push_back(mrpointer);
     preregistered_region = mrpointer;
-    ibv_mr* mrs = new ibv_mr[gb_number];
-    for (int i = 0; i < gb_number; ++i) {
+    size_t chunk_number = gb_number*define::GB/define::CHUNK_SIZE;
+    ibv_mr* mrs = new ibv_mr[chunk_number];
+    for (int i = 0; i < chunk_number; ++i) {
         mrs[i] = *mrpointer;
-        mrs[i].addr = (char*)mrs[i].addr + i*define::GB;
-        mrs[i].length = define::GB;
+        mrs[i].addr = (char*)mrs[i].addr + i*(define::CHUNK_SIZE);
+        mrs[i].length = define::CHUNK_SIZE;
 
         pre_allocated_pool.push_back(&mrs[i]);
     }
