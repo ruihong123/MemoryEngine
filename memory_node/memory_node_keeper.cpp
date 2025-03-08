@@ -433,6 +433,7 @@ int Memory_Node_Keeper::server_sock_connect(const char* servername, int port) {
   }
 
   send_pointer->content.mr = *mr;
+  assert(send_pointer->content.mr.length == define::CHUNK_SIZE);
   send_pointer->received = true;
 
   rdma_mg->RDMA_Write(request->buffer, request->rkey, &send_mr,
