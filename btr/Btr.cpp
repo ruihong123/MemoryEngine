@@ -69,7 +69,7 @@ namespace DSMEngine {
     }
     template <typename Key>
     Btr<Key>::Btr(DDSM *dsm, Cache *cache_ptr, RecordSchema *record_scheme_ptr, uint16_t Btr_id, bool secondary)
-            : scheme_ptr(record_scheme_ptr), tree_id(Btr_id), page_cache(cache_ptr), ddms_(dsm), secondary_(secondary){
+            : scheme_ptr(record_scheme_ptr), tree_id(Btr_id+1), page_cache(cache_ptr), ddms_(dsm), secondary_(secondary){
         assert(sizeof(LeafPage<Key>) < kLeafPageSize);
         assert(sizeof(InternalPage<Key>) < kInternalPageSize);
         // the secondary index type here is deprecated. If secondary key is needed we need to define the Key in
