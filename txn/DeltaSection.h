@@ -43,6 +43,7 @@ namespace DSMEngine {
 
         DeltaSection* inner_section;
         DeltaSectionWrap(uint8_t compute_node_id, GlobalAddress seg_addr, size_t seg_size, ibv_mr *seg_local_mr) {
+            seg_local_mr_ = seg_local_mr;
             inner_section = (DeltaSection *) seg_local_mr_->addr;
             inner_section->head_ = 0;
             inner_section->tail_ = 0;
