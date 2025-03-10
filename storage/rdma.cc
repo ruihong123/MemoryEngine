@@ -7124,6 +7124,9 @@ GlobalAddress RDMA_Manager::Allocate_Remote_RDMA_Slot(Chunk_type pool_name, uint
         // find the first empty SSTable Placeholder's iterator, iterator->first is ibv_mr* second is the bool vector for this ibv_mr*. Each ibv_mr is the origin block get from the remote memory. The memory was divided into chunks with size == SSTable size.
         int sst_index = ptr->second->allocate_memory_slot();
         assert(ptr->second->get_chunk_size() == chunk_size);
+        if(pool_name == Chunk_type::DeltaChunk){
+            assert(chunk_size == 10485760);
+        }
         if (sst_index >= 0) {
 
           remote_mr = *((ptr->second)->get_mr_ori());

@@ -183,7 +183,7 @@ namespace DSMEngine{
                 ds_epoch = delta_section->GetEpoch();
                 assert(iter != delta_sections.end());
                 assert(iter->first.nodeID == prev_delta.nodeID);
-                assert(iter->first.offset - prev_delta.offset <= ds_for_write->seg_real_size_);
+                assert(prev_delta.offset - iter->first.offset  <= ds_for_write->seg_real_size_);
             }
 //            uint64_t delta_offset = prev_delta.offset - delta_section->seg_addr_.offset;
             // check whether the prev delta is the latest version. check whether the prev_delta is within the head and tail plus checking

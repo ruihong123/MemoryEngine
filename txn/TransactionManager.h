@@ -66,6 +66,7 @@ class TransactionManager {
       std::unique_lock<std::shared_mutex> lck(delta_map_mtx);
       delta_sections.insert(std::make_pair(remote_addr, ds_for_write));
 
+
       // todo: sync the delta sections to the other nodes.
       rdma_mg->Sync_Create_Delta_Section_RPC(remote_addr, rdma_mg->node_id);
 
