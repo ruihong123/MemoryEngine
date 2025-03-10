@@ -122,6 +122,7 @@ namespace DSMEngine {
             }
             delta_gadd = seg_addr_;
             delta_gadd.offset += inner_section->tail_ + STRUCT_OFFSET(DeltaSection, local_seg_addr_);
+            assert(delta_gadd.offset - seg_addr_.offset < seg_real_size_ +  STRUCT_OFFSET(DeltaSection, local_seg_addr_) + 1);
             inner_section->tail_ += delta_size;
             if (inner_section->is_empty_){
                 inner_section->is_empty_ = false;
