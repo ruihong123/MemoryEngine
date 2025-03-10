@@ -55,7 +55,7 @@ class TransactionManager {
 //          auto func = std::bind(&TransactionManager::ProcessDeltaCreate,  std::placeholders::_1);
           rdma_mg->Set_message_handling_func(ProcessDeltaCreate, DeltaCreate);
           rdma_mg->Set_message_handling_func(ProcessDeltaPull, DeltaPull);
-          rdma_mg->Set_message_handling_func(ProcessSnapshotSync, SnapshotSync);
+          rdma_mg->Set_message_handling_func(ProcessSnapshotPush, SnapshotPush);
       }
 
       uint8_t target_node_id = 2*((rdma_mg->node_id/2) % rdma_mg->GetMemoryNodeNum()) +1;
@@ -65,7 +65,9 @@ class TransactionManager {
       ds_for_write= new DeltaSectionWrap(rdma_mg->node_id, remote_addr, rdma_mg->delta_section_size, local_mr);
       std::unique_lock<std::shared_mutex> lck(delta_map_mtx);
       delta_sections.insert(std::make_pair(remote_addr, ds_for_write));
-
+      if (gc_thread_ == nullptr){
+          gc_thread_ = new std::thread(&TransactionManager::GarbageCollection);
+      }
 
       // todo: sync the delta sections to the other nodes.
       rdma_mg->Sync_Create_Delta_Section_RPC(remote_addr, rdma_mg->node_id);
@@ -237,10 +239,11 @@ class TransactionManager {
     static std::map<uint16_t, uint64_t> cluster_least_sp_; // <node id, least snapshot id>
     void GetSnapshot();
     void ReleaseSnapshot();
-//    static std::thread *gc_thread_;
+    static std::thread *gc_thread_;
     static void ProcessDeltaCreate(void* args);
     static void ProcessDeltaPull(void* args);
-    static void ProcessSnapshotSync(void* args);
+    static void ProcessSnapshotPush(void* args);
+        static void ProcessSnapshotPull(void* args);
     static void GarbageCollection();
 
 #endif

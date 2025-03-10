@@ -188,7 +188,14 @@ struct PullDS{
     uint64_t old_epoch;
     uint8_t requester_node_id;
 
-//    ibv_mr write_back_mr;
+};
+
+struct SnapshotPush{
+    uint64_t least_snapshot;
+    uint8_t node_id;
+};
+struct SnapshotPull{
+
 };
 //struct WUnlock_message{
 //    GlobalAddress page_addr;
@@ -211,6 +218,8 @@ union RDMA_Request_Content {
   Invalid_Message inv_message;
   CreateDS create_ds;
   PullDS pull_ds;
+  SnapshotPush snapshot_push;
+  SnapshotPull snapshot_pull;
   Tuple_info tuple_info;
   Prepare prepare;
   Commit commit;
@@ -266,7 +275,7 @@ struct Arg_for_handler{
   std::string client_ip;
   uint16_t target_node_id;
 };
-enum Registered_F_type {TwoPC = 0,  TupleRead = 1, DeltaCreate = 2, DeltaPull = 3, SnapshotSync = 4 };
+enum Registered_F_type {TwoPC = 0,  TupleRead = 1, DeltaCreate = 2, DeltaPull = 3, SnapshotPush = 4, SnapshotPull = 5 };
 template <typename T>
 struct atomwrapper {
   std::atomic<T> _a;

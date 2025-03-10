@@ -10,6 +10,7 @@ namespace DSMEngine{
 //        uint64_t TransactionManager::last_broadcasted_sp = 0;
         SpinMutex TransactionManager::c_l_mtx;
         std::map<uint16_t, uint64_t > TransactionManager::cluster_least_sp_;
+        std::thread* TransactionManager::gc_thread_ = nullptr;
         bool TransactionManager::AllocateNewRecord(TxnContext *context, size_t table_id, Cache::Handle *&handle,
                                                    GlobalAddress &tuple_gaddr, Record*& tuple) {
             char* tuple_buffer;
@@ -206,7 +207,7 @@ namespace DSMEngine{
 #endif
             }
             std::shared_lock<std::shared_mutex> lck(delta_section->ds_mtx_);
-            DeltaRecord* delta_record = (DeltaRecord*)(delta_section->inner_section->local_seg_addr_ + prev_delta.offset);
+            DeltaRecord* delta_record = (DeltaRecord*)(delta_section->inner_section->local_seg_addr_ + (prev_delta.offset - delta_section->seg_addr_.offset));
             record->roll_back(delta_record);
             ts = record->GetWTS();
         }
@@ -432,21 +433,25 @@ namespace DSMEngine{
             std::unique_lock<SpinMutex> psp_lck(pin_sp_mtx);
             assert(pined_snapshot_this_node.count(snapshot_ts) != 0);
             bool least_sp_change = false;
-            if (pined_snapshot_this_node.begin()->first == snapshot_ts && pined_snapshot_this_node.begin()->second == 1)
+            uint64_t old_least_sp = 0;
+            if (pined_snapshot_this_node.begin()->first == snapshot_ts && pined_snapshot_this_node.begin()->second == 1){
                 least_sp_change = true;
+                old_least_sp = (pined_snapshot_this_node.begin()++)->first;
+            }
+
             if(pined_snapshot_this_node[snapshot_ts] == 1){
                 pined_snapshot_this_node.erase(snapshot_ts);
             }else{
                 pined_snapshot_this_node[snapshot_ts]--;
                 assert(pined_snapshot_this_node[snapshot_ts] > 0);
             };
-//            psp_lck.unlock();
-//            if (least_sp_change){
-//                // I think current strategy to sync the global least sp for this node is too eager, we can do it lazily
-//                auto rdma_mg = RDMA_Manager::Get_Instance();
-//                std::unique_lock<SpinMutex> cl_lck(c_l_mtx);
-//                cluster_least_sp_[rdma_mg->node_id] = pined_snapshot_this_node.begin()->first;
-//            }
+            psp_lck.unlock();
+            if (least_sp_change){
+                // I think current strategy to sync the global least sp for this node is too eager, we can do it lazily
+                auto rdma_mg = RDMA_Manager::Get_Instance();
+                std::unique_lock<SpinMutex> cl_lck(c_l_mtx);
+                cluster_least_sp_[rdma_mg->node_id] = old_least_sp;
+            }
         }
 
     void TransactionManager::ProcessDeltaCreate(void* args){
@@ -501,36 +506,22 @@ namespace DSMEngine{
         delete receive_msg_buf;
     }
 
-    void TransactionManager::ProcessSnapshotSync(void* args){
+    void TransactionManager::ProcessSnapshotPush(void* args){
 
         auto* rdma_mg = RDMA_Manager::Get_Instance();
         auto *receive_msg_buf = (RDMA_Request*)args;
-        GlobalAddress ds_gaddr = receive_msg_buf->content.pull_ds.ds_gaddr;
-        uint64_t old_head_ = receive_msg_buf->content.pull_ds.old_head;
-        uint64_t old_tail_ = receive_msg_buf->content.pull_ds.old_tail;
-        uint64_t old_max_ts = receive_msg_buf->content.pull_ds.old_max_ts;
-        uint64_t old_epoch = receive_msg_buf->content.pull_ds.old_epoch;
-
+        uint8_t node_id = receive_msg_buf->content.snapshot_push.node_id;
+        uint64_t least_spn = receive_msg_buf->content.snapshot_push.least_snapshot;
         {
-            std::unique_lock<std::shared_mutex> map_lck(TransactionManager::delta_map_mtx);
-            auto it = TransactionManager::delta_sections.find(ds_gaddr);
-            DeltaSectionWrap* ds_w = it->second;
-            // RDMA write back the most updated delta section.
-            std::shared_lock<std::shared_mutex> delta_lck(ds_w->ds_mtx_);
-            ibv_mr* local_mr = ds_w->seg_local_mr_;
-            int qp_id = rdma_mg->qp_inc_ticket++ % NUM_QP_ACCROSS_COMPUTE;
-//                if (old_epoch < ds_w->inner_section->epoch){
-            // the local copy is up to date.
-            //todo: develop reply mechanism according to the old epoch, old head and old tail.
-            uint8_t* polling_byte = (uint8_t*)((uint8_t*)local_mr->addr + rdma_mg->delta_section_size - 1);
-            *polling_byte = 1;
-            rdma_mg->RDMA_Write_xcompute(local_mr, receive_msg_buf->buffer, receive_msg_buf->rkey,
-                                         rdma_mg->delta_section_size,
-                                         ds_w->owner_compute_node_id_, qp_id, true);
-//                }else if() {}
-
-
+            std::unique_lock<SpinMutex> psp_lck(c_l_mtx);
+            if(cluster_least_sp_.count(node_id) == 0){
+                cluster_least_sp_[node_id] = least_spn;
+            }else{
+                cluster_least_sp_[node_id] = least_spn;
+            }
         }
+
+
         delete receive_msg_buf;
     }
     void TransactionManager::GarbageCollection(){
@@ -549,7 +540,7 @@ namespace DSMEngine{
             }
             if (least_sp_this_node != last_broadcasted_sp){
                 // todo: implement the garbage collection broadcast.
-//                BroadCastLeastSP(least_sp_this_node);
+                BroadCastLeastSP(least_sp_this_node);
                 last_broadcasted_sp = least_sp_this_node;
 
             }
@@ -572,7 +563,7 @@ namespace DSMEngine{
             }
             cl_lck.unlock();
                     // do garbage collection.
-            usleep(1000);
+            usleep(5000);
         }
     }
     bool TransactionManager::CoordinatorPrepare() {
