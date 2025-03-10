@@ -51,11 +51,11 @@ class TransactionManager {
       }
 #if defined(MVOCC)
       auto rdma_mg = default_gallocator->rdma_mg;
-      if (rdma_mg->message_handling_funcs_map.count("DeltaCreate") == 0){
+      if (rdma_mg->message_handling_funcs_map.count(DeltaCreate) == 0){
 //          auto func = std::bind(&TransactionManager::ProcessDeltaCreate,  std::placeholders::_1);
-          rdma_mg->Set_message_handling_func(ProcessDeltaCreate, "DeltaCreate");
-          rdma_mg->Set_message_handling_func(ProcessDeltaPull, "DeltaPull");
-          rdma_mg->Set_message_handling_func(ProcessDeltaPull, "SnapshotSync");
+          rdma_mg->Set_message_handling_func(ProcessDeltaCreate, DeltaCreate);
+          rdma_mg->Set_message_handling_func(ProcessDeltaPull, DeltaPull);
+          rdma_mg->Set_message_handling_func(ProcessSnapshotSync, SnapshotSync);
       }
 
       uint8_t target_node_id = 2*((rdma_mg->node_id/2) % rdma_mg->GetMemoryNodeNum()) +1;
@@ -240,6 +240,7 @@ class TransactionManager {
 //    static std::thread *gc_thread_;
     static void ProcessDeltaCreate(void* args);
     static void ProcessDeltaPull(void* args);
+    static void ProcessSnapshotSync(void* args);
     static void GarbageCollection();
 
 #endif

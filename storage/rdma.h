@@ -265,6 +265,7 @@ struct Arg_for_handler{
   std::string client_ip;
   uint16_t target_node_id;
 };
+enum Registered_F_type {TwoPC = 0,  TupleRead = 1, DeltaCreate = 2, DeltaPull = 3, SnapshotSync = 4 };
 template <typename T>
 struct atomwrapper {
   std::atomic<T> _a;
@@ -657,10 +658,7 @@ class RDMA_Manager {
                  std::string qp_type, size_t send_flag, int poll_num,
                  uint16_t target_node_id);
   int RDMA_Write_xcompute(ibv_mr *local_mr, void *addr, uint32_t rkey, size_t msg_size, uint16_t target_node_id,
-                          int num_of_qp, bool is_inline, bool async = true);
-    int RDMA_Write_Batch(void* addr, uint32_t rkey, ibv_mr* local_mr, size_t msg_size,
-                   std::string qp_type, size_t send_flag, int poll_num,
-                   uint16_t target_node_id);
+                          int num_of_qp, bool async);
   int RDMA_Write_Imme(void* addr, uint32_t rkey, ibv_mr* local_mr,
                       size_t msg_size, std::string qp_type, size_t send_flag,
                       int poll_num, unsigned int imme, uint16_t target_node_id);
@@ -725,7 +723,7 @@ class RDMA_Manager {
     bool global_write_page_and_WHandover(ibv_mr *page_buffer, GlobalAddress page_addr, size_t page_size, uint8_t next_holder_id,
                                          GlobalAddress remote_lock_addr, bool async = false, Cache_Handle* handle = nullptr);
     bool global_WHandover(ibv_mr *page_buffer, GlobalAddress page_addr, size_t page_size, uint8_t next_holder_id,
-                                         GlobalAddress remote_lock_addr, bool async = true, Cache_Handle* handle = nullptr);
+                          GlobalAddress remote_lock_addr, bool async);
     bool global_write_page_and_WdowntoR(ibv_mr *page_buffer, GlobalAddress page_addr, size_t page_size,
                                         GlobalAddress remote_lock_addr, uint8_t next_holder_id, bool async = true,
                                         Cache_Handle *handle = nullptr);
@@ -784,8 +782,8 @@ class RDMA_Manager {
   bool poll_reply_buffer(RDMA_Reply* rdma_reply);
   static Page_Forward_Reply_Type poll_reply_buffer(volatile Page_Forward_Reply_Type* reply_buffer);
   static bool poll_reply_buffer(RDMA_ReplyXCompute * rdma_reply);
-  void Set_message_handling_func(std::function<void(void*)> &&func, std::string  func_name);
-  void register_message_handling_thread(uint32_t handler_id, const std::string& func_name);
+  void Set_message_handling_func(std::function<void(void*)> &&func, Registered_F_type  func_name);
+  void register_message_handling_thread(uint32_t handler_id, Registered_F_type func_name);
     void join_all_handling_thread();
     int get_thread_id(){
         if (thread_id == 0){
@@ -903,7 +901,7 @@ class RDMA_Manager {
   ibv_mr* timestamp_oracle = nullptr;
   Env* env_;
   std::shared_mutex user_df_map_mutex;
-  std::unordered_map<std::string, std::function<void(void*)>> message_handling_funcs_map;
+  std::unordered_map<Registered_F_type, std::function<void(void*)>> message_handling_funcs_map;
 //  std::function<void(uint32_t)> message_handling_func;
     std::atomic<bool> handler_is_finish = false;
     //TODO: clear those allocated resources when RDMA manager is being destroyed.

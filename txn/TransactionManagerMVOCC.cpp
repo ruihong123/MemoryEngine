@@ -489,8 +489,42 @@ namespace DSMEngine{
             //todo: develop reply mechanism according to the old epoch, old head and old tail.
             uint8_t* polling_byte = (uint8_t*)((uint8_t*)local_mr->addr + rdma_mg->delta_section_size - 1);
             *polling_byte = 1;
-            rdma_mg->RDMA_Write_xcompute(local_mr, receive_msg_buf->buffer, receive_msg_buf->rkey, rdma_mg->delta_section_size,
-                                         ds_w->owner_compute_node_id_, qp_id, false, true);
+             rdma_mg->RDMA_Write_xcompute(local_mr, receive_msg_buf->buffer, receive_msg_buf->rkey,
+                                          rdma_mg->delta_section_size,
+                                          ds_w->owner_compute_node_id_, qp_id, true);
+//                }else if() {}
+
+
+        }
+        delete receive_msg_buf;
+    }
+
+    void TransactionManager::ProcessSnapshotSync(void* args){
+
+        auto* rdma_mg = RDMA_Manager::Get_Instance();
+        auto *receive_msg_buf = (RDMA_Request*)args;
+        GlobalAddress ds_gaddr = receive_msg_buf->content.pull_ds.ds_gaddr;
+        uint64_t old_head_ = receive_msg_buf->content.pull_ds.old_head;
+        uint64_t old_tail_ = receive_msg_buf->content.pull_ds.old_tail;
+        uint64_t old_max_ts = receive_msg_buf->content.pull_ds.old_max_ts;
+        uint64_t old_epoch = receive_msg_buf->content.pull_ds.old_epoch;
+
+        {
+            std::unique_lock<std::shared_mutex> map_lck(TransactionManager::delta_map_mtx);
+            auto it = TransactionManager::delta_sections.find(ds_gaddr);
+            DeltaSectionWrap* ds_w = it->second;
+            // RDMA write back the most updated delta section.
+            std::shared_lock<std::shared_mutex> delta_lck(ds_w->ds_mtx_);
+            ibv_mr* local_mr = ds_w->seg_local_mr_;
+            int qp_id = rdma_mg->qp_inc_ticket++ % NUM_QP_ACCROSS_COMPUTE;
+//                if (old_epoch < ds_w->inner_section->epoch){
+            // the local copy is up to date.
+            //todo: develop reply mechanism according to the old epoch, old head and old tail.
+            uint8_t* polling_byte = (uint8_t*)((uint8_t*)local_mr->addr + rdma_mg->delta_section_size - 1);
+            *polling_byte = 1;
+            rdma_mg->RDMA_Write_xcompute(local_mr, receive_msg_buf->buffer, receive_msg_buf->rkey,
+                                         rdma_mg->delta_section_size,
+                                         ds_w->owner_compute_node_id_, qp_id, true);
 //                }else if() {}
 
 

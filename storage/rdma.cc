@@ -352,12 +352,12 @@ bool RDMA_Manager::poll_reply_buffer(RDMA_Reply* rdma_reply) {
         return *reply_buff;
     }
 
-    void RDMA_Manager::Set_message_handling_func(std::function<void(void* )> &&func, std::string func_name) {
+    void RDMA_Manager::Set_message_handling_func(std::function<void(void* )> &&func, Registered_F_type func_name) {
         std::unique_lock<std::shared_mutex> lck(user_df_map_mutex);
         message_handling_funcs_map.insert({func_name, std::move(func)});
 //        message_handling_func = std::move(func);
     }
-    void RDMA_Manager::register_message_handling_thread(uint32_t handler_id, const std::string& func_name) {
+    void RDMA_Manager::register_message_handling_thread(uint32_t handler_id, Registered_F_type func_name) {
         std::shared_lock<std::shared_mutex> lck(user_df_map_mutex);
         RDMA_Request* request = new RDMA_Request();
         request->command = invalid_command_;
@@ -1041,7 +1041,7 @@ int RDMA_Manager::resources_create() {
             << std::endl;
   std::cout << "maximum memory region size is" << res->device_attr.max_mr_size
             << std::endl;
-
+//        std::cout << "maximum inline msg size is"  << res->device_attr.max_ <<std::endl;
   return rc;
 }
 
@@ -1279,6 +1279,10 @@ void RDMA_Manager::Cross_Computes_RPC_Threads_Creator(uint16_t target_node_id) {
                 case broadcast_tlocal_ds:
                     post_receive_xcompute(&recv_mr[buff_pos],target_node_id,qp_num);
                     Create_Delta_Section_handler(receive_msg_buf, target_node_id);
+                    break;
+                case pull_delta_section:
+                    post_receive_xcompute(&recv_mr[buff_pos],target_node_id,qp_num);
+                    Pull_Delta_Section_handler(receive_msg_buf, target_node_id);
                     break;
                 case heart_beat:
                     printf("heart_beat\n");
@@ -2836,7 +2840,7 @@ int RDMA_Manager::RDMA_Write(void* addr, uint32_t rkey, ibv_mr* local_mr,
 
     int RDMA_Manager::RDMA_Write_xcompute(ibv_mr *local_mr, void *addr, uint32_t rkey, size_t msg_size,
                                           uint16_t target_node_id,
-                                          int num_of_qp, bool is_inline, bool async) {
+                                          int num_of_qp, bool async) {
         struct ibv_send_wr sr;
         struct ibv_sge sge;
         struct ibv_send_wr* bad_wr = NULL;
@@ -2875,7 +2879,7 @@ int RDMA_Manager::RDMA_Write(void* addr, uint32_t rkey, ibv_mr* local_mr,
             sge.addr = (uintptr_t)async_buf->addr;
             sge.length = msg_size;
             sge.lkey = async_buf->lkey;
-            if (is_inline){
+            if (msg_size < MAX_INLINE_SIZE){
                 sr.send_flags = IBV_SEND_INLINE;
             }
             ibv_qp* qp = static_cast<ibv_qp*>((*qp_xcompute.at(target_node_id))[num_of_qp]);
@@ -2887,7 +2891,7 @@ int RDMA_Manager::RDMA_Write(void* addr, uint32_t rkey, ibv_mr* local_mr,
             sge.addr = (uintptr_t)local_mr->addr;
             sge.length = msg_size;
             sge.lkey = local_mr->lkey;
-            if (is_inline){
+            if (msg_size < MAX_INLINE_SIZE){
                 sr.send_flags = IBV_SEND_SIGNALED|IBV_SEND_INLINE;
             }else{
                 sr.send_flags = IBV_SEND_SIGNALED;
@@ -5113,8 +5117,8 @@ int RDMA_Manager::RDMA_CAS(ibv_mr *remote_mr, ibv_mr *local_mr, uint64_t compare
     }
 
     bool RDMA_Manager::global_WHandover(ibv_mr *page_buffer, GlobalAddress page_addr, size_t page_size,
-                                                       uint8_t next_holder_id, GlobalAddress remote_lock_addr,
-                                                       bool async, Cache_Handle* handle) {
+                                        uint8_t next_holder_id,
+                                        GlobalAddress remote_lock_addr, bool async) {
 
 //        if (next_holder_id >16){
 //            throw std::invalid_argument( "received wrong handover target node id" );
@@ -7938,7 +7942,7 @@ void RDMA_Manager::fs_deserilization(
                 *((Page_Forward_Reply_Type* )local_mr->addr) = reply_type;
                 RDMA_Write_xcompute(local_mr, receive_msg_buf->buffer, receive_msg_buf->rkey,
                                     sizeof(Page_Forward_Reply_Type),
-                                    target_node_id, qp_id, true, true);
+                                    target_node_id, qp_id, true);
                 handle->buffered_inv_mtx.unlock();
                 handle->rw_mtx.unlock();
 //                printf("Node %u receive writer invalidate shared invalidation message from node %u over data %p get processed, priority is %u\n", node_id, target_node_id, g_ptr, starv_level);
@@ -7955,7 +7959,7 @@ void RDMA_Manager::fs_deserilization(
                 *((Page_Forward_Reply_Type* )local_mr->addr) = reply_type;
                 RDMA_Write_xcompute(local_mr, receive_msg_buf->buffer, receive_msg_buf->rkey,
                                     sizeof(Page_Forward_Reply_Type),
-                                    target_node_id, qp_id, true, true);
+                                    target_node_id, qp_id, true);
 //                printf("Node %u receive writer invalidate shared invalidation message from node %u over data %p get dropped, starv level is %u\n", node_id, target_node_id, g_ptr, starv_level);
 //                fflush(stdout);
                 break;
@@ -8148,7 +8152,7 @@ void RDMA_Manager::fs_deserilization(
                 RDMA_Write_xcompute(local_mr, (char *) receive_msg_buf->buffer + kLeafPageSize -
                                               sizeof(Page_Forward_Reply_Type), receive_msg_buf->rkey,
                                     sizeof(Page_Forward_Reply_Type),
-                                    target_node_id, qp_id, true, false);
+                                    target_node_id, qp_id, false);
                 assert(!pending_reminder);
                 handle->buffered_inv_mtx.unlock();
 
@@ -8165,9 +8169,10 @@ void RDMA_Manager::fs_deserilization(
                     local_mr = Get_local_send_message_mr();
                     *((Page_Forward_Reply_Type* )local_mr->addr) = reply_type;
                     RDMA_Write_xcompute(local_mr,
-                                        (char *) receive_msg_buf->buffer + kLeafPageSize - sizeof(Page_Forward_Reply_Type),
+                                        (char *) receive_msg_buf->buffer + kLeafPageSize -
+                                        sizeof(Page_Forward_Reply_Type),
                                         receive_msg_buf->rkey, sizeof(Page_Forward_Reply_Type),
-                                        target_node_id, qp_id, true);
+                                        target_node_id, qp_id, false);
                 }
 //                printf("Node %u receive reader invalidate modified invalidation message from node %u over data %p get dropped, starv level is %u\n", node_id, target_node_id, g_ptr, starv_level);
 //                fflush(stdout);
@@ -8344,7 +8349,7 @@ void RDMA_Manager::fs_deserilization(
                 RDMA_Write_xcompute(local_mr, (char *) receive_msg_buf->buffer + kLeafPageSize -
                                               sizeof(Page_Forward_Reply_Type), receive_msg_buf->rkey,
                                     sizeof(Page_Forward_Reply_Type),
-                                    target_node_id, qp_id, true, false);
+                                    target_node_id, qp_id, false);
                 handle->buffered_inv_mtx.unlock();
                 assert(!pending_reminder);
 //                printf("Node %u receive writer invalidate modified invalidation message from node %u over data %p get pending, starv level is %u\n", node_id, target_node_id, g_ptr, starv_level);
@@ -8363,9 +8368,10 @@ void RDMA_Manager::fs_deserilization(
                     local_mr = Get_local_send_message_mr();
                     *((Page_Forward_Reply_Type* )local_mr->addr) = reply_type;
                     RDMA_Write_xcompute(local_mr,
-                                        (char *) receive_msg_buf->buffer + kLeafPageSize - sizeof(Page_Forward_Reply_Type),
+                                        (char *) receive_msg_buf->buffer + kLeafPageSize -
+                                        sizeof(Page_Forward_Reply_Type),
                                         receive_msg_buf->rkey, sizeof(Page_Forward_Reply_Type),
-                                        target_node_id, qp_id, true);
+                                        target_node_id, qp_id, false);
                 }
 
 //                printf("Node %u receive writer invalidate modified invalidation message from node %u over data %p get dropped, starv level is %u\n", node_id, target_node_id, g_ptr, starv_level);
@@ -8397,15 +8403,39 @@ void RDMA_Manager::fs_deserilization(
 //        }
 //        delete receive_msg_buf;
     std::shared_lock<std::shared_mutex> read_lock(user_df_map_mutex);
-    while(message_handling_funcs_map.find("DeltaCreate") == message_handling_funcs_map.end()){
+    while(message_handling_funcs_map.find(DeltaCreate) == message_handling_funcs_map.end()){
         // wait for the front end thread register the message handling function.
         read_lock.unlock();
         usleep(10);
         read_lock.lock();
 //        ddd
     }
-        message_handling_funcs_map.at("DeltaCreate")(receive_msg_buf);
+        message_handling_funcs_map.at(DeltaCreate)(receive_msg_buf);
     }
+    void RDMA_Manager::Pull_Delta_Section_handler(RDMA_Request *receive_msg_buf, uint8_t target_node_id) {
+//        GlobalAddress ds_gaddr = receive_msg_buf->content.create_ds.ds_gaddr;
+//        uint8_t compute_node_id = receive_msg_buf->content.create_ds.compute_node_id;
+//        ibv_mr* local_mr = new ibv_mr{};
+//        Allocate_Local_RDMA_Slot(*local_mr, DeltaChunk);
+//        // TODO: there is compilation error becuae DSMengine does not contain defination for transaction.
+//        // we need to wrap the funciton to a function pointer or funciton object.
+//        auto* ds_for_write= new DeltaSection(0, 0, compute_node_id, ds_gaddr, delta_section_size, local_mr);
+//        {
+//            std::unique_lock<std::shared_mutex> lck(TransactionManager::delta_map_mtx);
+//            TransactionManager::delta_sections.insert(std::make_pair(ds_gaddr, ds_for_write));
+//        }
+//        delete receive_msg_buf;
+        std::shared_lock<std::shared_mutex> read_lock(user_df_map_mutex);
+        while(message_handling_funcs_map.find(DeltaPull) == message_handling_funcs_map.end()){
+            // wait for the front end thread register the message handling function.
+            read_lock.unlock();
+            usleep(10);
+            read_lock.lock();
+//        ddd
+        }
+        message_handling_funcs_map.at(DeltaPull)(receive_msg_buf);
+    }
+
 
     void RDMA_Manager::Write_Invalidation_Message_Handler(void* thread_args) {
         BGThreadMetadata* p = static_cast<BGThreadMetadata*>(thread_args);
@@ -8426,7 +8456,7 @@ void RDMA_Manager::fs_deserilization(
     if (communication_queues.find(handling_id) == communication_queues.end()){
         read_lock.unlock();
         std::unique_lock<std::shared_mutex> write_lock(user_df_map_mutex);
-        register_message_handling_thread(handling_id, "2PC");
+        register_message_handling_thread(handling_id, TwoPC);
         //wait for the handling thread ready to receive the message.
         usleep(100);
         write_lock.unlock();
