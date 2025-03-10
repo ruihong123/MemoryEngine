@@ -186,6 +186,7 @@ struct PullDS{
     uint64_t old_tail;
     uint64_t old_max_ts;
     uint64_t old_epoch;
+    uint8_t requester_node_id;
 
 //    ibv_mr write_back_mr;
 };

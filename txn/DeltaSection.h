@@ -173,6 +173,7 @@ namespace DSMEngine {
             send_pointer->content.pull_ds.old_tail = inner_section->tail_;
             send_pointer->content.pull_ds.old_max_ts = inner_section->max_ts;
             send_pointer->content.pull_ds.old_epoch = inner_section->epoch;
+            send_pointer->content.pull_ds.requester_node_id = rdma_mg->node_id;
             send_pointer->buffer = recv_mr->addr;
             send_pointer->rkey = recv_mr->rkey;
 

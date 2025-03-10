@@ -475,6 +475,7 @@ namespace DSMEngine{
         uint64_t old_tail_ = receive_msg_buf->content.pull_ds.old_tail;
         uint64_t old_max_ts = receive_msg_buf->content.pull_ds.old_max_ts;
         uint64_t old_epoch = receive_msg_buf->content.pull_ds.old_epoch;
+        uint8_t requester_node_id = receive_msg_buf->content.pull_ds.requester_node_id;
 
         {
             std::unique_lock<std::shared_mutex> map_lck(TransactionManager::delta_map_mtx);
@@ -491,7 +492,7 @@ namespace DSMEngine{
             *polling_byte = 1;
              rdma_mg->RDMA_Write_xcompute(local_mr, receive_msg_buf->buffer, receive_msg_buf->rkey,
                                           rdma_mg->delta_section_size,
-                                          ds_w->owner_compute_node_id_, qp_id, true);
+                                          requester_node_id, qp_id, true);
 //                }else if() {}
 
 
