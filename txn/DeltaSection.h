@@ -184,7 +184,7 @@ namespace DSMEngine {
 //        *receive_pointer = {};
 
             int qp_id = rdma_mg->qp_inc_ticket++ % NUM_QP_ACCROSS_COMPUTE;
-
+            assert(owner_compute_node_id_ != rdma_mg->node_id);
             rdma_mg->post_send_xcompute(send_mr, owner_compute_node_id_, qp_id, sizeof(RDMA_Request));
             ibv_wc wc[2] = {};
             assert(send_pointer->command!= create_qp_);
