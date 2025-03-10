@@ -540,7 +540,7 @@ namespace DSMEngine{
             }
             if (least_sp_this_node != last_broadcasted_sp){
                 // todo: implement the garbage collection broadcast.
-                BroadCastLeastSP(least_sp_this_node);
+//                BroadCastLeastSP(least_sp_this_node);
                 last_broadcasted_sp = least_sp_this_node;
 
             }
