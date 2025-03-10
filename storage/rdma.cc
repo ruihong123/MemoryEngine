@@ -6380,8 +6380,9 @@ bool RDMA_Manager::Remote_Memory_Register(size_t size, uint16_t target_node_id, 
             break;
         case Chunk_type::DeltaChunk:
             Bitmap_map = &Remote_Delta_Bitmap;
-            chunk_size = name_to_chunksize.at(pool_name);
             remote_mem_pool = &remote_mem_delta_pool;
+            chunk_size = name_to_chunksize.at(pool_name);
+
             break;
         default:
             assert(false);
@@ -7122,6 +7123,7 @@ GlobalAddress RDMA_Manager::Allocate_Remote_RDMA_Slot(Chunk_type pool_name, uint
         // iterate among all the remote memory region
         // find the first empty SSTable Placeholder's iterator, iterator->first is ibv_mr* second is the bool vector for this ibv_mr*. Each ibv_mr is the origin block get from the remote memory. The memory was divided into chunks with size == SSTable size.
         int sst_index = ptr->second->allocate_memory_slot();
+        assert(ptr->second->get_chunk_size() == chunk_size);
         if (sst_index >= 0) {
 
           remote_mr = *((ptr->second)->get_mr_ori());
@@ -7143,6 +7145,7 @@ GlobalAddress RDMA_Manager::Allocate_Remote_RDMA_Slot(Chunk_type pool_name, uint
     ibv_mr* mr_last = remote_mem_pool->at(target_node_id)->back();
     int sst_index = -1;
     In_Use_Array* last_element = Bitmap_map->at(target_node_id)->at(mr_last->addr);
+    assert(last_element->get_chunk_size() == chunk_size);
     if (last_element->get_chunk_size() == chunk_size){
         sst_index = last_element->allocate_memory_slot();
     }else{
