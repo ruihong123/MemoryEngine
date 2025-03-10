@@ -193,7 +193,7 @@ namespace DSMEngine{
             //check whether the delta_offset is within the ring buffer by tail and head.
 
 
-            if ( ds_epoch != meta.prev_delta_epoch_ || !delta_section->inner_section->is_empty_ || !delta_section->isOffsetInValidRing(prev_delta)){
+            if ( ds_epoch != meta.prev_delta_epoch_ || delta_section->inner_section->is_empty_ || !delta_section->isOffsetInValidRing(prev_delta)){
                 // fetch the latest version of the delta section.
                 // todo: sync the delta section.
                 delta_section->PullUpdates();
