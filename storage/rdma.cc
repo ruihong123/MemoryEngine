@@ -2870,7 +2870,6 @@ int RDMA_Manager::RDMA_Write(void* addr, uint32_t rkey, ibv_mr* local_mr,
         }
         if (!need_signal){
             ibv_mr* async_buf = (*qp_xcompute_asyncT.at(target_node_id))[num_of_qp].mrs[pending_num];
-
             assert(local_mr->length >= msg_size);
             assert(async_buf->length >= msg_size);
             memcpy(async_buf->addr, local_mr->addr, msg_size);

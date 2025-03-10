@@ -487,12 +487,13 @@ namespace DSMEngine{
             int qp_id = rdma_mg->qp_inc_ticket++ % NUM_QP_ACCROSS_COMPUTE;
 //                if (old_epoch < ds_w->inner_section->epoch){
             // the local copy is up to date.
-            //todo: develop reply mechanism according to the old epoch, old head and old tail.
+            //todo: develop reply mechanism according to the old epoch, old head and old tail and also try to make the delta
+            // write an async operation to minumize the latency.
             uint8_t* polling_byte = (uint8_t*)((uint8_t*)local_mr->addr + rdma_mg->delta_section_size - 1);
             *polling_byte = 1;
              rdma_mg->RDMA_Write_xcompute(local_mr, receive_msg_buf->buffer, receive_msg_buf->rkey,
                                           rdma_mg->delta_section_size,
-                                          requester_node_id, qp_id, true);
+                                          requester_node_id, qp_id, false);
 //                }else if() {}
 
 
