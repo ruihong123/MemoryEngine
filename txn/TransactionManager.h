@@ -60,7 +60,7 @@ class TransactionManager {
 
       uint8_t target_node_id = 2*((rdma_mg->node_id/2) % rdma_mg->GetMemoryNodeNum()) +1;
       GlobalAddress remote_addr = rdma_mg->Allocate_Remote_RDMA_Slot(Chunk_type::DeltaChunk, target_node_id);
-      assert(remote_addr.offset % 10*define::MB == 0);
+      assert((remote_addr.offset % 128*define::MB)%10*define::MB == 0);
       ibv_mr* local_mr = new ibv_mr{};
       rdma_mg->Allocate_Local_RDMA_Slot(*local_mr, DeltaChunk);
       ds_for_write= new DeltaSectionWrap(rdma_mg->node_id, remote_addr, rdma_mg->delta_section_size, local_mr);
