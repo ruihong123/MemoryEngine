@@ -7135,7 +7135,7 @@ GlobalAddress RDMA_Manager::Allocate_Remote_RDMA_Slot(Chunk_type pool_name, uint
 
           remote_mr = *((ptr->second)->get_mr_ori());
           remote_mr.addr = static_cast<void*>(static_cast<char*>(remote_mr.addr) +
-                                              sst_index * cachelin_size);
+                                              sst_index * chunk_size);
           remote_mr.length = chunk_size;
           ret.nodeID = target_node_id;
           ret.offset = static_cast<char*>(remote_mr.addr) - (char*)base_addr_map_data[target_node_id];
