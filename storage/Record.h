@@ -272,6 +272,33 @@ public:
             PutMeta(meta);
 
         }
+        void serialize_to_delta(char* & start){
+            // serialize the record to the delta section.
+            for (auto col_id: dirty_col_ids) {
+                size_t column_size = schema_ptr_->GetColumnSize(col_id);
+                size_t column_offset = schema_ptr_->GetColumnOffset(col_id);
+                memcpy(start, &col_id, sizeof(size_t));
+                start += sizeof(size_t);
+                memcpy(start, &column_size, sizeof(size_t));
+                start += sizeof(size_t);
+                memcpy(start, data_ptr_ + column_offset, column_size);
+                start += column_size;
+
+            }
+        }
+        size_t estimate_delta_size(){
+            // estimate the size of the delta section.
+            // fill in the delta record, according to the dirty_col_ids and old_record.
+            size_t field_size = 0;
+            // calculate the size for serializing the dirty fields
+            for (auto col_id: dirty_col_ids) {
+                size_t column_size = schema_ptr_->GetColumnSize(col_id);
+                size_t column_offset = schema_ptr_->GetColumnOffset(col_id);
+                    field_size += sizeof(size_t) * 2 + column_size;
+            }
+            size_t delta_size = field_size + STRUCT_OFFSET(DeltaRecord, data_);
+            return delta_size;
+        }
 
 
 private:

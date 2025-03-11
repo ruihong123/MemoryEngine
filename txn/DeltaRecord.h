@@ -45,7 +45,7 @@ namespace DSMEngine {
         }
 
     };
-}
+}__attribute__ ((packed));
 
 
 #endif //SELCC_DELTARECORD_H

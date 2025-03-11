@@ -65,18 +65,8 @@ namespace DSMEngine {
         // new_record is the local copy and the old_record is the global copy. Later the local copy will be written to the global copy.
         void fill_in_delta_record(Record *new_record, Record *old_record, GlobalAddress& delta_gadd, size_t& delta_size) {
 
-            // fill in the delta record, according to the dirty_col_ids and old_record.
-            size_t field_size = 0;
-            // calculate the size for serializing the dirty fields
-            for (auto col_id: new_record->dirty_col_ids) {
-                size_t column_size = new_record->schema_ptr_->GetColumnSize(col_id);
-                size_t column_offset = new_record->schema_ptr_->GetColumnOffset(col_id);
-                if (memcmp(new_record->data_ptr_ + column_offset, old_record->data_ptr_ + column_offset, column_size) != 0) {
-                    field_size += sizeof(size_t) * 2 + column_size;
-                }
-            }
-            delta_size = field_size + STRUCT_OFFSET(DeltaRecord, data_);
-            size_t delta_size_padding = delta_size;
+            delta_size = new_record->estimate_delta_size();
+//            size_t delta_size_padding = delta_size;
             std::unique_lock<std::shared_mutex> lck(ds_mtx_);
             // The code below could be buggy, take care!
             if ((seg_real_size_ - inner_section->tail_) < delta_size) {
@@ -84,11 +74,11 @@ namespace DSMEngine {
                 // if the tail is very close to the end of the buffer, we need to wrap the tail to
                 // the beginning of the buffer.
 //                do it here
-                delta_size_padding = seg_real_size_ - inner_section->tail_ + delta_size;
+                inner_section->tail_ = 0;
             }
             uint64_t  old_head = inner_section->head_;
             // we append new delta record to the tail.
-            while (!inner_section->is_empty_ && (old_head + seg_real_size_ - inner_section->tail_) % seg_real_size_ <= delta_size_padding) {
+            while (!inner_section->is_empty_ && (old_head + seg_real_size_ - inner_section->tail_) % seg_real_size_ <= delta_size) {
                 // wait until there is enough space for the new delta record.
                 // if full then we clear the whole delta section. (will be changed later)
                 // todo: use condition variable to wait.
@@ -96,30 +86,17 @@ namespace DSMEngine {
 //                inner_section->tail_ = inner_section->head_;
 //                inner_section->is_empty_ = true;
             }
-            if (delta_size_padding > delta_size){
-                // if the tail is wrapped to the beginning of the buffer, we need to restart the tail to the beginning.
-                inner_section->tail_ = 0;
-            }
             MetaColumn meta_col = old_record->GetMeta();
             // update the max time stamp.
             if (inner_section->max_ts < meta_col.Wts_){
                 inner_section->max_ts = meta_col.Wts_;
             }
-            DeltaRecord *delta_record = new(inner_section->local_seg_addr_ + inner_section->tail_) DeltaRecord(
+            DeltaRecord * delta_record = new(inner_section->local_seg_addr_ + inner_section->tail_) DeltaRecord(
                     meta_col.Wts_, delta_size, meta_col.prev_delta_, meta_col.prev_delta_wts_,
                     meta_col.prev_delta_epoch_, meta_col.prev_delta_size_ );
             char *start = delta_record->data_;
-            for (auto col_id: new_record->dirty_col_ids) {
-                size_t column_size = new_record->schema_ptr_->GetColumnSize(col_id);
-                size_t column_offset = new_record->schema_ptr_->GetColumnOffset(col_id);
-                memcpy(start, &col_id, sizeof(size_t));
-                start += sizeof(size_t);
-                memcpy(start, &column_size, sizeof(size_t));
-                start += sizeof(size_t);
-                memcpy(start, new_record->data_ptr_ + column_offset, column_size);
-                start += column_size;
-                assert(start <= (char*)seg_local_mr_->addr + seg_local_mr_->length);
-            }
+            new_record->serialize_to_delta(start);
+            assert(start <= (char*)seg_local_mr_->addr + seg_local_mr_->length);
             delta_gadd = seg_addr_;
             delta_gadd.offset += inner_section->tail_ + STRUCT_OFFSET(DeltaSection, local_seg_addr_);
             assert(delta_gadd.offset - seg_addr_.offset < seg_real_size_ +  STRUCT_OFFSET(DeltaSection, local_seg_addr_) + 1);
@@ -127,6 +104,12 @@ namespace DSMEngine {
             if (inner_section->is_empty_){
                 inner_section->is_empty_ = false;
             }
+        }
+
+        void Recover_from_delta_record(Record *record, GlobalAddress& delta_gadd, size_t& delta_size){
+            std::shared_lock<std::shared_mutex> lck(ds_mtx_);
+            DeltaRecord* delta_record = (DeltaRecord*)(inner_section->local_seg_addr_ + (delta_gadd.offset - seg_addr_.offset));
+            record->roll_back(delta_record);
         }
         uint64_t GetMaxTimestamp(){
             return inner_section->max_ts;
