@@ -422,7 +422,7 @@ int Memory_Node_Keeper::server_sock_connect(const char* servername, int port) {
   char* buff;
   {
     std::unique_lock<std::shared_mutex> lck(rdma_mg->local_mem_mutex);
-    assert(request->content.mem_size == define::CHUNK_SIZE); // Preallocation requrie memory is in chunk of 128MB
+    assert(request->content.mem_size == define::Alloc_Granu); // Preallocation requrie memory is in chunk of 128MB
       if (!rdma_mg->Local_Memory_Register(&buff, &mr, request->content.mem_size,
                                           Regular_Page)) {
         fprintf(stderr, "memory registering failed by size of 0x%x\n",
@@ -433,7 +433,7 @@ int Memory_Node_Keeper::server_sock_connect(const char* servername, int port) {
   }
 
   send_pointer->content.mr = *mr;
-  assert(send_pointer->content.mr.length == define::CHUNK_SIZE);
+  assert(send_pointer->content.mr.length == define::Alloc_Granu);
   send_pointer->received = true;
 
   rdma_mg->RDMA_Write(request->buffer, request->rkey, &send_mr,

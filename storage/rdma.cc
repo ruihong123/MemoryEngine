@@ -790,12 +790,12 @@ ibv_mr * RDMA_Manager::Preregister_Memory(size_t gb_number) {
     }
     local_mem_regions.push_back(mrpointer);
     preregistered_region = mrpointer;
-    size_t chunk_number = gb_number*define::GB/define::CHUNK_SIZE;
+    size_t chunk_number = gb_number*define::GB/define::Alloc_Granu;
     ibv_mr* mrs = new ibv_mr[chunk_number];
     for (int i = 0; i < chunk_number; ++i) {
         mrs[i] = *mrpointer;
-        mrs[i].addr = (char*)mrs[i].addr + i*(define::CHUNK_SIZE);
-        mrs[i].length = define::CHUNK_SIZE;
+        mrs[i].addr = (char*)mrs[i].addr + i*(define::Alloc_Granu);
+        mrs[i].length = define::Alloc_Granu;
 
         pre_allocated_pool.push_back(&mrs[i]);
     }
@@ -6392,6 +6392,7 @@ bool RDMA_Manager::Remote_Memory_Register(size_t size, uint16_t target_node_id, 
     }
   remote_mem_pool->at(target_node_id)->push_back(
       temp_pointer);  // push the new pointer for the new ibv_mr (different from the receive buffer) to remote_mem_pool
+    assert(temp_pointer->length == size);
 
     //put the rkey in the rkey map
 //    rkey_map_data[pool_name] = temp_pointer->rkey;
@@ -7043,7 +7044,7 @@ void RDMA_Manager::Allocate_Remote_RDMA_Slot(ibv_mr &remote_mr, Chunk_type pool_
             // begginning.
             std::unique_lock<std::shared_mutex> mem_write_lock(remote_mem_mutex);
             if (Bitmap_map->at(target_node_id)->empty()) {
-                Remote_Memory_Register(define::CHUNK_SIZE, target_node_id, pool_name);
+                Remote_Memory_Register(define::Alloc_Granu, target_node_id, pool_name);
             }
             mem_write_lock.unlock();
         }
@@ -7073,7 +7074,7 @@ void RDMA_Manager::Allocate_Remote_RDMA_Slot(ibv_mr &remote_mr, Chunk_type pool_
         mem_read_lock.unlock();
         // If not find remote buffers are all used, allocate another remote memory region.
         std::unique_lock<std::shared_mutex> mem_write_lock(remote_mem_mutex);
-        Remote_Memory_Register(define::CHUNK_SIZE, target_node_id, pool_name);
+        Remote_Memory_Register(define::Alloc_Granu, target_node_id, pool_name);
         //  fs_meta_save();
         ibv_mr* mr_last;
         mr_last = remote_mem_pool->at(target_node_id)->back();
@@ -7113,7 +7114,7 @@ GlobalAddress RDMA_Manager::Allocate_Remote_RDMA_Slot(Chunk_type pool_name, uint
         // begginning.
         std::unique_lock<std::shared_mutex> mem_write_lock(remote_mem_mutex);
         if (Bitmap_map->at(target_node_id)->empty()) {
-            Remote_Memory_Register(define::CHUNK_SIZE, target_node_id, pool_name);
+            Remote_Memory_Register(define::Alloc_Granu, target_node_id, pool_name);
           //      fs_meta_save();
         }
         mem_write_lock.unlock();
@@ -7167,7 +7168,7 @@ GlobalAddress RDMA_Manager::Allocate_Remote_RDMA_Slot(Chunk_type pool_name, uint
         assert(ret.offset<69055800320ull);
         return ret;
     }else{
-        Remote_Memory_Register(define::CHUNK_SIZE, target_node_id, pool_name);
+        Remote_Memory_Register(define::Alloc_Granu, target_node_id, pool_name);
         //  fs_meta_save();
         //  ibv_mr* mr_last;
         mr_last = remote_mem_pool->at(target_node_id)->back();

@@ -87,7 +87,7 @@ namespace define {
 //use the define::GB instead of 1024*1024*1024, because bydefault, the number is int which is smaller or equal than 1 GB.
 constexpr uint64_t MB = 1024ull * 1024;
 constexpr uint64_t GB = 1024ull * MB;
-constexpr uint64_t CHUNK_SIZE = 128ull * MB;
+constexpr uint64_t Alloc_Granu = 128ull * MB;
 constexpr uint16_t kCacheLineSize = 64;
 
 // for remote allocate
@@ -266,7 +266,7 @@ struct std::hash<GlobalAddress>
 
 [[maybe_unused]]static GlobalAddress TOPAGE(GlobalAddress addr){
     GlobalAddress ret = addr;
-    size_t bulk_granularity = define::CHUNK_SIZE;
+    size_t bulk_granularity = define::Alloc_Granu;
     size_t bulk_offset = ret.offset / bulk_granularity;
     ret.offset = ret.offset % bulk_granularity;
     ret.offset = bulk_offset*bulk_granularity + (ret.offset/kLeafPageSize)*kLeafPageSize;
