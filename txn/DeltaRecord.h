@@ -7,7 +7,7 @@
 #include <infiniband/verbs.h>
 #include "Common.h"
 namespace DSMEngine {
-    class DeltaRecord{
+    class DeltaRecord {
     public:
         uint64_t Wts_;
         uint32_t current_record_size_;
@@ -44,7 +44,7 @@ namespace DSMEngine {
             prev_record_size_ = prev_record_size;
         }
 
-    };
+    }__attribute__((packed));
 };
 
 
