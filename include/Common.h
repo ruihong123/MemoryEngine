@@ -319,7 +319,7 @@ inline std::ostream &operator<<(std::ostream &os, const GlobalAddress &obj) {
     return os;
 }
 
-bool buffer_is_not_all_zero(char* buf, int size) {
+static bool buffer_is_not_all_zero(char* buf, int size) {
     for (int i = 0; i < size; i++) {
         if (buf[i] != 0) {
             return true;
