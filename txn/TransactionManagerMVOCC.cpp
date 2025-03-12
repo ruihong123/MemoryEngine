@@ -162,7 +162,7 @@ namespace DSMEngine{
         record->CopyFrom(access->access_global_record_);
 
         uint64_t ts = record->GetWTS();
-        assert(ts != 0);
+        assert(buffer_is_not_all_zero(record->data_ptr_, schema_ptr->GetSchemaSize()));
         // todo: for serializable isolation level, a larger tuple timestamps means that we need to abort this txn.
 #ifndef NDEBUG
     size_t lc = 0;
