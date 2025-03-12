@@ -1520,8 +1520,8 @@ ibv_mr *RDMA_Manager::create_lock_table() {
                 fprintf(stderr, "failed to malloc bytes to memory buffer create lock table\n");
                 return nullptr;
             }
-            memset(buff, 0, size);
-
+//            memset(buff, 0, size);
+            *(uint64_t* ) buff = 1;// initialize timestamp to 1 for better debugging.
             /* register the memory buffer */
             mr_flags =
                     IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_ATOMIC;
