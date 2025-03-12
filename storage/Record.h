@@ -293,7 +293,7 @@ public:
             // calculate the size for serializing the dirty fields
             for (auto col_id: dirty_col_ids) {
                 size_t column_size = schema_ptr_->GetColumnSize(col_id);
-                size_t column_offset = schema_ptr_->GetColumnOffset(col_id);
+//                size_t column_offset = schema_ptr_->GetColumnOffset(col_id);
                     field_size += sizeof(size_t) * 2 + column_size;
             }
             size_t delta_size = field_size + STRUCT_OFFSET(DeltaRecord, data_);
