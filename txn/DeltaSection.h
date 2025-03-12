@@ -91,7 +91,7 @@ namespace DSMEngine {
             if (inner_section->max_ts < meta_col.Wts_){
                 inner_section->max_ts = meta_col.Wts_;
             }
-            DeltaRecord * delta_record = new(inner_section->local_seg_addr_ + inner_section->tail_) DeltaRecord(
+            DeltaRecord * delta_record = new(inner_section->local_seg_addr_ + STRUCT_OFFSET(DeltaSection, local_seg_addr_) + inner_section->tail_) DeltaRecord(
                     meta_col.Wts_, delta_size, meta_col.prev_delta_, meta_col.prev_delta_wts_,
                     meta_col.prev_delta_epoch_, meta_col.prev_delta_data_size_ );
             char *start = delta_record->data_;

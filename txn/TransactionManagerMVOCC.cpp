@@ -183,6 +183,7 @@ namespace DSMEngine{
             {
                 std::shared_lock<std::shared_mutex> l(delta_map_mtx);
                 auto iter = delta_sections.lower_bound(prev_delta);
+                assert(iter != delta_sections.end());
                 delta_section = iter->second;
 //                largest_ds_timestamp = delta_section->GetMaxTimestamp();
                 ds_head = delta_section->GetHead();
