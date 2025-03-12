@@ -10,7 +10,7 @@ namespace DSMEngine {
     class DeltaRecord {
     public:
         uint64_t Wts_;
-        uint32_t current_record_size_;
+        uint32_t current_record_data_size_;
         GlobalAddress prev_delta_gaddr;
         uint64_t prev_delta_wts_;
         uint64_t prev_delta_epoch_;
@@ -22,13 +22,13 @@ namespace DSMEngine {
         DeltaRecord() {
             Wts_ = 0;
             prev_delta_gaddr = GlobalAddress::Null();
-            current_record_size_ = 0;
+            current_record_data_size_ = 0;
         }
 
         DeltaRecord(uint64_t wts, uint32_t d_record_size, GlobalAddress prev_delta, uint64_t prev_delta_wts,
                     uint64_t prev_delta_epoch, uint32_t prev_record_size) {
             Wts_ = wts;
-            current_record_size_ = d_record_size;
+            current_record_data_size_ = d_record_size;
             prev_delta_gaddr = prev_delta;
             prev_delta_wts_ = prev_delta_wts;
             prev_delta_epoch_ = prev_delta_epoch;
@@ -37,7 +37,7 @@ namespace DSMEngine {
         void initialize(uint64_t wts, uint32_t d_record_size, GlobalAddress prev_delta, uint64_t prev_delta_wts,
                         uint64_t prev_delta_epoch, uint32_t prev_record_size) {
             Wts_ = wts;
-            current_record_size_ = d_record_size;
+            current_record_data_size_ = d_record_size;
             prev_delta_gaddr = prev_delta;
             prev_delta_wts_ = prev_delta_wts;
             prev_delta_epoch_ = prev_delta_epoch;

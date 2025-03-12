@@ -93,7 +93,7 @@ namespace DSMEngine {
             }
             DeltaRecord * delta_record = new(inner_section->local_seg_addr_ + inner_section->tail_) DeltaRecord(
                     meta_col.Wts_, delta_size, meta_col.prev_delta_, meta_col.prev_delta_wts_,
-                    meta_col.prev_delta_epoch_, meta_col.prev_delta_size_ );
+                    meta_col.prev_delta_epoch_, meta_col.prev_delta_data_size_ );
             char *start = delta_record->data_;
             new_record->serialize_to_delta(start);
             assert(start <= (char*)seg_local_mr_->addr + seg_local_mr_->length);

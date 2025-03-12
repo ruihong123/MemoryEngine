@@ -162,7 +162,13 @@ namespace DSMEngine{
         record->CopyFrom(access->access_global_record_);
         uint64_t ts = record->GetWTS();
         // todo: for serializable isolation level, a larger tuple timestamps means that we need to abort this txn.
+#ifndef NDEBUG
+    size_t lc = 0;
+#endif
         while (ts > snapshot_ts){
+#ifndef NDEBUG
+            lc++;
+#endif
             // TODO: ROll back old version of the data.
             MetaColumn meta = record->GetMeta();
             GlobalAddress prev_delta = meta.prev_delta_;
@@ -342,7 +348,7 @@ namespace DSMEngine{
                 MetaColumn meta = access->txn_local_tuple_->GetMeta();
                 meta.prev_delta_ = delta_gadd;
                 meta.prev_delta_epoch_ = ds_for_write->GetEpoch();
-                meta.prev_delta_size_ = delta_size;
+                meta.prev_delta_data_size_ = delta_size;
                 access->txn_local_tuple_->PutMeta(meta);
                 access->access_global_record_->CopyFrom(access->txn_local_tuple_);
                 access->access_global_record_->PutWTS(commit_ts);

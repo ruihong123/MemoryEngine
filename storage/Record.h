@@ -256,7 +256,7 @@ public:
         void roll_back(DeltaRecord *delta_record){
             // roll back the record to the previous version.
             char* start = delta_record->data_;
-            char* end = start + delta_record->current_record_size_;
+            char* end = start + delta_record->current_record_data_size_;
             while (start < end){
                 size_t column_id = *(size_t*)start;
                 start += sizeof(size_t);
