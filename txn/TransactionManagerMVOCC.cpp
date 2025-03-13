@@ -216,7 +216,7 @@ namespace DSMEngine{
 #endif
             }
             std::shared_lock<std::shared_mutex> lck(delta_section->ds_mtx_);
-            DeltaRecord* delta_record = (DeltaRecord*)(delta_section->inner_section->local_seg_addr_ + (prev_delta.offset - delta_section->seg_addr_.offset));
+            DeltaRecord* delta_record = (DeltaRecord*)(delta_section->inner_section + (prev_delta.offset - delta_section->seg_addr_.offset));
             record->roll_back(delta_record);
             ts = record->GetWTS();
         }
@@ -356,12 +356,14 @@ namespace DSMEngine{
                 meta.prev_delta_data_size_ = delta_size;
                 access->txn_local_tuple_->PutMeta(meta);
                 // todo: delete the asertion below.
-                assert(meta.Wts_ <1000000);
                 access->access_global_record_->CopyFrom(access->txn_local_tuple_);
                 access->access_global_record_->PutWTS(commit_ts);
+                assert(meta.Wts_ <1000000);
+
             }else if(access_type == INSERT_ONLY){
                 access->access_global_record_->CopyFrom(access->txn_local_tuple_);
                 access->access_global_record_->PutWTS(commit_ts);
+
             }
             delete access->access_global_record_;
             access->access_global_record_ = nullptr;
