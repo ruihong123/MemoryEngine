@@ -270,9 +270,9 @@ public:
             meta.Wts_ = delta_record->Wts_;
             meta.prev_delta_ = delta_record->prev_delta_gaddr;
             PutMeta(meta);
-
         }
-        void serialize_to_delta(char* & start){
+        void serialize_to_delta(DeltaRecord *delta_record){
+            char* start = delta_record->data_;
             // serialize the record to the delta section.
             for (auto col_id: dirty_col_ids) {
                 size_t column_size = schema_ptr_->GetColumnSize(col_id);

@@ -91,12 +91,11 @@ namespace DSMEngine {
             if (inner_section->max_ts < meta_col.Wts_){
                 inner_section->max_ts = meta_col.Wts_;
             }
-            DeltaRecord * delta_record = new(inner_section->local_seg_addr_ + STRUCT_OFFSET(DeltaSection, local_seg_addr_) + inner_section->tail_) DeltaRecord(
+            DeltaRecord * delta_record = new(inner_section->local_seg_addr_ + inner_section->tail_) DeltaRecord(
                     meta_col.Wts_, delta_size, meta_col.prev_delta_, meta_col.prev_delta_wts_,
                     meta_col.prev_delta_epoch_, meta_col.prev_delta_data_size_ );
-            char *start = delta_record->data_;
-            new_record->serialize_to_delta(start);
-            assert(start <= (char*)seg_local_mr_->addr + seg_local_mr_->length);
+            new_record->serialize_to_delta(delta_record);
+            assert(delta_record->data_ + delta_size <= (char*)seg_local_mr_->addr + seg_local_mr_->length);
             delta_gadd = seg_addr_;
             delta_gadd.offset += inner_section->tail_ + STRUCT_OFFSET(DeltaSection, local_seg_addr_);
             assert(delta_gadd.offset - seg_addr_.offset < seg_real_size_ +  STRUCT_OFFSET(DeltaSection, local_seg_addr_) + 1);
