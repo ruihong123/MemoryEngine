@@ -268,7 +268,11 @@ public:
             // Also roll back the metadata.
             MetaColumn meta = GetMeta();
             meta.Wts_ = delta_record->Wts_;
+            assert(meta.Wts_ <0x100d2c00cbe9 );
             meta.prev_delta_ = delta_record->prev_delta_gaddr;
+            meta.prev_delta_epoch_ = delta_record->prev_delta_epoch_;
+            meta.prev_delta_wts_ = delta_record->prev_delta_wts_;
+            meta.prev_delta_data_size_ = delta_record->prev_delta_data_size_;
             PutMeta(meta);
         }
         void serialize_to_delta(DeltaRecord *delta_record){

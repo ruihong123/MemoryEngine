@@ -354,14 +354,17 @@ namespace DSMEngine{
                 meta.prev_delta_ = delta_gadd;
                 meta.prev_delta_epoch_ = ds_for_write->GetEpoch();
                 meta.prev_delta_data_size_ = delta_size;
+                meta.prev_delta_wts_ = meta.Wts_;
+                meta.Wts_ = commit_ts;
+
                 access->txn_local_tuple_->PutMeta(meta);
                 // todo: delete the asertion below.
                 access->access_global_record_->CopyFrom(access->txn_local_tuple_);
-                access->access_global_record_->PutWTS(commit_ts);
+//                access->access_global_record_->PutWTS(commit_ts);
 
             }else if(access_type == INSERT_ONLY){
+                access->txn_local_tuple_->PutWTS(commit_ts);
                 access->access_global_record_->CopyFrom(access->txn_local_tuple_);
-                access->access_global_record_->PutWTS(commit_ts);
 
             }
             delete access->access_global_record_;
