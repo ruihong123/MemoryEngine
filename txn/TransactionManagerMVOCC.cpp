@@ -352,6 +352,7 @@ namespace DSMEngine{
                 ds_for_write->fill_in_delta_record(access->txn_local_tuple_, access->access_global_record_, delta_gadd, delta_size);
                 MetaColumn meta = access->txn_local_tuple_->GetMeta();
                 meta.prev_delta_ = delta_gadd;
+                printf("Prev delta is %p\n", delta_gadd);
                 meta.prev_delta_epoch_ = ds_for_write->GetEpoch();
                 meta.prev_delta_data_size_ = delta_size;
                 meta.prev_delta_wts_ = meta.Wts_;
