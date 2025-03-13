@@ -220,6 +220,8 @@ namespace DSMEngine{
             record->roll_back(delta_record);
             ts = record->GetWTS();
         }
+        assert(buffer_is_not_all_zero(record->data_ptr_, schema_ptr->GetSchemaSize()));
+
         access->txn_local_tuple_ = record;
         access->access_addr_ = tuple_gaddr;
         if (access_type == DELETE_ONLY) {
