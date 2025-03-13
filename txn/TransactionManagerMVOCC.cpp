@@ -355,6 +355,8 @@ namespace DSMEngine{
                 meta.prev_delta_epoch_ = ds_for_write->GetEpoch();
                 meta.prev_delta_data_size_ = delta_size;
                 access->txn_local_tuple_->PutMeta(meta);
+                // todo: delete the asertion below.
+                assert(meta.Wts_ <1000000);
                 access->access_global_record_->CopyFrom(access->txn_local_tuple_);
                 access->access_global_record_->PutWTS(commit_ts);
             }else if(access_type == INSERT_ONLY){
