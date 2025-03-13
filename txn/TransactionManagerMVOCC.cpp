@@ -358,7 +358,6 @@ namespace DSMEngine{
                 // todo: delete the asertion below.
                 access->access_global_record_->CopyFrom(access->txn_local_tuple_);
                 access->access_global_record_->PutWTS(commit_ts);
-                assert(meta.Wts_ <1000000);
 
             }else if(access_type == INSERT_ONLY){
                 access->access_global_record_->CopyFrom(access->txn_local_tuple_);
