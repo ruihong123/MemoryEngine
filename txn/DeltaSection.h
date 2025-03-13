@@ -171,13 +171,6 @@ namespace DSMEngine {
             rdma_mg->post_send_xcompute(send_mr, owner_compute_node_id_, qp_id, sizeof(RDMA_Request));
             ibv_wc wc[2] = {};
             assert(send_pointer->command!= create_qp_);
-//        printf("Tuple read request sent from %u to %u\n", node_id, target_node_id);
-//        fflush(stdout);
-////         Check the completion outside this function
-//        if (poll_completion_xcompute(wc, 1, std::string("main"), true, target_node_id, qp_id)){
-//            fprintf(stderr, "failed to poll send for remote memory register\n");
-//            return false;
-//        }
             asm volatile ("sfence\n" : : );
             asm volatile ("lfence\n" : : );
             asm volatile ("mfence\n" : : );
@@ -188,6 +181,8 @@ namespace DSMEngine {
                 asm volatile ("lfence\n" : : );
                 asm volatile ("mfence\n" : : );
             }
+            printf("Successfully pull the updates for %p deltasection\n", seg_addr_);
+
 
         }
 
