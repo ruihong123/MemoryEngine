@@ -382,6 +382,20 @@ class TpccPopulator : public BenchmarkPopulator {
       record_in_cache.SetColumn(2, record_ptr->i_name_, 32);
       record_in_cache.SetColumn(3, &record_ptr->i_price_);
       record_in_cache.SetColumn(4, record_ptr->i_data_, 64);
+      MetaColumn meta;
+#if defined(TO)
+      meta.Rts_ = 0;
+#endif
+#if defined(TO) || defined(OCC) || defined(MVOCC)
+      meta.Wts_ = 0;
+#endif
+#if defined(MVOCC)
+      meta.prev_delta_ = GlobalAddress::Null();
+      meta.prev_delta_wts_ = 0;
+      meta.prev_delta_epoch_ = 0;
+      meta.prev_delta_data_size_ = 0;
+#endif
+      record_in_cache.PutMeta(meta);
     IndexKey key = GetItemPrimaryKey(record_ptr->i_id_, record_ptr->w_id_);
 
       storage_manager_->tables_[ITEM_TABLE_ID]->InsertPriIndex(
@@ -413,6 +427,20 @@ class TpccPopulator : public BenchmarkPopulator {
     record_in_cache.SetColumn(6, record_ptr->w_zip_, 9);
     record_in_cache.SetColumn(7, &record_ptr->w_tax_);
     record_in_cache.SetColumn(8, &record_ptr->w_ytd_);
+      MetaColumn meta;
+#if defined(TO)
+      meta.Rts_ = 0;
+#endif
+#if defined(TO) || defined(OCC) || defined(MVOCC)
+      meta.Wts_ = 0;
+#endif
+#if defined(MVOCC)
+      meta.prev_delta_ = GlobalAddress::Null();
+      meta.prev_delta_wts_ = 0;
+      meta.prev_delta_epoch_ = 0;
+      meta.prev_delta_data_size_ = 0;
+#endif
+      record_in_cache.PutMeta(meta);
     IndexKey k = GetWarehousePrimaryKey(record_ptr->w_id_);
       storage_manager_->tables_[WAREHOUSE_TABLE_ID]->InsertPriIndex(
               &k, 1, tuple_gaddr);
@@ -445,6 +473,20 @@ class TpccPopulator : public BenchmarkPopulator {
       record_in_cache.SetColumn(8, &record_ptr->d_tax_);
       record_in_cache.SetColumn(9, &record_ptr->d_ytd_);
       record_in_cache.SetColumn(10, &record_ptr->d_next_o_id_);
+      MetaColumn meta;
+#if defined(TO)
+      meta.Rts_ = 0;
+#endif
+#if defined(TO) || defined(OCC) || defined(MVOCC)
+      meta.Wts_ = 0;
+#endif
+#if defined(MVOCC)
+      meta.prev_delta_ = GlobalAddress::Null();
+      meta.prev_delta_wts_ = 0;
+      meta.prev_delta_epoch_ = 0;
+      meta.prev_delta_data_size_ = 0;
+#endif
+      record_in_cache.PutMeta(meta);
       assert(record_ptr->d_next_o_id_ > 0);
     IndexKey k = GetDistrictPrimaryKey(record_ptr->d_id_, record_ptr->d_w_id_);
       storage_manager_->tables_[DISTRICT_TABLE_ID]->InsertPriIndex(
@@ -489,6 +531,20 @@ class TpccPopulator : public BenchmarkPopulator {
       record_in_cache.SetColumn(18, &record_ptr->c_payment_cnt_);
       record_in_cache.SetColumn(19, &record_ptr->c_delivery_cnt_);
       record_in_cache.SetColumn(20, record_ptr->c_data_, 500);
+      MetaColumn meta;
+#if defined(TO)
+      meta.Rts_ = 0;
+#endif
+#if defined(TO) || defined(OCC) || defined(MVOCC)
+      meta.Wts_ = 0;
+#endif
+#if defined(MVOCC)
+      meta.prev_delta_ = GlobalAddress::Null();
+      meta.prev_delta_wts_ = 0;
+      meta.prev_delta_epoch_ = 0;
+      meta.prev_delta_data_size_ = 0;
+#endif
+      record_in_cache.PutMeta(meta);
     IndexKey key = GetCustomerPrimaryKey(record_ptr->c_id_, record_ptr->c_d_id_,
                                          record_ptr->c_w_id_);
       storage_manager_->tables_[CUSTOMER_TABLE_ID]->InsertPriIndex(
@@ -521,6 +577,20 @@ class TpccPopulator : public BenchmarkPopulator {
       record_in_cache.SetColumn(14, &record_ptr->s_order_cnt_);
       record_in_cache.SetColumn(15, &record_ptr->s_remote_cnt_);
       record_in_cache.SetColumn(16, record_ptr->s_data_, 64);
+      MetaColumn meta;
+#if defined(TO)
+      meta.Rts_ = 0;
+#endif
+#if defined(TO) || defined(OCC) || defined(MVOCC)
+      meta.Wts_ = 0;
+#endif
+#if defined(MVOCC)
+      meta.prev_delta_ = GlobalAddress::Null();
+      meta.prev_delta_wts_ = 0;
+      meta.prev_delta_epoch_ = 0;
+      meta.prev_delta_data_size_ = 0;
+#endif
+      record_in_cache.PutMeta(meta);
     IndexKey key = GetStockPrimaryKey(record_ptr->s_i_id_, record_ptr->s_w_id_);
       storage_manager_->tables_[STOCK_TABLE_ID]->InsertPriIndex(
               &key, 1, tuple_gaddr);
@@ -550,6 +620,20 @@ class TpccPopulator : public BenchmarkPopulator {
       record_in_cache.SetColumn(5, &record_ptr->o_carrier_id_);
       record_in_cache.SetColumn(6, &record_ptr->o_ol_cnt_);
       record_in_cache.SetColumn(7, &record_ptr->o_all_local_);
+      MetaColumn meta;
+#if defined(TO)
+      meta.Rts_ = 0;
+#endif
+#if defined(TO) || defined(OCC) || defined(MVOCC)
+      meta.Wts_ = 0;
+#endif
+#if defined(MVOCC)
+      meta.prev_delta_ = GlobalAddress::Null();
+      meta.prev_delta_wts_ = 0;
+      meta.prev_delta_epoch_ = 0;
+      meta.prev_delta_data_size_ = 0;
+#endif
+      record_in_cache.PutMeta(meta);
     IndexKey key = GetOrderPrimaryKey(record_ptr->o_id_, record_ptr->o_d_id_,
                                       record_ptr->o_w_id_);
       storage_manager_->tables_[ORDER_TABLE_ID]->InsertPriIndex(
@@ -570,6 +654,20 @@ class TpccPopulator : public BenchmarkPopulator {
       record_in_cache.SetColumn(0, &record_ptr->o_id_);
       record_in_cache.SetColumn(1, &record_ptr->d_id_);
       record_in_cache.SetColumn(2, &record_ptr->w_id_);
+      MetaColumn meta;
+#if defined(TO)
+      meta.Rts_ = 0;
+#endif
+#if defined(TO) || defined(OCC) || defined(MVOCC)
+      meta.Wts_ = 0;
+#endif
+#if defined(MVOCC)
+      meta.prev_delta_ = GlobalAddress::Null();
+      meta.prev_delta_wts_ = 0;
+      meta.prev_delta_epoch_ = 0;
+      meta.prev_delta_data_size_ = 0;
+#endif
+      record_in_cache.PutMeta(meta);
     IndexKey key = GetNewOrderPrimaryKey(record_ptr->o_id_, record_ptr->d_id_,
                                          record_ptr->w_id_);
       storage_manager_->tables_[NEW_ORDER_TABLE_ID]->InsertPriIndex(
@@ -596,6 +694,20 @@ class TpccPopulator : public BenchmarkPopulator {
       record_in_cache.SetColumn(7, &record_ptr->ol_quantity_);
       record_in_cache.SetColumn(8, &record_ptr->ol_amount_);
       record_in_cache.SetColumn(9, record_ptr->ol_dist_info_, 32);
+      MetaColumn meta;
+#if defined(TO)
+      meta.Rts_ = 0;
+#endif
+#if defined(TO) || defined(OCC) || defined(MVOCC)
+      meta.Wts_ = 0;
+#endif
+#if defined(MVOCC)
+      meta.prev_delta_ = GlobalAddress::Null();
+      meta.prev_delta_wts_ = 0;
+      meta.prev_delta_epoch_ = 0;
+      meta.prev_delta_data_size_ = 0;
+#endif
+      record_in_cache.PutMeta(meta);
     IndexKey key = GetOrderLinePrimaryKey(record_ptr->ol_o_id_,
                                           record_ptr->ol_d_id_,
                                           record_ptr->ol_w_id_,
@@ -623,6 +735,20 @@ class TpccPopulator : public BenchmarkPopulator {
       record_in_cache.SetColumn(5, &record_ptr->h_date_);
       record_in_cache.SetColumn(6, &record_ptr->h_amount_);
       record_in_cache.SetColumn(7, record_ptr->h_data_, 32);
+      MetaColumn meta;
+#if defined(TO)
+      meta.Rts_ = 0;
+#endif
+#if defined(TO) || defined(OCC) || defined(MVOCC)
+      meta.Wts_ = 0;
+#endif
+#if defined(MVOCC)
+      meta.prev_delta_ = GlobalAddress::Null();
+      meta.prev_delta_wts_ = 0;
+      meta.prev_delta_epoch_ = 0;
+      meta.prev_delta_data_size_ = 0;
+#endif
+      record_in_cache.PutMeta(meta);
     IndexKey key = GetHistoryPrimaryKey(record_ptr->h_c_id_,
                                         record_ptr->h_d_id_,
                                         record_ptr->h_w_id_);
@@ -644,6 +770,20 @@ class TpccPopulator : public BenchmarkPopulator {
       record_in_cache.SetColumn(0, &record_ptr->d_id_);
       record_in_cache.SetColumn(1, &record_ptr->w_id_);
       record_in_cache.SetColumn(2, &record_ptr->o_id_);
+      MetaColumn meta;
+#if defined(TO)
+      meta.Rts_ = 0;
+#endif
+#if defined(TO) || defined(OCC) || defined(MVOCC)
+      meta.Wts_ = 0;
+#endif
+#if defined(MVOCC)
+      meta.prev_delta_ = GlobalAddress::Null();
+      meta.prev_delta_wts_ = 0;
+      meta.prev_delta_epoch_ = 0;
+      meta.prev_delta_data_size_ = 0;
+#endif
+      record_in_cache.PutMeta(meta);
     IndexKey key = GetDistrictNewOrderPrimaryKey(record_ptr->d_id_,
                                                  record_ptr->w_id_);
       storage_manager_->tables_[DISTRICT_NEW_ORDER_TABLE_ID]->InsertPriIndex(

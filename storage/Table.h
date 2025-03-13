@@ -229,6 +229,8 @@ public:
         // TODO: if this is a new cache line, we need to initialize the header correctly.
         int cnt = 0;
         bool ret = page->AllocateRecord(cnt, GetSchema() , tuple_gaddr, tuple_data_);
+//        // initialize the tuple as zero;
+//        memset(tuple_data_, 0, schema_ptr_->GetSchemaSize());
         assert((tuple_gaddr.offset - handle->gptr.offset) > STRUCT_OFFSET(DataPage, data_));
         assert((char*)tuple_data_ - (char*)page_buffer > STRUCT_OFFSET(DataPage, data_));
         assert(((DataPage*)page_buffer)->hdr.this_page_g_ptr != GlobalAddress::Null());
