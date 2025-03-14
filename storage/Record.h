@@ -262,9 +262,12 @@ public:
                 start += sizeof(size_t);
                 size_t column_size = *(size_t*)start;
                 start += sizeof(size_t);
+                assert(column_size == schema_ptr_->GetColumnSize(column_id));
                 memcpy(data_ptr_ + schema_ptr_->GetColumnOffset(column_id), start, column_size);
                 start += column_size;
             }
+            assert(start == end);
+
             // Also roll back the metadata.
             MetaColumn meta = GetMeta();
             meta.Wts_ = delta_record->Wts_;
