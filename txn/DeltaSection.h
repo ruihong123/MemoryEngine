@@ -182,6 +182,7 @@ namespace DSMEngine {
                 asm volatile ("mfence\n" : : );
             }
             printf("Successfully pull the updates for %p deltasection\n", seg_addr_);
+            fflush(stdout);
 
 
         }
