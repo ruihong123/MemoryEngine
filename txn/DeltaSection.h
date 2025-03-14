@@ -95,6 +95,11 @@ namespace DSMEngine {
                     meta_col.Wts_, delta_size, meta_col.prev_delta_, meta_col.prev_delta_wts_,
                     meta_col.prev_delta_epoch_, meta_col.prev_delta_data_size_ );
             new_record->serialize_to_delta(delta_record);
+#ifndef NDEBUG
+               Record* record = new Record(new_record->schema_ptr_);
+                record->roll_back(delta_record);
+                delete record;
+#endif
             assert(delta_record->data_ + delta_size <= (char*)seg_local_mr_->addr + seg_local_mr_->length);
             delta_gadd = seg_addr_;
             delta_gadd.offset += inner_section->tail_ + STRUCT_OFFSET(DeltaSection, local_seg_addr_);
