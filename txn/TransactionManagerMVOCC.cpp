@@ -216,7 +216,7 @@ namespace DSMEngine{
 #endif
             }
             std::shared_lock<std::shared_mutex> lck(delta_section->ds_mtx_);
-            DeltaRecord* delta_record = (DeltaRecord*)(delta_section->inner_section + (prev_delta.offset - delta_section->seg_addr_.offset));
+            DeltaRecord* delta_record = (DeltaRecord*)((char*)delta_section->seg_local_mr_->addr + (prev_delta.offset - delta_section->seg_addr_.offset));
             record->roll_back(delta_record);
             ts = record->GetWTS();
         }
