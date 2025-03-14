@@ -96,12 +96,11 @@ namespace DSMEngine {
                 record->roll_back(delta_record);
                 delete record;
 #endif
-            assert(delta_record->data_ + delta_size <= (char*)seg_local_mr_->addr + seg_local_mr_->length);
+            assert((char*)delta_record + delta_size <= (char*)seg_local_mr_->addr + seg_local_mr_->length);
             delta_gadd = seg_addr_;
             delta_gadd.offset += inner_section->tail_ + STRUCT_OFFSET(DeltaSection, local_seg_addr_);
             assert(*((char*)inner_section + (delta_gadd.offset - seg_addr_.offset)) == '&');
             inner_section->tail_ += delta_size;
-            assert(*(uint64_t *) delta_record->data_ <100);
             if (inner_section->is_empty_){
                 inner_section->is_empty_ = false;
             }

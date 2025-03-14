@@ -257,6 +257,7 @@ public:
             // roll back the record to the previous version.
             char* start = delta_record->data_;
             char* end = start + delta_record->current_record_data_size_ - STRUCT_OFFSET(DeltaRecord, data_);
+            assert(end > start);
             while (start < end){
                 size_t column_id = *(size_t*)start;
                 start += sizeof(size_t);
@@ -304,6 +305,7 @@ public:
                 size_t column_size = schema_ptr_->GetColumnSize(col_id);
 //                size_t column_offset = schema_ptr_->GetColumnOffset(col_id);
                     field_size += sizeof(size_t) * 2 + column_size;
+
             }
             size_t delta_size = field_size + STRUCT_OFFSET(DeltaRecord, data_);
             return delta_size;
