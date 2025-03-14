@@ -284,6 +284,8 @@ public:
             for (auto col_id: dirty_col_ids) {
                 size_t column_size = schema_ptr_->GetColumnSize(col_id);
                 size_t column_offset = schema_ptr_->GetColumnOffset(col_id);
+                //todo: delte the assert below.
+                assert(col_id < 35);
                 memcpy(start, &col_id, sizeof(size_t));
                 start += sizeof(size_t);
                 memcpy(start, &column_size, sizeof(size_t));
