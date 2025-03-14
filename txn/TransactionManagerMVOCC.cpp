@@ -353,6 +353,7 @@ namespace DSMEngine{
                 MetaColumn meta = access->txn_local_tuple_->GetMeta();
                 meta.prev_delta_ = delta_gadd;
                 printf("Prev delta is %p, this record is %p\n", delta_gadd, access->access_addr_);
+                fflush(stdout);
                 meta.prev_delta_epoch_ = ds_for_write->GetEpoch();
                 meta.prev_delta_data_size_ = delta_size;
                 meta.prev_delta_wts_ = meta.Wts_;
