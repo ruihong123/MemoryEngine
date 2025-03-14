@@ -27,16 +27,12 @@ namespace DSMEngine {
 
     class DeltaSectionWrap {
     public:
-//        uint64_t head_;
-//        uint64_t tail_;
-//        // is_empty is necessary because we can not tell whether the ring  buffer is full or empty
-//        // merely by checking the head and tail pointer.
-//        bool is_empty_;
+        // is_empty is necessary because we can not tell whether the ring  buffer is full or empty
+        // merely by checking the head and tail pointer.
         uint8_t owner_compute_node_id_;
         GlobalAddress seg_addr_;
         ibv_mr *seg_local_mr_;
-//        char* local_seg_addr_;
-        size_t seg_real_size_;
+        size_t seg_real_size_; // not include the header size of inner delta section.
         RDMA_Manager *rdma_mg_;
         std::shared_mutex ds_mtx_; // todo: change it into spinlatch.
         std::condition_variable cv;
@@ -65,7 +61,7 @@ namespace DSMEngine {
         // new_record is the local copy and the old_record is the global copy. Later the local copy will be written to the global copy.
         void fill_in_delta_record(Record *new_record, Record *old_record, GlobalAddress& delta_gadd, size_t& delta_size) {
 
-            delta_size = new_record->estimate_delta_size();
+            delta_size = new_record->estimate_delta_size(); // delta size include both delta header and delta content.
 //            size_t delta_size_padding = delta_size;
             std::unique_lock<std::shared_mutex> lck(ds_mtx_);
             // The code below could be buggy, take care!
@@ -111,7 +107,7 @@ namespace DSMEngine {
             }
         }
 
-        void Recover_from_delta_record(Record *record, GlobalAddress& delta_gadd, size_t& delta_size){
+        void recover_from_delta_record(Record *record, GlobalAddress& delta_gadd){
             std::shared_lock<std::shared_mutex> lck(ds_mtx_);
             DeltaRecord* delta_record = (DeltaRecord*)(inner_section->local_seg_addr_ + (delta_gadd.offset - seg_addr_.offset));
             record->roll_back(delta_record);
