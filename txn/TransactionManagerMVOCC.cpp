@@ -518,7 +518,6 @@ namespace DSMEngine{
              rdma_mg->RDMA_Write_xcompute(local_mr, receive_msg_buf->buffer, receive_msg_buf->rkey,
                                           rdma_mg->delta_section_size,
                                           requester_node_id, qp_id, false);
-//                }else if() {}
 
 
         }

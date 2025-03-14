@@ -98,7 +98,7 @@ namespace DSMEngine {
             assert(delta_record->data_ + delta_size <= (char*)seg_local_mr_->addr + seg_local_mr_->length);
             delta_gadd = seg_addr_;
             delta_gadd.offset += inner_section->tail_ + STRUCT_OFFSET(DeltaSection, local_seg_addr_);
-            assert(delta_gadd.offset - seg_addr_.offset < seg_real_size_ +  STRUCT_OFFSET(DeltaSection, local_seg_addr_) + 1);
+            assert(*((char*)inner_section + (delta_gadd.offset - seg_addr_.offset)) == '&');
             inner_section->tail_ += delta_size;
             assert(*(uint64_t *) delta_record->data_ <100);
             if (inner_section->is_empty_){
@@ -181,7 +181,7 @@ namespace DSMEngine {
                 asm volatile ("lfence\n" : : );
                 asm volatile ("mfence\n" : : );
             }
-            printf("Successfully pull the updates for %p deltasection\n", seg_addr_);
+            printf("Successfully pull the updates for %p delta section\n", seg_addr_);
             fflush(stdout);
 
 
