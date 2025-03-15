@@ -7725,8 +7725,8 @@ void RDMA_Manager::fs_deserilization(
             ibv_qp_init_attr qp_state;
             if (count > 1000000){
                 ibv_query_qp((*qp_xcompute.at(target_node_id))[num_of_cp], &qp_init_attr, IBV_QP_STATE, &qp_state);
+                assert(qp_init_attr.qp_state == IBV_QPS_RTS);
             }
-            assert(qp_init_attr.qp_state == IBV_QPS_RTS);
             /*gettimeofday(&cur_time, NULL);
             cur_time_msec = (cur_time.tv_sec * 1000) + (cur_time.tv_usec / 1000);*/
         } while (poll_num < num_entries);  // && ((cur_time_msec - start_time_msec) < MAX_POLL_CQ_TIMEOUT));
