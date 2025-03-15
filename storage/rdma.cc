@@ -7713,12 +7713,20 @@ void RDMA_Manager::fs_deserilization(
             cq = (*cq_xcompute.at(target_node_id))[num_of_cp*2];
         else
             cq = (*cq_xcompute.at(target_node_id))[num_of_cp*2+1];
+        size_t count = 0;
         do {
             poll_result = ibv_poll_cq(cq, num_entries, &wc_p[poll_num]);
             if (poll_result < 0)
                 break;
             else
                 poll_num = poll_num + poll_result;
+            count++;
+            ibv_qp_attr qp_init_attr;
+            ibv_qp_init_attr qp_state;
+            if (count > 1000000){
+                ibv_query_qp((*qp_xcompute.at(target_node_id))[num_of_cp], &qp_init_attr, IBV_QP_STATE, &qp_state);
+            }
+            assert(qp_init_attr.qp_state == IBV_QPS_RTS);
             /*gettimeofday(&cur_time, NULL);
             cur_time_msec = (cur_time.tv_sec * 1000) + (cur_time.tv_usec / 1000);*/
         } while (poll_num < num_entries);  // && ((cur_time_msec - start_time_msec) < MAX_POLL_CQ_TIMEOUT));
