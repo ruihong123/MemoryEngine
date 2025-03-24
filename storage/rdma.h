@@ -154,8 +154,10 @@ enum RDMA_Command_Type {
   writer_invalidate_modified,
   reader_invalidate_modified,
   writer_invalidate_shared,
-  broadcast_tlocal_ds,
+  broadcast_create_ds,
   pull_delta_section,
+  push_least_snapshot,
+  pull_least_snapshot,
   tuple_read_2pc,
   prepare_2pc,
   commit_2pc,
@@ -190,11 +192,11 @@ struct PullDS{
 
 };
 
-struct SnapshotPush{
+struct PushSP{
     uint64_t least_snapshot;
     uint8_t node_id;
 };
-struct SnapshotPull{
+struct PullSP{
 
 };
 //struct WUnlock_message{
@@ -218,8 +220,8 @@ union RDMA_Request_Content {
   Invalid_Message inv_message;
   CreateDS create_ds;
   PullDS pull_ds;
-  SnapshotPush snapshot_push;
-  SnapshotPull snapshot_pull;
+  PushSP snapshot_push;
+  PullSP snapshot_pull;
   Tuple_info tuple_info;
   Prepare prepare;
   Commit commit;
@@ -573,6 +575,7 @@ class RDMA_Manager {
     void Writer_Inv_Modified_handler(RDMA_Request *receive_msg_buf, uint8_t target_node_id);
     void Create_Delta_Section_handler(RDMA_Request *receive_msg_buf, uint8_t target_node_id);
     void Pull_Delta_Section_handler(RDMA_Request *receive_msg_buf, uint8_t target_node_id);
+    void Push_Least_Snapshot_handler(RDMA_Request *receive_msg_buf, uint8_t target_node_id);
     static void Write_Invalidation_Message_Handler(void* thread_args);
     static void Read_Invalidation_Message_Handler(void* thread_args);
     void Tuple_read_2pc_handler(RDMA_Request *receive_msg_buf, uint8_t target_node_id);
@@ -669,6 +672,8 @@ class RDMA_Manager {
                  uint16_t target_node_id);
   int RDMA_Write_xcompute(ibv_mr *local_mr, void *addr, uint32_t rkey, size_t msg_size, uint16_t target_node_id,
                           int num_of_qp, bool async);
+  int post_send_xcompute(ibv_mr *mr, uint16_t target_node_id, int num_of_qp, size_t msg_size);
+
   int RDMA_Write_Imme(void* addr, uint32_t rkey, ibv_mr* local_mr,
                       size_t msg_size, std::string qp_type, size_t send_flag,
                       int poll_num, unsigned int imme, uint16_t target_node_id);
@@ -832,7 +837,7 @@ class RDMA_Manager {
   size_t total_registered_size;
 
   uint64_t cachelin_size;
-  uint64_t delta_section_size;
+  uint64_t delta_section_size; // include the delta section header.
   std::shared_mutex remote_mem_mutex;
 
   std::shared_mutex rw_mutex;
@@ -934,27 +939,15 @@ class RDMA_Manager {
   // use thread local qp and cq instead of map, this could be lock free.
   //  static __thread std::string thread_id;
   template <typename T>
-  int post_send(ibv_mr* mr, uint16_t target_node_id, std::string qp_type = "main") {
+  int post_send(ibv_mr* mr, uint16_t target_node_id, std::string qp_type = "main"){
     struct ibv_send_wr sr;
     struct ibv_sge sge;
     struct ibv_send_wr* bad_wr = NULL;
     int rc;
-    //  if (!rdma_config.server_name) {
-    // server side.
-    /* prepare the scatter/gather entry */
     memset(&sge, 0, sizeof(sge));
     sge.addr = (uintptr_t)mr->addr;
     sge.length = sizeof(T);
     sge.lkey = mr->lkey;
-    //  }
-    //  else {
-    //    //client side
-    //    /* prepare the scatter/gather entry */
-    //    memset(&sge, 0, sizeof(sge));
-    //    sge.addr = (uintptr_t)res->send_buf;
-    //    sge.length = sizeof(T);
-    //    sge.lkey = res->mr_send->lkey;
-    //  }
 
     /* prepare the send work request */
     memset(&sr, 0, sizeof(sr));
@@ -998,7 +991,8 @@ class RDMA_Manager {
     }
     return rc;
   }
-
+  template <typename T>
+  int post_receive(ibv_mr* mr, uint16_t target_node_id, std::string qp_type = "main");
 
  private:
   config_t rdma_config;
@@ -1036,35 +1030,24 @@ class RDMA_Manager {
 
   int post_receive(ibv_mr** mr_list, size_t sge_size, std::string qp_type,
                    uint16_t target_node_id);
-    int post_receive_xcompute(ibv_mr *mr, uint16_t target_node_id, int num_of_qp);
     // RDMA RPC send is async by default.
-    int post_send_xcompute(ibv_mr *mr, uint16_t target_node_id, int num_of_qp, size_t msg_size);
+    int post_receive_xcompute(ibv_mr *mr, uint16_t target_node_id, int num_of_qp);
 
-        int post_send(ibv_mr** mr_list, size_t sge_size, std::string qp_type,
+    int post_send(ibv_mr** mr_list, size_t sge_size, std::string qp_type,
                 uint16_t target_node_id);
+  
+};
+
   template <typename T>
-  int post_receive(ibv_mr* mr, uint16_t target_node_id,
-                   std::string qp_type = "main") {
+  inline int RDMA_Manager::post_receive(ibv_mr* mr, uint16_t target_node_id, std::string qp_type){
     struct ibv_recv_wr rr;
     struct ibv_sge sge;
     struct ibv_recv_wr* bad_wr;
     int rc;
-    //  if (!rdma_config.server_name) {
-    //    /* prepare the scatter/gather entry */
-
     memset(&sge, 0, sizeof(sge));
     sge.addr = (uintptr_t)mr->addr;
     sge.length = sizeof(T);
     sge.lkey = mr->lkey;
-
-    //  }
-    //  else {
-    //    /* prepare the scatter/gather entry */
-    //    memset(&sge, 0, sizeof(sge));
-    //    sge.addr = (uintptr_t)res->receive_buf;
-    //    sge.length = sizeof(T);
-    //    sge.lkey = res->mr_receive->lkey;
-    //  }
 
     /* prepare the receive work request */
     memset(&rr, 0, sizeof(rr));
@@ -1072,11 +1055,6 @@ class RDMA_Manager {
     rr.wr_id = 0;
     rr.sg_list = &sge;
     rr.num_sge = 1;
-    /* post the Receive Request to the RQ */
-//    if (rdma_config.server_name)
-//      rc = ibv_post_recv(res->qp_map["main"], &rr, &bad_wr);
-//    else
-//      rc = ibv_post_recv(res->qp_map[qp_id], &rr, &bad_wr);
     ibv_qp* qp;
     if (qp_type == "read_local"){
       //    assert(false);// Never comes to here
@@ -1106,19 +1084,62 @@ class RDMA_Manager {
       rc = ibv_post_recv(res->qp_map.at(target_node_id), &rr, &bad_wr);
       l.unlock();
     }
-//    if (rc)
-//#ifndef NDEBUG
-//      fprintf(stderr, "failed to post RR\n");
-//#endif
-//    else
-//#ifndef NDEBUG
-//      fprintf(stdout, "Receive Request was posted\n");
-//#endif
+
     return rc;
-  }  // For a non-thread-local queue pair, send_cq==true poll the cq of send queue, send_cq==false poll the cq of receive queue
-};
+  }  
 
+  // template <typename T>
+  // inline int RDMA_Manager::post_send(ibv_mr* mr, uint16_t target_node_id, std::string qp_type) {
+  //   struct ibv_send_wr sr;
+  //   struct ibv_sge sge;
+  //   struct ibv_send_wr* bad_wr = NULL;
+  //   int rc;
+  //   memset(&sge, 0, sizeof(sge));
+  //   sge.addr = (uintptr_t)mr->addr;
+  //   sge.length = sizeof(T);
+  //   sge.lkey = mr->lkey;
 
+  //   /* prepare the send work request */
+  //   memset(&sr, 0, sizeof(sr));
+  //   sr.next = NULL;
+  //   sr.wr_id = 0;
+  //   sr.sg_list = &sge;
+  //   sr.num_sge = 1;
+  //   sr.opcode = static_cast<ibv_wr_opcode>(IBV_WR_SEND);
+  //   sr.send_flags = IBV_SEND_SIGNALED;
 
+  //   /* there is a Receive Request in the responder side, so we won't get any into RNR flow */
+
+  //   ibv_qp* qp;
+  //   if (qp_type == "default"){
+  //     //    assert(false);// Never comes to here
+  //     qp = static_cast<ibv_qp*>(qp_data_default.at(target_node_id)->Get());
+  //     if (qp == NULL) {
+  //       Remote_Query_Pair_Connection(qp_type,target_node_id);
+  //       qp = static_cast<ibv_qp*>(qp_data_default.at(target_node_id)->Get());
+  //     }
+  //     rc = ibv_post_send(qp, &sr, &bad_wr);
+  //   }else if (qp_type == "write_local_flush"){
+  //     qp = static_cast<ibv_qp*>(qp_local_write_flush.at(target_node_id)->Get());
+  //     if (qp == NULL) {
+  //       Remote_Query_Pair_Connection(qp_type,target_node_id);
+  //       qp = static_cast<ibv_qp*>(qp_local_write_flush.at(target_node_id)->Get());
+  //     }
+  //     rc = ibv_post_send(qp, &sr, &bad_wr);
+
+  //   }else if (qp_type == "write_local_compact"){
+  //     qp = static_cast<ibv_qp*>(qp_local_write_compact.at(target_node_id)->Get());
+  //     if (qp == NULL) {
+  //       Remote_Query_Pair_Connection(qp_type,target_node_id);
+  //       qp = static_cast<ibv_qp*>(qp_local_write_compact.at(target_node_id)->Get());
+  //     }
+  //     rc = ibv_post_send(qp, &sr, &bad_wr);
+  //   } else {
+  //     std::shared_lock<std::shared_mutex> l(qp_cq_map_mutex);
+  //     rc = ibv_post_send(res->qp_map.at(target_node_id), &sr, &bad_wr);
+  //     l.unlock();
+  //   }
+  //   return rc;
+  // }
 }
 #endif

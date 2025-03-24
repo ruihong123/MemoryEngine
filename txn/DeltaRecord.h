@@ -13,11 +13,11 @@ namespace DSMEngine {
         char marker_ = '&';
 #endif
         uint64_t Wts_;
-        uint32_t current_record_data_size_; // include both header and data content
         GlobalAddress prev_delta_gaddr;
         uint64_t prev_delta_wts_;
         uint64_t prev_delta_epoch_;
         uint32_t prev_delta_data_size_;
+        uint32_t current_record_data_size_; // include both header and data content
 //    size_t* column_ids_;
 //    char** payloads_;
         char data_[1];

@@ -67,7 +67,7 @@ class TransactionManager {
       std::unique_lock<std::shared_mutex> lck(delta_map_mtx);
       delta_sections.insert(std::make_pair(remote_addr, ds_for_write));
       if (gc_thread_ == nullptr){
-//          gc_thread_ = new std::thread(&TransactionManager::GarbageCollection);
+         gc_thread_ = new std::thread(&TransactionManager::GarbageCollection);
       }
 
       // todo: sync the delta sections to the other nodes.
@@ -246,6 +246,7 @@ class TransactionManager {
     static void ProcessSnapshotPush(void* args);
         static void ProcessSnapshotPull(void* args);
     static void GarbageCollection();
+    static void BroadCastLeastSP(uint64_t least_sp);
 
 #endif
 protected:

@@ -495,8 +495,7 @@ void RDMA_Manager::compute_message_handling_thread(std::string q_id, uint16_t sh
     buffer_counter = 0;
     comm_thread_recv_mrs.insert({shard_target_node_id, recv_mr});
   }
-  printf("Start to sync options\n");
-//  sync_option_to_remote(shard_target_node_id);
+
   ibv_wc wc[3] = {};
   //    RDMA_Request receive_msg_buf;
 //  {
@@ -548,9 +547,7 @@ void RDMA_Manager::compute_message_handling_thread(std::string q_id, uint16_t sh
         while (*imme_data != 0 || *byte_len != 0 ){
           cv_imme->notify_one();
         }
-        post_receive<RDMA_Request>(&recv_mr[buffer_counter],
-                                            shard_target_node_id,
-                                            "main");
+        post_receive<RDMA_Request>(&recv_mr[buffer_counter], shard_target_node_id, "main");
         // increase the buffer index
         if (buffer_counter == RECEIVE_OUTSTANDING_SIZE - 1 ){
           buffer_counter = 0;
@@ -1276,13 +1273,17 @@ void RDMA_Manager::Cross_Computes_RPC_Threads_Creator(uint16_t target_node_id) {
                     post_receive_xcompute(&recv_mr[buff_pos],target_node_id,qp_num);
                     Reader_Inv_Modified_handler(receive_msg_buf, target_node_id);
                     break;
-                case broadcast_tlocal_ds:
+                case broadcast_create_ds:
                     post_receive_xcompute(&recv_mr[buff_pos],target_node_id,qp_num);
                     Create_Delta_Section_handler(receive_msg_buf, target_node_id);
                     break;
                 case pull_delta_section:
                     post_receive_xcompute(&recv_mr[buff_pos],target_node_id,qp_num);
                     Pull_Delta_Section_handler(receive_msg_buf, target_node_id);
+                    break;
+                case push_least_snapshot:
+                    post_receive_xcompute(&recv_mr[buff_pos],target_node_id,qp_num);
+                    Push_Least_Snapshot_handler(receive_msg_buf, target_node_id);
                     break;
                 case heart_beat:
                     printf("heart_beat\n");
@@ -1401,7 +1402,8 @@ void RDMA_Manager::Put_qp_info_into_RemoteM(uint16_t target_compute_node_id,
 //    RDMA_Reply* receive_pointer;
     uint16_t target_memory_node_id = 1;
     //Use node 1 memory node as the place to store the temporary QP information
-    post_send<RDMA_Request>(send_mr, target_memory_node_id, std::string("main"));
+    rc = post_send<RDMA_Request>(send_mr, target_memory_node_id, std::string("main"));
+    assert(rc == 0);
     ibv_wc wc[2] = {};
     //  while(wc.opcode != IBV_WC_RECV){
     //    poll_completion(&wc);
@@ -2855,6 +2857,7 @@ int RDMA_Manager::RDMA_Write(void* addr, uint32_t rkey, ibv_mr* local_mr,
         sr.opcode = IBV_WR_RDMA_WRITE;
         sr.wr.rdma.remote_addr = (uint64_t)addr;
         sr.wr.rdma.rkey = rkey;
+        sr.send_flags = msg_size < MAX_INLINE_SIZE ? IBV_SEND_INLINE|IBV_SEND_FENCE : 0|IBV_SEND_FENCE;
         //TODO: maybe unsingaled wr does not perform well, when there is high concurrrency over the same queue pair, because
         // we need a lock to protect the outstanding counter. We shall adjust SEND_OUTSTANDING_SIZE_XCOMPUTE to much larger than (2x) the
         // parallelism of the compute node.
@@ -2878,9 +2881,6 @@ int RDMA_Manager::RDMA_Write(void* addr, uint32_t rkey, ibv_mr* local_mr,
             sge.addr = (uintptr_t)async_buf->addr;
             sge.length = msg_size;
             sge.lkey = async_buf->lkey;
-            if (msg_size < MAX_INLINE_SIZE){
-                sr.send_flags = IBV_SEND_INLINE;
-            }
             ibv_qp* qp = static_cast<ibv_qp*>((*qp_xcompute.at(target_node_id))[num_of_qp]);
             rc = ibv_post_send(qp, &sr, &bad_wr);
         }
@@ -2890,13 +2890,12 @@ int RDMA_Manager::RDMA_Write(void* addr, uint32_t rkey, ibv_mr* local_mr,
             sge.addr = (uintptr_t)local_mr->addr;
             sge.length = msg_size;
             sge.lkey = local_mr->lkey;
-            if (msg_size < MAX_INLINE_SIZE){
-                sr.send_flags = IBV_SEND_SIGNALED|IBV_SEND_INLINE;
-            }else{
-                sr.send_flags = IBV_SEND_SIGNALED;
-            }
+            sr.send_flags = sr.send_flags|IBV_SEND_SIGNALED;
             ibv_qp* qp = static_cast<ibv_qp*>((*qp_xcompute.at(target_node_id))[num_of_qp]);
+            printf("RDMA write to be posted with signal, message size is %zu, thread id is %d\n", msg_size, thread_id);
+            fflush(stdout);
             rc = ibv_post_send(qp, &sr, &bad_wr);
+            
             ibv_wc wc[2] = {};
             if (rc) {
                 assert(false);
@@ -2917,6 +2916,84 @@ int RDMA_Manager::RDMA_Write(void* addr, uint32_t rkey, ibv_mr* local_mr,
         }
         return rc;
     }
+    int RDMA_Manager::post_send_xcompute(ibv_mr *mr, uint16_t target_node_id, int num_of_qp, size_t msg_size) {
+      struct ibv_send_wr sr;
+      struct ibv_sge sge;
+      struct ibv_send_wr* bad_wr = NULL;
+      int rc = 0;
+
+      /* prepare the send work request */
+      memset(&sr, 0, sizeof(sr));
+      sr.next = NULL;
+      sr.wr_id = 0;
+      sr.sg_list = &sge;
+      sr.num_sge = 1;
+      sr.opcode = static_cast<ibv_wr_opcode>(IBV_WR_SEND);
+      std::atomic<uint16_t >* os_start = &(*qp_xcompute_os_c.at(target_node_id))[2*num_of_qp];
+      SpinMutex* mtx = &(*qp_xcompute_mtx.at(target_node_id))[num_of_qp];
+      mtx->lock();
+      auto pending_num = os_start->fetch_add(1);
+      bool need_signal =  pending_num >= SEND_OUTSTANDING_SIZE_XCOMPUTE - 1;
+//        bool need_signal = true; // Let's first test it with all signalled RDMA.
+      if (!need_signal){
+          ibv_mr* async_buf = (*qp_xcompute_asyncT.at(target_node_id))[num_of_qp].mrs[pending_num];
+          assert(mr->length >= msg_size);
+          assert(async_buf->length >= msg_size);
+          memcpy(async_buf->addr, mr->addr, msg_size);
+          memset(&sge, 0, sizeof(sge));
+          sge.addr = (uintptr_t)async_buf->addr;
+          assert(mr->length != 0);
+//    printf("The length of the mr is %lu", mr->length);
+          sge.length = msg_size;
+          sge.lkey = async_buf->lkey;
+
+          sr.send_flags = IBV_SEND_INLINE;
+          ibv_qp* qp = static_cast<ibv_qp*>((*qp_xcompute.at(target_node_id))[num_of_qp]);
+          rc = ibv_post_send(qp, &sr, &bad_wr);
+          if (rc) {
+            assert(false);
+            fprintf(stderr, "failed to post SR, return is %d\n", rc);
+          }
+      }
+      else{
+          memset(&sge, 0, sizeof(sge));
+          sge.addr = (uintptr_t)mr->addr;
+          assert(mr->length != 0);
+//    printf("The length of the mr is %lu", mr->length);
+          sge.length = msg_size;
+          sge.lkey = mr->lkey;
+
+          sr.send_flags = IBV_SEND_SIGNALED|IBV_SEND_INLINE;
+          ibv_qp* qp = static_cast<ibv_qp*>((*qp_xcompute.at(target_node_id))[num_of_qp]);
+          printf("RDMA send to be posted with signal, message size is %zu, thread id is %d \n", msg_size, thread_id);
+          fflush(stdout);
+          rc = ibv_post_send(qp, &sr, &bad_wr);
+          
+          ibv_wc wc[2] = {};
+          if (rc) {
+              assert(false);
+              fprintf(stderr, "failed to post SR, return is %d\n", rc);
+          }
+          if (poll_completion_xcompute(wc, 1, std::string("main"),
+                                       true, target_node_id, num_of_qp)){
+              fprintf(stderr, "failed to poll send for remote memory register\n");
+              assert(false);
+          }
+          os_start->store(0);
+
+
+      }
+      mtx->unlock();
+
+//    std::shared_lock<std::shared_mutex> l(qp_cq_map_mutex);
+      /* post the Send Request to the RQ */
+//    l.unlock();
+      if (rc) {
+          assert(false);
+          fprintf(stderr, "failed to post SR, return is %d\n", rc);
+      }
+      return rc;
+  }
 int RDMA_Manager::RDMA_Write_Imme(void* addr, uint32_t rkey, ibv_mr* local_mr,
                                   size_t msg_size, std::string qp_type,
                                   size_t send_flag, int poll_num,
@@ -5813,7 +5890,6 @@ int RDMA_Manager::post_receive_xcompute(ibv_mr *mr, uint16_t target_node_id, int
     struct ibv_sge sge;
     struct ibv_recv_wr* bad_wr;
     int rc;
-    //  if (!rdma_config.server_name) {
     //    /* prepare the scatter/gather entry */
 
     memset(&sge, 0, sizeof(sge));
@@ -5823,15 +5899,6 @@ int RDMA_Manager::post_receive_xcompute(ibv_mr *mr, uint16_t target_node_id, int
     sge.length = mr->length;
     sge.lkey = mr->lkey;
 
-    //  }
-    //  else {
-    //    /* prepare the scatter/gather entry */
-    //    memset(&sge, 0, sizeof(sge));
-    //    sge.addr = (uintptr_t)res->receive_buf;
-    //    sge.length = sizeof(T);
-    //    sge.lkey = res->mr_receive->lkey;
-    //  }
-
     /* prepare the receive work request */
     memset(&rr, 0, sizeof(rr));
     rr.next = NULL;
@@ -5840,185 +5907,15 @@ int RDMA_Manager::post_receive_xcompute(ibv_mr *mr, uint16_t target_node_id, int
     rr.num_sge = 1;
     /* post the Receive Request to the RQ */
     ibv_qp* qp;
-//    try
     {
-//        std::shared_lock<std::shared_mutex> l(qp_cq_map_mutex);
         qp = static_cast<ibv_qp*>((*qp_xcompute.at(target_node_id))[num_of_qp]);
     }
-//    catch (...)
-//    {
-//        printf("An exception occurred. target node is %hu, number of qp is  %d \n", target_node_id, num_of_qp);
-//    }
+
     rc = ibv_post_recv(qp, &rr, &bad_wr);
 
     return rc;
 }
-//int RDMA_Manager::post_send_xcompute(ibv_mr *mr, uint16_t target_node_id, int num_of_qp) {
-//    struct ibv_send_wr sr;
-//    struct ibv_sge sge;
-//    struct ibv_send_wr* bad_wr = NULL;
-//    int rc = 0;
-//
-//    //  if (!rdma_config.server_name) {
-//    //    /* prepare the scatter/gather entry */
-//
-//    memset(&sge, 0, sizeof(sge));
-//    sge.addr = (uintptr_t)mr->addr;
-//    assert(mr->length != 0);
-////    printf("The length of the mr is %lu", mr->length);
-//    sge.length = mr->length;
-//    sge.lkey = mr->lkey;
-//    //  }
-//    //  else {
-//    //    /* prepare the scatter/gather entry */
-//    //    memset(&sge, 0, sizeof(sge));
-//    //    sge.addr = (uintptr_t)res->receive_buf;
-//    //    sge.length = sizeof(T);
-//    //    sge.lkey = res->mr_receive->lkey;
-//    //  }
-//
-//    /* prepare the send work request */
-//    memset(&sr, 0, sizeof(sr));
-//    sr.next = NULL;
-//    sr.wr_id = 0;
-//    sr.sg_list = &sge;
-//    sr.num_sge = 1;
-//    sr.opcode = static_cast<ibv_wr_opcode>(IBV_WR_SEND);
-//    std::atomic<uint16_t >* os_start = &(*qp_xcompute_os_c.at(target_node_id))[2*num_of_qp];
-//    std::atomic<uint16_t >* os_end = &(*qp_xcompute_os_c.at(target_node_id))[2*num_of_qp+1];
-//    auto pending_num = os_start->fetch_add(1);
-//    bool need_signal =  pending_num >= SEND_OUTSTANDING_SIZE_XCOMPUTE - 1;
-//    if (!need_signal){
-//        sr.send_flags = IBV_SEND_INLINE;
-//        ibv_qp* qp = static_cast<ibv_qp*>((*qp_xcompute.at(target_node_id))[num_of_qp]);
-//        rc = ibv_post_send(qp, &sr, &bad_wr);
-//        //os_end is updated after os_start, it is possible to have os_end >= SEND_OUTSTANDING_SIZE_XCOMPUTE - 1
-//        // we spin here until the end counter reset.
-//        while(os_end->load() >= SEND_OUTSTANDING_SIZE_XCOMPUTE - 1){
-//            asm volatile("pause\n": : :"memory");
-//        }
-//        os_end->fetch_add(1);
-//        assert(os_end->load() <= SEND_OUTSTANDING_SIZE_XCOMPUTE - 1);
-//    }
-//    else{
-//        SpinMutex* mtx = &(*qp_xcompute_mtx.at(target_node_id))[num_of_qp];
-//        mtx->lock();
-//        auto new_pending_num = os_start->fetch_add(1);
-//        if (new_pending_num >= SEND_OUTSTANDING_SIZE_XCOMPUTE - 1){
-//
-//            sr.send_flags = IBV_SEND_SIGNALED|IBV_SEND_INLINE;
-//            ibv_qp* qp = static_cast<ibv_qp*>((*qp_xcompute.at(target_node_id))[num_of_qp]);
-//            //We need to make sure that the wr sequence in the queue is in the ticket order. otherwise, the pending wr
-//            // can still exceed the upper bound.
-//            while (os_end->load() < SEND_OUTSTANDING_SIZE_XCOMPUTE - 1){
-//                asm volatile("pause\n": : :"memory");
-//            }
-//            assert(os_end->load() == SEND_OUTSTANDING_SIZE_XCOMPUTE - 1);
-//            rc = ibv_post_send(qp, &sr, &bad_wr);
-//            ibv_wc wc[2] = {};
-//            if (rc) {
-//                assert(false);
-//                fprintf(stderr, "failed to post SR, return is %d\n", rc);
-//            }
-//            if (poll_completion_xcompute(wc, 1, std::string("main"),
-//                                         true, target_node_id, num_of_qp)){
-//                fprintf(stderr, "failed to poll send for remote memory register\n");
-//                assert(false);
-//            }
-//            os_start->store(0);
-//            os_end->store(0);
-//            mtx->unlock();
-//        }else{
-//            sr.send_flags = IBV_SEND_INLINE;
-//            ibv_qp* qp = static_cast<ibv_qp*>((*qp_xcompute.at(target_node_id))[num_of_qp]);
-//            rc = ibv_post_send(qp, &sr, &bad_wr);
-//            os_end->fetch_add(1);
-//            assert(os_end->load() <= SEND_OUTSTANDING_SIZE_XCOMPUTE - 1);
-//            mtx->unlock();
-//        }
-//    }
-////    std::shared_lock<std::shared_mutex> l(qp_cq_map_mutex);
-//    /* post the Send Request to the RQ */
-////    l.unlock();
-//    if (rc) {
-//        assert(false);
-//        fprintf(stderr, "failed to post SR, return is %d\n", rc);
-//    }
-//    return rc;
-//}
-
-    int RDMA_Manager::post_send_xcompute(ibv_mr *mr, uint16_t target_node_id, int num_of_qp, size_t msg_size) {
-        struct ibv_send_wr sr;
-        struct ibv_sge sge;
-        struct ibv_send_wr* bad_wr = NULL;
-        int rc = 0;
-
-        /* prepare the send work request */
-        memset(&sr, 0, sizeof(sr));
-        sr.next = NULL;
-        sr.wr_id = 0;
-        sr.sg_list = &sge;
-        sr.num_sge = 1;
-        sr.opcode = static_cast<ibv_wr_opcode>(IBV_WR_SEND);
-        std::atomic<uint16_t >* os_start = &(*qp_xcompute_os_c.at(target_node_id))[2*num_of_qp];
-        SpinMutex* mtx = &(*qp_xcompute_mtx.at(target_node_id))[num_of_qp];
-        mtx->lock();
-        auto pending_num = os_start->fetch_add(1);
-        bool need_signal =  pending_num >= SEND_OUTSTANDING_SIZE_XCOMPUTE - 1;
-//        bool need_signal = true; // Let's first test it with all signalled RDMA.
-        if (!need_signal){
-            ibv_mr* async_buf = (*qp_xcompute_asyncT.at(target_node_id))[num_of_qp].mrs[pending_num];
-            assert(mr->length >= msg_size);
-            assert(async_buf->length >= msg_size);
-            memcpy(async_buf->addr, mr->addr, msg_size);
-            memset(&sge, 0, sizeof(sge));
-            sge.addr = (uintptr_t)async_buf->addr;
-            assert(mr->length != 0);
-//    printf("The length of the mr is %lu", mr->length);
-            sge.length = msg_size;
-            sge.lkey = async_buf->lkey;
-
-            sr.send_flags = IBV_SEND_INLINE;
-            ibv_qp* qp = static_cast<ibv_qp*>((*qp_xcompute.at(target_node_id))[num_of_qp]);
-            rc = ibv_post_send(qp, &sr, &bad_wr);
-
-        }
-        else{
-            memset(&sge, 0, sizeof(sge));
-            sge.addr = (uintptr_t)mr->addr;
-            assert(mr->length != 0);
-//    printf("The length of the mr is %lu", mr->length);
-            sge.length = msg_size;
-            sge.lkey = mr->lkey;
-
-            sr.send_flags = IBV_SEND_SIGNALED|IBV_SEND_INLINE;
-            ibv_qp* qp = static_cast<ibv_qp*>((*qp_xcompute.at(target_node_id))[num_of_qp]);
-            rc = ibv_post_send(qp, &sr, &bad_wr);
-            ibv_wc wc[2] = {};
-            if (rc) {
-                assert(false);
-                fprintf(stderr, "failed to post SR, return is %d\n", rc);
-            }
-            if (poll_completion_xcompute(wc, 1, std::string("main"),
-                                         true, target_node_id, num_of_qp)){
-                fprintf(stderr, "failed to poll send for remote memory register\n");
-                assert(false);
-            }
-            os_start->store(0);
-
-
-        }
-        mtx->unlock();
-
-//    std::shared_lock<std::shared_mutex> l(qp_cq_map_mutex);
-        /* post the Send Request to the RQ */
-//    l.unlock();
-        if (rc) {
-            assert(false);
-            fprintf(stderr, "failed to post SR, return is %d\n", rc);
-        }
-        return rc;
-    }
+    
 int RDMA_Manager::post_receive(ibv_mr* mr, std::string qp_type, size_t size,
                                uint16_t target_node_id) {
   struct ibv_recv_wr rr;
@@ -6116,21 +6013,25 @@ int RDMA_Manager::poll_completion(ibv_wc* wc_p, int num_entries,
   int poll_num = 0;
   int rc = 0;
   ibv_cq* cq;
+  ibv_qp* qp;
   /* poll the completion for a while before giving up of doing it .. */
   // gettimeofday(&cur_time, NULL);
   // start_time_msec = (cur_time.tv_sec * 1000) + (cur_time.tv_usec / 1000);
   std::shared_lock<std::shared_mutex> l(qp_cq_map_mutex);
   if (qp_type == "write_local_flush"){
     cq = (ibv_cq*)cq_local_write_flush.at(target_node_id)->Get();
+    qp = (ibv_qp*)qp_local_write_flush.at(target_node_id)->Get();
     assert(cq != nullptr);
   }else if (qp_type == "write_local_compact"){
     cq = (ibv_cq*)cq_local_write_compact.at(target_node_id)->Get();
+    qp = (ibv_qp*)qp_local_write_compact.at(target_node_id)->Get();
 //    cq = ((CQ_Map*)cq_local_write_compact->Get())->at(shard_target_node_id);
 //    cq = static_cast<ibv_cq*>(cq_local_write_compact->Get());
     assert(cq != nullptr);
 
   }else if (qp_type == "default"){
     cq = (ibv_cq*)cq_data_default.at(target_node_id)->Get();
+    qp = (ibv_qp*)qp_data_default.at(target_node_id)->Get();
 //    cq = ((CQ_Map*)cq_data_default->Get())->at(shard_target_node_id);
 //    cq = static_cast<ibv_cq*>(cq_data_default->Get());
     assert(cq != nullptr);
@@ -6139,17 +6040,28 @@ int RDMA_Manager::poll_completion(ibv_wc* wc_p, int num_entries,
 //    assert(res->cq_map.contains());
     if (send_cq)
       cq = res->cq_map.at(target_node_id).first;
+      
     else
       cq = res->cq_map.at(target_node_id).second;
     assert(cq != nullptr);
+    qp = res->qp_map.at(target_node_id);
   }
   l.unlock();
+  size_t count = 0;
   do {
     poll_result = ibv_poll_cq(cq, num_entries, &wc_p[poll_num]);
     if (poll_result < 0)
       break;
     else
       poll_num = poll_num + poll_result;
+      
+      ibv_qp_attr qp_init_attr;
+      ibv_qp_init_attr qp_state;
+      if (count++ > 1000000){
+          ibv_query_qp(qp, &qp_init_attr, IBV_QP_STATE, &qp_state);
+          assert(qp_init_attr.qp_state == IBV_QPS_RTS);
+      }
+    
     /*gettimeofday(&cur_time, NULL);
     cur_time_msec = (cur_time.tv_sec * 1000) + (cur_time.tv_usec / 1000);*/
   } while (poll_num < num_entries);  // && ((cur_time_msec - start_time_msec) < MAX_POLL_CQ_TIMEOUT));
@@ -6692,7 +6604,7 @@ inv_resend:
         ibv_mr* send_mr = Get_local_send_message_mr();
 //        Allocate_Local_RDMA_Slot(send_mr, Message);
         send_pointer = (RDMA_Request*)send_mr->addr;
-        send_pointer->command = broadcast_tlocal_ds;
+        send_pointer->command = broadcast_create_ds;
         send_pointer->content.create_ds.ds_gaddr = ds_ptr;
         send_pointer->content.create_ds.compute_node_id = compute_node_id;
         for(auto iter: compute_nodes){
@@ -7720,10 +7632,9 @@ void RDMA_Manager::fs_deserilization(
                 break;
             else
                 poll_num = poll_num + poll_result;
-            count++;
             ibv_qp_attr qp_init_attr;
             ibv_qp_init_attr qp_state;
-            if (count > 1000000){
+            if (count++ > 1000000){
                 ibv_query_qp((*qp_xcompute.at(target_node_id))[num_of_cp], &qp_init_attr, IBV_QP_STATE, &qp_state);
                 assert(qp_init_attr.qp_state == IBV_QPS_RTS);
             }
@@ -8443,6 +8354,17 @@ void RDMA_Manager::fs_deserilization(
         }
         message_handling_funcs_map.at(DeltaPull)(receive_msg_buf);
     }
+    void RDMA_Manager::Push_Least_Snapshot_handler(RDMA_Request *receive_msg_buf, uint8_t target_node_id) {
+        std::shared_lock<std::shared_mutex> read_lock(user_df_map_mutex);
+        while(message_handling_funcs_map.find(SnapshotPush) == message_handling_funcs_map.end()){
+            // wait for the front end thread register the message handling function.
+            read_lock.unlock();
+            usleep(10);
+            read_lock.lock();
+        }
+        message_handling_funcs_map.at(SnapshotPush)(receive_msg_buf);
+    }
+    
 
 
     void RDMA_Manager::Write_Invalidation_Message_Handler(void* thread_args) {

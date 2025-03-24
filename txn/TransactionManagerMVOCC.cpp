@@ -201,22 +201,39 @@ namespace DSMEngine{
 
 
             //check whether the delta_offset is within the ring buffer by tail and head.
-
-
-            if ( ds_epoch != meta.prev_delta_epoch_ || delta_section->inner_section->is_empty_ || !delta_section->isOffsetInValidRing(prev_delta)){
-                // fetch the latest version of the delta section.
-                // todo: sync the delta section.
-                delta_section->PullUpdates();
-            }else{
 #ifndef NDEBUG
-                long offset = prev_delta.offset - prev_delta.offset - STRUCT_OFFSET(DeltaSection, local_seg_addr_);
-                if (ds_tail >= ds_head){
-                    assert(ds_tail - offset > STRUCT_OFFSET(DeltaRecord, data_));
-                }
+            bool pull_update = false;
 #endif
+
+            if (delta_section->inner_section->is_empty_ || !delta_section->isOffsetValid(prev_delta, meta.prev_delta_epoch_)){
+                // fetch the latest version of the delta section.
+                // use double checked locking to avoid conflict.
+                std::unique_lock<std::shared_mutex> lck(delta_section->ds_mtx_);
+                if (delta_section->inner_section->is_empty_ || !delta_section->isOffsetValid(prev_delta, meta.prev_delta_epoch_)){
+                    assert(delta_section->owner_compute_node_id_ != RDMA_Manager::node_id);
+                    delta_section->PullUpdates();
+#ifndef NDEBUG
+                    pull_update = true;
+#endif
+                }
+
             }
+            assert(meta.prev_delta_epoch_ <= delta_section->inner_section->epoch);
+
+
             std::shared_lock<std::shared_mutex> lck(delta_section->ds_mtx_);
+#ifndef NDEBUG  
+            ds_tail = delta_section->GetTail();
+            ds_head = delta_section->GetHead();
+            assert(!delta_section->inner_section->is_empty_&& delta_section->isOffsetValid(prev_delta, meta.prev_delta_epoch_));
+
+            long offset = prev_delta.offset - delta_section->seg_addr_.offset - STRUCT_OFFSET(DeltaSection, local_seg_addr_);
+            if (ds_tail >= ds_head){
+                assert(ds_tail - offset > STRUCT_OFFSET(DeltaRecord, data_));
+            }
+#endif
             DeltaRecord* delta_record = (DeltaRecord*)((char*)delta_section->seg_local_mr_->addr + (prev_delta.offset - delta_section->seg_addr_.offset));
+            assert(delta_record->marker_ == '&');
             record->roll_back(delta_record);
             ts = record->GetWTS();
         }
@@ -274,7 +291,7 @@ namespace DSMEngine{
                 }else if (access_type == READ_WRITE || access_type == INSERT_ONLY){
 
                     if (locked_handles_.find(page_gaddr) == locked_handles_.end()){
-                        //No matter write or read we need acquire exclusive latch.
+                        //Acquire the exclusive latch and put the latch in to the lock handles table.
                         assert(page_gaddr.offset - tuple_gaddr.offset > STRUCT_OFFSET(DataPage, data_));
                         default_gallocator->SELCC_Exclusive_Lock(page_buff, page_gaddr, handle);
                         assert((tuple_gaddr.offset - handle->gptr.offset) > STRUCT_OFFSET(DataPage, data_));
@@ -352,8 +369,6 @@ namespace DSMEngine{
                 ds_for_write->fill_in_delta_record(access->txn_local_tuple_, access->access_global_record_, delta_gadd, delta_size);
                 MetaColumn meta = access->txn_local_tuple_->GetMeta();
                 meta.prev_delta_ = delta_gadd;
-                printf("Prev delta is %p, this record is %p\n", delta_gadd, access->access_addr_);
-                fflush(stdout);
                 meta.prev_delta_epoch_ = ds_for_write->GetEpoch();
                 meta.prev_delta_data_size_ = delta_size;
                 meta.prev_delta_wts_ = meta.Wts_;
@@ -435,6 +450,7 @@ namespace DSMEngine{
         }
         void TransactionManager::GetSnapshot() {
             snapshot_ts = GlobalTimestamp::GetMonotoneTimestamp();
+            need to fix.
             // todo: there is a potential bug. If the snapshot is acquire but this thread is yield, then the global cluster may not detect that this snapshot number is pinned and the background thread may clean up
             // the old version for this snapshot number. We can make the timestamp acquire inside the spin lock, but it may cause the performance issue.
             // Another solution could be using another spin mutex to use a shared lock to block the garbage collector when we are calling Get snapshot function
@@ -465,12 +481,13 @@ namespace DSMEngine{
                 assert(pined_snapshot_this_node[snapshot_ts] > 0);
             };
             psp_lck.unlock();
-            if (least_sp_change){
-                // I think current strategy to sync the global least sp for this node is too eager, we can do it lazily
-                auto rdma_mg = RDMA_Manager::Get_Instance();
-                std::unique_lock<SpinMutex> cl_lck(c_l_mtx);
-                cluster_least_sp_[rdma_mg->node_id] = old_least_sp;
-            }
+
+            // if (least_sp_change){
+            //     // I think current strategy to sync the global least sp for this node is too eager, we can do it lazily
+            //     auto rdma_mg = RDMA_Manager::Get_Instance();
+            //     std::unique_lock<SpinMutex> cl_lck(c_l_mtx);
+            //     cluster_least_sp_[rdma_mg->node_id] = old_least_sp;
+            // }
         }
 
     void TransactionManager::ProcessDeltaCreate(void* args){
@@ -502,23 +519,33 @@ namespace DSMEngine{
         uint8_t requester_node_id = receive_msg_buf->content.pull_ds.requester_node_id;
 
         {
-            std::unique_lock<std::shared_mutex> map_lck(TransactionManager::delta_map_mtx);
+            std::shared_lock<std::shared_mutex> map_lck(TransactionManager::delta_map_mtx);
             auto it = TransactionManager::delta_sections.find(ds_gaddr);
+            map_lck.unlock();
             DeltaSectionWrap* ds_w = it->second;
             // RDMA write back the most updated delta section.
             std::shared_lock<std::shared_mutex> delta_lck(ds_w->ds_mtx_);
             ibv_mr* local_mr = ds_w->seg_local_mr_;
-            int qp_id = rdma_mg->qp_inc_ticket++ % NUM_QP_ACCROSS_COMPUTE;
 //                if (old_epoch < ds_w->inner_section->epoch){
             // the local copy is up to date.
             //todo: develop reply mechanism according to the old epoch, old head and old tail and also try to make the delta
             // write an async operation to minumize the latency.
+            // uint8_t* polling_byte = (uint8_t*)((uint8_t*)local_mr->addr + rdma_mg->delta_section_size - 1);
+            // *polling_byte = 1;
+            //  rdma_mg->RDMA_Write_xcompute(local_mr, receive_msg_buf->buffer, receive_msg_buf->rkey,
+            //                               rdma_mg->delta_section_size,
+            //                               requester_node_id, qp_id, false);
+            int qp_id = rdma_mg->qp_inc_ticket++ % NUM_QP_ACCROSS_COMPUTE;
             uint8_t* polling_byte = (uint8_t*)((uint8_t*)local_mr->addr + rdma_mg->delta_section_size - 1);
-            *polling_byte = 1;
-             rdma_mg->RDMA_Write_xcompute(local_mr, receive_msg_buf->buffer, receive_msg_buf->rkey,
-                                          rdma_mg->delta_section_size,
-                                          requester_node_id, qp_id, false);
-
+            *polling_byte = 5;
+            rdma_mg->RDMA_Write_xcompute(local_mr, receive_msg_buf->buffer, receive_msg_buf->rkey,
+                                        rdma_mg->delta_section_size,
+                                        requester_node_id, qp_id, false);
+            // ibv_mr* thread_local_mr = rdma_mg->Get_local_send_message_mr();
+            // uint8_t* local_uint8 = (uint8_t*)thread_local_mr->addr;
+            // *local_uint8 = 5;
+            // rdma_mg->RDMA_Write_xcompute(thread_local_mr, receive_msg_buf->buffer + rdma_mg->delta_section_size - 1, receive_msg_buf->rkey,
+            //     1, requester_node_id, qp_id, true);
 
         }
         delete receive_msg_buf;
@@ -535,12 +562,30 @@ namespace DSMEngine{
             if(cluster_least_sp_.count(node_id) == 0){
                 cluster_least_sp_[node_id] = least_spn;
             }else{
+                assert(cluster_least_sp_[node_id] <= least_spn);
                 cluster_least_sp_[node_id] = least_spn;
             }
         }
 
 
         delete receive_msg_buf;
+    }
+    void TransactionManager::BroadCastLeastSP(uint64_t least_sp){
+        auto* rdma_mg = RDMA_Manager::Get_Instance();
+        RDMA_Request* send_pointer;
+        ibv_mr* send_mr = rdma_mg->Get_local_send_message_mr();
+
+        send_pointer = (RDMA_Request*)send_mr->addr;
+        send_pointer->command = push_least_snapshot;
+        send_pointer->content.snapshot_push.least_snapshot = least_sp;
+        send_pointer->content.snapshot_push.node_id = rdma_mg->node_id;
+        for (uint8_t i = 0; i < rdma_mg->GetComputeNodeNum(); i++){
+            uint8_t target_node_id = 2*i;
+            if (target_node_id != rdma_mg->node_id){
+                int qp_id = rdma_mg->qp_inc_ticket++ % NUM_QP_ACCROSS_COMPUTE;
+                rdma_mg->post_send_xcompute(send_mr, target_node_id, qp_id, sizeof(RDMA_Request));
+            }
+        }
     }
     void TransactionManager::GarbageCollection(){
         auto rdma_mg = RDMA_Manager::Get_Instance();
@@ -552,17 +597,19 @@ namespace DSMEngine{
             uint64_t least_sp_this_node;
 
             if(pined_snapshot_this_node.empty()){
-                least_sp_this_node = UINT64_MAX;
+                least_sp_this_node = UINT64_MAX; // todo: this is a bug, we need to fix it.
             }else{
                 least_sp_this_node = pined_snapshot_this_node.begin()->first;
             }
+            psp_lck.unlock();
+
             if (least_sp_this_node != last_broadcasted_sp){
                 // todo: implement the garbage collection broadcast.
-//                BroadCastLeastSP(least_sp_this_node);
+               BroadCastLeastSP(least_sp_this_node);
                 last_broadcasted_sp = least_sp_this_node;
 
             }
-            psp_lck.unlock();
+
             //step 2: do garbage collection according to the least sp across the cluster.
             std::unique_lock<SpinMutex> cl_lck(c_l_mtx);
             cluster_least_sp_[rdma_mg->node_id] = least_sp_this_node;
@@ -572,16 +619,18 @@ namespace DSMEngine{
                     least_sp_across_cluster = iter.second;
                 }
             }
+            cl_lck.unlock();
             if (least_sp_across_cluster > last_gc_ts){
                 // do garbage collection.
                 last_gc_ts = least_sp_across_cluster;
+                std::shared_lock<std::shared_mutex> lck(delta_map_mtx);
                 for (auto iter = delta_sections.begin(); iter != delta_sections.end();){
                     // todo: garbage collect the old delta file from the head.
+                    iter->second->GarbageCollectionBySnapshot(least_sp_across_cluster);
                 }
             }
-            cl_lck.unlock();
-                    // do garbage collection.
-            usleep(5000);
+            // do garbage collection.
+            usleep(1000);
         }
     }
     bool TransactionManager::CoordinatorPrepare() {

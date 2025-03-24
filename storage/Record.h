@@ -254,9 +254,11 @@ public:
             this->SetColumn(meta_col_id, &meta_col);
         }
         void roll_back(DeltaRecord *delta_record){
+            assert(delta_record->current_record_data_size_ != 0);
             // roll back the record to the previous version.
             char* start = delta_record->data_;
-            char* end = start + delta_record->current_record_data_size_ - STRUCT_OFFSET(DeltaRecord, data_);
+            size_t data_offset = STRUCT_OFFSET(DeltaRecord, data_);
+            char* end = start + delta_record->current_record_data_size_ - data_offset;
             assert(end > start);
             while (start < end){
                 size_t column_id = *(size_t*)start;

@@ -35,7 +35,7 @@ namespace DSMEngine {
         size_t seg_real_size_; // not include the header size of inner delta section.
         RDMA_Manager *rdma_mg_;
         std::shared_mutex ds_mtx_; // todo: change it into spinlatch.
-        std::condition_variable cv;
+        std::condition_variable_any cv;
 
         DeltaSection* inner_section;
         DeltaSectionWrap(uint8_t compute_node_id, GlobalAddress seg_addr, size_t seg_size, ibv_mr *seg_local_mr) {
@@ -65,13 +65,8 @@ namespace DSMEngine {
 //            size_t delta_size_padding = delta_size;
             std::unique_lock<std::shared_mutex> lck(ds_mtx_);
             // The code below could be buggy, take care!
-            if ((seg_real_size_ - inner_section->tail_) < delta_size) {
-                // todo: make here waiting for the garbage collection.
-                // if the tail is very close to the end of the buffer, we need to wrap the tail to
-                // the beginning of the buffer.
-//                do it here
-                inner_section->tail_ = 0;
-            }
+            
+            
             uint64_t  old_head = inner_section->head_;
             // we append new delta record to the tail.
             while (!inner_section->is_empty_ && (old_head + seg_real_size_ - inner_section->tail_) % seg_real_size_ <= delta_size) {
@@ -79,8 +74,20 @@ namespace DSMEngine {
                 // if full then we clear the whole delta section. (will be changed later)
                 // todo: use condition variable to wait.
                 old_head = inner_section->head_;
-//                inner_section->tail_ = inner_section->head_;
-//                inner_section->is_empty_ = true;
+                //todo: wait for the signal of garbage collection.
+                cv.wait(lck, [this, old_head, delta_size]{return ((old_head + seg_real_size_ - inner_section->tail_) % seg_real_size_ > delta_size);});
+            //     // fake garbage collecion code. should be cleared.
+            //    inner_section->tail_ = inner_section->head_;
+            //    inner_section->is_empty_ = true;
+            //    inner_section->epoch++;
+            }
+
+            if (seg_real_size_ - inner_section->tail_ < delta_size)
+            {
+                //mark that the parser need to move to 0 postion of this ring buffer
+                *((char*)(inner_section->local_seg_addr_ + inner_section->tail_)) = '^';
+                inner_section->tail_ = 0;
+                inner_section->epoch++;
             }
             MetaColumn meta_col = old_record->GetMeta();
             // update the max time stamp.
@@ -105,6 +112,35 @@ namespace DSMEngine {
                 inner_section->is_empty_ = false;
             }
         }
+        void GarbageCollectionBySnapshot(uint64_t snapshot){
+            std::unique_lock<std::shared_mutex> lck(ds_mtx_);
+            while(1){
+                if (inner_section->is_empty_ ){
+                    assert(inner_section->head_ == inner_section->tail_);
+                    break;
+                }
+                DeltaRecord* delta_record = (DeltaRecord*)(inner_section->local_seg_addr_ + inner_section->head_);
+                if (delta_record->marker_ == '^'){
+                    // move the head to 0 position. Reset the head and delta_record.
+                    inner_section->head_ = 0;
+                    delta_record = (DeltaRecord*)(inner_section->local_seg_addr_ + inner_section->head_);
+                    assert(inner_section->tail_ > 0);
+                }
+                
+                if (delta_record->Wts_ < snapshot){
+                    inner_section->head_ += delta_record->current_record_data_size_;
+                    if(inner_section->head_ >= seg_real_size_){
+                        inner_section->head_ = inner_section->head_ % seg_real_size_;
+                    }
+                    if (inner_section->head_ == inner_section->tail_){
+                        inner_section->is_empty_ = true;
+                    }
+                }else{
+                    break;
+                }
+            }
+            cv.notify_all();
+        }
 
         void recover_from_delta_record(Record *record, GlobalAddress& delta_gadd){
             std::shared_lock<std::shared_mutex> lck(ds_mtx_);
@@ -123,12 +159,18 @@ namespace DSMEngine {
         uint64_t GetTail(){
             return inner_section->tail_;
         }
-        bool isOffsetInValidRing(GlobalAddress gaddr)
-        {
+        bool isOffsetValid(GlobalAddress gaddr, uint64_t epoch)
+        {   
             const uint64_t & head = inner_section->head_;
             const uint64_t & tail = inner_section->tail_;
             long offset = gaddr.offset - seg_addr_.offset - STRUCT_OFFSET(DeltaSection, local_seg_addr_);
             assert(offset >= 0);
+            // strictly speaking this logic is not correct. A smaller epoch does not mean the offset is invalid.
+            // but a larger epoch means the offset is invalid.
+            if (epoch > inner_section->epoch){
+                return false;
+            }
+
             // Case 1: The buffer is not wrapped
             // Occupied region is [head, tail)
             if (tail >= head) {
@@ -164,6 +206,7 @@ namespace DSMEngine {
             uint8_t * receive_pointer = (uint8_t*)((uint8_t*)recv_mr->addr + rdma_mg->delta_section_size - 1);
             //Clear the reply buffer for the polling.
             *receive_pointer = 0;
+            memset((void*)recv_mr->addr, 0, rdma_mg->delta_section_size);
 //        *receive_pointer = {};
 
             int qp_id = rdma_mg->qp_inc_ticket++ % NUM_QP_ACCROSS_COMPUTE;
@@ -175,13 +218,18 @@ namespace DSMEngine {
             asm volatile ("lfence\n" : : );
             asm volatile ("mfence\n" : : );
             volatile uint8_t * check_byte = (uint8_t*)receive_pointer;
+            size_t poll_num = 0;
             while(!*check_byte){
+                poll_num++;
                 _mm_clflush((const void *) check_byte);
                 asm volatile ("sfence\n" : : );
                 asm volatile ("lfence\n" : : );
                 asm volatile ("mfence\n" : : );
             }
-            printf("Successfully pull the updates for %p delta section\n", seg_addr_);
+            assert(*check_byte == 5);
+            assert(((DeltaSection*)recv_mr->addr)->local_seg_addr_[0] == '&');
+            assert(((DeltaSection*)recv_mr->addr)->tail_!=0);
+            printf("Successfully pull the updates for %p delta section, pollnum is \n", seg_addr_, poll_num);
             fflush(stdout);
 
 
