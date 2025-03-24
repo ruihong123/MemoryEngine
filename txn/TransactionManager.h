@@ -64,14 +64,19 @@ class TransactionManager {
       ibv_mr* local_mr = new ibv_mr{};
       rdma_mg->Allocate_Local_RDMA_Slot(*local_mr, DeltaChunk);
       ds_for_write= new DeltaSectionWrap(rdma_mg->node_id, remote_addr, rdma_mg->delta_section_size, local_mr);
-      std::unique_lock<std::shared_mutex> lck(delta_map_mtx);
+      std::unique_lock<std::shared_mutex> lck1(delta_map_mtx);
       delta_sections.insert(std::make_pair(remote_addr, ds_for_write));
-      if (gc_thread_ == nullptr){
-         gc_thread_ = new std::thread(&TransactionManager::GarbageCollection);
-      }
-
       // todo: sync the delta sections to the other nodes.
       rdma_mg->Sync_Create_Delta_Section_RPC(remote_addr, rdma_mg->node_id);
+      lck1.unlock();
+      std::unique_lock<SpinMutex> lck2(c_l_mtx);
+      // need to initialize the cluster_least_sp_.
+      if (cluster_least_sp_.empty()){
+          for (uint16_t i = 0; i < rdma_mg->GetComputeNodeNum(); i++){
+              cluster_least_sp_[2*i] = 0;
+          }
+
+      }
 
 #endif
 
@@ -230,6 +235,7 @@ class TransactionManager {
   StorageManager* storage_manager_;
     Env* env_;
     static WritableFile* log_file;
+    static std::atomic<uint64_t>  largest_sp;
 #if defined(MVOCC)
     static std::shared_mutex delta_map_mtx;
     static std::map<GlobalAddress, DeltaSectionWrap*, std::greater<GlobalAddress>> delta_sections;
@@ -240,7 +246,7 @@ class TransactionManager {
     static std::map<uint16_t, uint64_t> cluster_least_sp_; // <node id, least snapshot id>
     void GetSnapshot();
     void ReleaseSnapshot();
-    static std::thread *gc_thread_;
+    static std::thread *gc_thread;
     static void ProcessDeltaCreate(void* args);
     static void ProcessDeltaPull(void* args);
     static void ProcessSnapshotPush(void* args);

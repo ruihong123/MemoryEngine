@@ -8355,6 +8355,7 @@ void RDMA_Manager::fs_deserilization(
         message_handling_funcs_map.at(DeltaPull)(receive_msg_buf);
     }
     void RDMA_Manager::Push_Least_Snapshot_handler(RDMA_Request *receive_msg_buf, uint8_t target_node_id) {
+        assert(receive_msg_buf->command == push_least_snapshot);
         std::shared_lock<std::shared_mutex> read_lock(user_df_map_mutex);
         while(message_handling_funcs_map.find(SnapshotPush) == message_handling_funcs_map.end()){
             // wait for the front end thread register the message handling function.

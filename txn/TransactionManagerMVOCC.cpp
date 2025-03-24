@@ -3,6 +3,7 @@
 #include "GlobalTimestamp.h"
 namespace DSMEngine{
         WritableFile* TransactionManager::log_file = nullptr;
+        std::atomic<uint64_t > TransactionManager::largest_sp = 0;
         std::shared_mutex TransactionManager::delta_map_mtx;
         std::map<GlobalAddress, DeltaSectionWrap*, std::greater<GlobalAddress>> TransactionManager::delta_sections;
         SpinMutex TransactionManager::pin_sp_mtx;
@@ -10,7 +11,7 @@ namespace DSMEngine{
 //        uint64_t TransactionManager::last_broadcasted_sp = 0;
         SpinMutex TransactionManager::c_l_mtx;
         std::map<uint16_t, uint64_t > TransactionManager::cluster_least_sp_;
-        std::thread* TransactionManager::gc_thread_ = nullptr;
+        std::thread* TransactionManager::gc_thread = nullptr;
         bool TransactionManager::AllocateNewRecord(TxnContext *context, size_t table_id, Cache::Handle *&handle,
                                                    GlobalAddress &tuple_gaddr, Record*& tuple) {
             char* tuple_buffer;
@@ -455,7 +456,7 @@ namespace DSMEngine{
             // Another solution could be using another spin mutex to use a shared lock to block the garbage collector when we are calling Get snapshot function
             std::unique_lock<SpinMutex> psp_lck(pin_sp_mtx);
             snapshot_ts = GlobalTimestamp::GetMonotoneTimestamp();
-
+            largest_sp.store( largest_sp.load() < snapshot_ts ?  snapshot_ts: largest_sp.load()); // atomic is actually not necessary here.
             if(pined_snapshot_this_node.count(snapshot_ts) == 0){
                 pined_snapshot_this_node[snapshot_ts] = 1;
             }else{
@@ -592,16 +593,19 @@ namespace DSMEngine{
         uint64_t last_broadcasted_sp = 0;
         uint64_t last_gc_ts = 0;
         while(1){
+            // Get the largest snapshot till now in this compute node.
+            uint64_t largest_snapshot = largest_sp.load();
+
             //step 1: update the least sp of this node and broadcast.
             std::unique_lock<SpinMutex> psp_lck(pin_sp_mtx);
             uint64_t least_sp_this_node;
-
             if(pined_snapshot_this_node.empty()){
-                least_sp_this_node = UINT64_MAX; // todo: this is a bug, we need to fix it.
+                least_sp_this_node = largest_snapshot; // todo: this is a bug, we need to fix it.
             }else{
                 least_sp_this_node = pined_snapshot_this_node.begin()->first;
             }
             psp_lck.unlock();
+
 
             if (least_sp_this_node != last_broadcasted_sp){
                 // todo: implement the garbage collection broadcast.
