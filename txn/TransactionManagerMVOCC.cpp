@@ -450,7 +450,7 @@ namespace DSMEngine{
         }
         void TransactionManager::GetSnapshot() {
             snapshot_ts = GlobalTimestamp::GetMonotoneTimestamp();
-            need to fix.
+            // need to fix.
             // todo: there is a potential bug. If the snapshot is acquire but this thread is yield, then the global cluster may not detect that this snapshot number is pinned and the background thread may clean up
             // the old version for this snapshot number. We can make the timestamp acquire inside the spin lock, but it may cause the performance issue.
             // Another solution could be using another spin mutex to use a shared lock to block the garbage collector when we are calling Get snapshot function
