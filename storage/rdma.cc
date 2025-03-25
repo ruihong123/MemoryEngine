@@ -4431,7 +4431,9 @@ int RDMA_Manager::RDMA_CAS(ibv_mr *remote_mr, ibv_mr *local_mr, uint64_t compare
                         // If there is another request comes in immediately for the same page before the lock release, this print
                         // below will happen.
                         printf("read invalidation target is itself, this is rare case,, page_addr is %p, retry_cnt is %lu\n", page_addr, retry_cnt);
-                        assert(false);
+                        if (retry_cnt > 10000000){
+                            assert(false);
+                        }
                     }
                 }
 #ifdef PARALLEL_INVALIDATION
