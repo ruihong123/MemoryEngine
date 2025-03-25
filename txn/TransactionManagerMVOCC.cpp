@@ -628,7 +628,7 @@ namespace DSMEngine{
                 // do garbage collection.
                 last_gc_ts = least_sp_across_cluster;
                 std::shared_lock<std::shared_mutex> lck(delta_map_mtx);
-                for (auto iter = delta_sections.begin(); iter != delta_sections.end();){
+                for (auto iter = delta_sections.begin(); iter != delta_sections.end(); iter++){
                     if (iter->second->owner_compute_node_id_ == rdma_mg->node_id){
                         iter->second->GarbageCollectionBySnapshot(least_sp_across_cluster);
                     }
