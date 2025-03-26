@@ -2892,8 +2892,8 @@ int RDMA_Manager::RDMA_Write(void* addr, uint32_t rkey, ibv_mr* local_mr,
             sge.lkey = local_mr->lkey;
             sr.send_flags = sr.send_flags|IBV_SEND_SIGNALED;
             ibv_qp* qp = static_cast<ibv_qp*>((*qp_xcompute.at(target_node_id))[num_of_qp]);
-            printf("RDMA write to be posted with signal, message size is %zu, thread id is %d\n", msg_size, thread_id);
-            fflush(stdout);
+//            printf("RDMA write to be posted with signal, message size is %zu, thread id is %d\n", msg_size, thread_id);
+//            fflush(stdout);
             rc = ibv_post_send(qp, &sr, &bad_wr);
             
             ibv_wc wc[2] = {};
@@ -2965,8 +2965,8 @@ int RDMA_Manager::RDMA_Write(void* addr, uint32_t rkey, ibv_mr* local_mr,
 
           sr.send_flags = IBV_SEND_SIGNALED|IBV_SEND_INLINE;
           ibv_qp* qp = static_cast<ibv_qp*>((*qp_xcompute.at(target_node_id))[num_of_qp]);
-          printf("RDMA send to be posted with signal, message size is %zu, thread id is %d \n", msg_size, thread_id);
-          fflush(stdout);
+//          printf("RDMA send to be posted with signal, message size is %zu, thread id is %d \n", msg_size, thread_id);
+//          fflush(stdout);
           rc = ibv_post_send(qp, &sr, &bad_wr);
           
           ibv_wc wc[2] = {};

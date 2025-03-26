@@ -231,7 +231,7 @@ namespace DSMEngine {
             assert(*check_byte == 5);
             assert(((DeltaSection*)recv_mr->addr)->local_seg_addr_[0] == '&');
             assert(((DeltaSection*)recv_mr->addr)->tail_!=0);
-            printf("Successfully pull the updates for %p delta section, pollnum is \n", seg_addr_, poll_num);
+            printf("Successfully pull the updates for %p delta section, pollnum is %d \n", seg_addr_, poll_num);
             fflush(stdout);
 
 
