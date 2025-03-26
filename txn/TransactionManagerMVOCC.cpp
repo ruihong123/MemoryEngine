@@ -219,10 +219,11 @@ namespace DSMEngine{
                 }
 
             }
-            assert(meta.prev_delta_epoch_ <= delta_section->inner_section->epoch);
 
 
             std::shared_lock<std::shared_mutex> lck(delta_section->ds_mtx_);
+            assert(meta.prev_delta_epoch_ <= delta_section->inner_section->epoch);
+
 #ifndef NDEBUG  
             ds_tail = delta_section->GetTail();
             ds_head = delta_section->GetHead();
