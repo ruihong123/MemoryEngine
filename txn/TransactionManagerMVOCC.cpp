@@ -443,6 +443,7 @@ namespace DSMEngine{
                 // unlock
             }
             locked_handles_.clear();
+            ReleaseSnapshot();
             is_first_access_ = true;
             pure_read_txn = true;;
             snapshot_ts = 0;
@@ -481,6 +482,7 @@ namespace DSMEngine{
                 pined_snapshot_this_node[snapshot_ts]--;
                 assert(pined_snapshot_this_node[snapshot_ts] > 0);
             };
+            snapshot_ts = 0;
             psp_lck.unlock();
 
             // if (least_sp_change){
