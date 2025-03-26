@@ -13,8 +13,8 @@ namespace DSMEngine {
         char marker_ = '&';
 #endif
         uint64_t Wts_;
+        uint64_t next_delta_wts_;
         GlobalAddress prev_delta_gaddr;
-        uint64_t prev_delta_wts_;
         uint64_t prev_delta_epoch_;
         uint32_t prev_delta_data_size_;
         uint32_t current_record_data_size_; // include both header and data content
@@ -31,21 +31,21 @@ namespace DSMEngine {
             current_record_data_size_ = 0;
         }
 
-        DeltaRecord(uint64_t wts, uint32_t d_record_size, GlobalAddress prev_delta, uint64_t prev_delta_wts,
+        DeltaRecord(uint64_t wts, uint32_t d_record_size, GlobalAddress prev_delta, uint64_t next_delta_wts,
                     uint64_t prev_delta_epoch, uint32_t prev_record_size) {
             Wts_ = wts;
             current_record_data_size_ = d_record_size;
             prev_delta_gaddr = prev_delta;
-            prev_delta_wts_ = prev_delta_wts;
+            next_delta_wts_ = next_delta_wts;
             prev_delta_epoch_ = prev_delta_epoch;
             prev_delta_data_size_ = prev_record_size;
         }
-        void initialize(uint64_t wts, uint32_t d_record_size, GlobalAddress prev_delta, uint64_t prev_delta_wts,
+        void initialize(uint64_t wts, uint32_t d_record_size, GlobalAddress prev_delta, uint64_t next_delta_wts,
                         uint64_t prev_delta_epoch, uint32_t prev_record_size) {
             Wts_ = wts;
             current_record_data_size_ = d_record_size;
             prev_delta_gaddr = prev_delta;
-            prev_delta_wts_ = prev_delta_wts;
+            next_delta_wts_ = next_delta_wts;
             prev_delta_epoch_ = prev_delta_epoch;
             prev_delta_data_size_ = prev_record_size;
         }

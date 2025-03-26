@@ -367,7 +367,8 @@ namespace DSMEngine{
                 // TODO: Create a new delta_record in the delta section and update the prev_delta in the record's metadata.
                 GlobalAddress delta_gadd = GlobalAddress::Null();
                 size_t delta_size = 0;
-                ds_for_write->fill_in_delta_record(access->txn_local_tuple_, access->access_global_record_, delta_gadd, delta_size);
+                ds_for_write->fill_in_delta_record(access->txn_local_tuple_, access->access_global_record_, delta_gadd,
+                                                   delta_size, commit_ts);
                 MetaColumn meta = access->txn_local_tuple_->GetMeta();
                 meta.prev_delta_ = delta_gadd;
                 meta.prev_delta_epoch_ = ds_for_write->GetEpoch();

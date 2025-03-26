@@ -59,7 +59,8 @@ namespace DSMEngine {
             delete seg_local_mr_;
         }
         // new_record is the local copy and the old_record is the global copy. Later the local copy will be written to the global copy.
-        void fill_in_delta_record(Record *new_record, Record *old_record, GlobalAddress& delta_gadd, size_t& delta_size) {
+        void fill_in_delta_record(Record *new_record, Record *old_record, GlobalAddress &delta_gadd, size_t &delta_size,
+                                  uint64_t commit_ts) {
 
             delta_size = new_record->estimate_delta_size(); // delta size include both delta header and delta content.
 //            size_t delta_size_padding = delta_size;
@@ -95,7 +96,7 @@ namespace DSMEngine {
                 inner_section->max_ts = meta_col.Wts_;
             }
             DeltaRecord * delta_record = new(inner_section->local_seg_addr_ + inner_section->tail_) DeltaRecord(
-                    meta_col.Wts_, delta_size, meta_col.prev_delta_, meta_col.prev_delta_wts_,
+                    meta_col.Wts_, delta_size, meta_col.prev_delta_, commit_ts,
                     meta_col.prev_delta_epoch_, meta_col.prev_delta_data_size_ );
             new_record->serialize_to_delta(delta_record);
 #ifndef NDEBUG
@@ -113,6 +114,7 @@ namespace DSMEngine {
             }
         }
         void GarbageCollectionBySnapshot(uint64_t snapshot){
+            // todo: this garbage collection logic is not correct. We need to fix it.
             std::unique_lock<std::shared_mutex> lck(ds_mtx_);
             while(1){
                 if (inner_section->is_empty_ ){
@@ -127,7 +129,7 @@ namespace DSMEngine {
                     assert(inner_section->tail_ > 0);
                 }
                 
-                if (delta_record->Wts_ < snapshot){
+                if (delta_record->next_delta_wts_ < snapshot){
                     inner_section->head_ += delta_record->current_record_data_size_;
                     if(inner_section->head_ >= seg_real_size_){
                         inner_section->head_ = inner_section->head_ % seg_real_size_;
