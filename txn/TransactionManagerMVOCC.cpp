@@ -373,7 +373,7 @@ namespace DSMEngine{
                 meta.prev_delta_ = delta_gadd;
                 meta.prev_delta_epoch_ = ds_for_write->GetEpoch();
                 meta.prev_delta_data_size_ = delta_size;
-                meta.prev_delta_wts_ = meta.Wts_;
+//                meta.next_delta_wts_ = meta.Wts_;
                 meta.Wts_ = commit_ts;
 
                 access->txn_local_tuple_->PutMeta(meta);

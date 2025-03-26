@@ -31,7 +31,7 @@ struct MetaColumn {
 #endif
 #if defined(MVOCC)
     GlobalAddress prev_delta_;
-    uint64_t prev_delta_wts_;
+//    uint64_t next_delta_wts_;
     uint64_t prev_delta_epoch_;
     uint32_t prev_delta_data_size_;
 #endif

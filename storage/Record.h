@@ -277,7 +277,7 @@ public:
             assert(meta.Wts_ <0x100d2c00cbe9 );
             meta.prev_delta_ = delta_record->prev_delta_gaddr;
             meta.prev_delta_epoch_ = delta_record->prev_delta_epoch_;
-            meta.prev_delta_wts_ = delta_record->prev_delta_wts_;
+//            meta.next_delta_wts_ = delta_record->next_delta_wts_; // this operation is useless.
             meta.prev_delta_data_size_ = delta_record->prev_delta_data_size_;
             PutMeta(meta);
         }

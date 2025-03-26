@@ -391,7 +391,7 @@ class TpccPopulator : public BenchmarkPopulator {
 #endif
 #if defined(MVOCC)
       meta.prev_delta_ = GlobalAddress::Null();
-      meta.prev_delta_wts_ = 0;
+//      meta.next_delta_wts_ = 0;
       meta.prev_delta_epoch_ = 0;
       meta.prev_delta_data_size_ = 0;
 #endif
@@ -436,7 +436,7 @@ class TpccPopulator : public BenchmarkPopulator {
 #endif
 #if defined(MVOCC)
       meta.prev_delta_ = GlobalAddress::Null();
-      meta.prev_delta_wts_ = 0;
+//      meta.next_delta_wts_ = 0;
       meta.prev_delta_epoch_ = 0;
       meta.prev_delta_data_size_ = 0;
 #endif
@@ -482,7 +482,7 @@ class TpccPopulator : public BenchmarkPopulator {
 #endif
 #if defined(MVOCC)
       meta.prev_delta_ = GlobalAddress::Null();
-      meta.prev_delta_wts_ = 0;
+//      meta.next_delta_wts_ = 0;
       meta.prev_delta_epoch_ = 0;
       meta.prev_delta_data_size_ = 0;
 #endif
@@ -540,7 +540,7 @@ class TpccPopulator : public BenchmarkPopulator {
 #endif
 #if defined(MVOCC)
       meta.prev_delta_ = GlobalAddress::Null();
-      meta.prev_delta_wts_ = 0;
+//      meta.next_delta_wts_ = 0;
       meta.prev_delta_epoch_ = 0;
       meta.prev_delta_data_size_ = 0;
 #endif
@@ -586,7 +586,7 @@ class TpccPopulator : public BenchmarkPopulator {
 #endif
 #if defined(MVOCC)
       meta.prev_delta_ = GlobalAddress::Null();
-      meta.prev_delta_wts_ = 0;
+//      meta.next_delta_wts_ = 0;
       meta.prev_delta_epoch_ = 0;
       meta.prev_delta_data_size_ = 0;
 #endif
@@ -629,7 +629,7 @@ class TpccPopulator : public BenchmarkPopulator {
 #endif
 #if defined(MVOCC)
       meta.prev_delta_ = GlobalAddress::Null();
-      meta.prev_delta_wts_ = 0;
+//      meta.next_delta_wts_ = 0;
       meta.prev_delta_epoch_ = 0;
       meta.prev_delta_data_size_ = 0;
 #endif
@@ -663,7 +663,7 @@ class TpccPopulator : public BenchmarkPopulator {
 #endif
 #if defined(MVOCC)
       meta.prev_delta_ = GlobalAddress::Null();
-      meta.prev_delta_wts_ = 0;
+//      meta.next_delta_wts_ = 0;
       meta.prev_delta_epoch_ = 0;
       meta.prev_delta_data_size_ = 0;
 #endif
@@ -703,7 +703,7 @@ class TpccPopulator : public BenchmarkPopulator {
 #endif
 #if defined(MVOCC)
       meta.prev_delta_ = GlobalAddress::Null();
-      meta.prev_delta_wts_ = 0;
+//      meta.next_delta_wts_ = 0;
       meta.prev_delta_epoch_ = 0;
       meta.prev_delta_data_size_ = 0;
 #endif
@@ -744,7 +744,7 @@ class TpccPopulator : public BenchmarkPopulator {
 #endif
 #if defined(MVOCC)
       meta.prev_delta_ = GlobalAddress::Null();
-      meta.prev_delta_wts_ = 0;
+//      meta.next_delta_wts_ = 0;
       meta.prev_delta_epoch_ = 0;
       meta.prev_delta_data_size_ = 0;
 #endif
@@ -779,7 +779,7 @@ class TpccPopulator : public BenchmarkPopulator {
 #endif
 #if defined(MVOCC)
       meta.prev_delta_ = GlobalAddress::Null();
-      meta.prev_delta_wts_ = 0;
+//      meta.next_delta_wts_ = 0;
       meta.prev_delta_epoch_ = 0;
       meta.prev_delta_data_size_ = 0;
 #endif
