@@ -528,6 +528,7 @@ namespace DSMEngine{
             DeltaSectionWrap* ds_w = it->second;
             // RDMA write back the most updated delta section.
             std::shared_lock<std::shared_mutex> delta_lck(ds_w->ds_mtx_);
+            assert(!ds_w->inner_section->is_empty_);
             ibv_mr* local_mr = ds_w->seg_local_mr_;
 //                if (old_epoch < ds_w->inner_section->epoch){
             // the local copy is up to date.
