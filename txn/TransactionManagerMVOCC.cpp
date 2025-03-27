@@ -597,9 +597,17 @@ namespace DSMEngine{
         auto rdma_mg = RDMA_Manager::Get_Instance();
         uint64_t last_broadcasted_sp = 0;
         uint64_t last_gc_ts = 0;
+        uint64_t largest_snapshot = largest_sp.load();
         while(1){
-            // Get the largest snapshot till now in this compute node.
-            uint64_t largest_snapshot = largest_sp.load();
+            if (largest_snapshot <  largest_sp.load()){
+                // Get the largest snapshot till now in this compute node.
+                largest_snapshot = largest_sp.load();
+            }else{
+                std::unique_lock<SpinMutex> psp_lck(pin_sp_mtx);
+                largest_snapshot = GlobalTimestamp::GetMonotoneTimestamp();
+                largest_sp.store(largest_snapshot);
+            }
+
 
             //step 1: update the least sp of this node and broadcast.
             std::unique_lock<SpinMutex> psp_lck(pin_sp_mtx);
