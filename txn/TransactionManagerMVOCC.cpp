@@ -549,6 +549,7 @@ namespace DSMEngine{
              bool async = false;
              for(auto pair : boundaries){
                  assert(boundaries.size() <= 3);
+                 assert(boundaries.size() > 0);
                  qp_id = rdma_mg->qp_inc_ticket++ % NUM_QP_ACCROSS_COMPUTE;
 
                 local_mr = *ds_w->seg_local_mr_;
@@ -561,6 +562,8 @@ namespace DSMEngine{
                  }
                 local_mr.addr = (void*)((char*)local_mr.addr + start);
                  remote_addr += start;
+                 printf("Issue write request from %lu to %lu\n", start, end);
+                 fflush(stdout);
                 rdma_mg->RDMA_Write_xcompute(&local_mr, remote_addr + start, receive_msg_buf->rkey,
                                             write_size,
                                             requester_node_id, qp_id, async);
