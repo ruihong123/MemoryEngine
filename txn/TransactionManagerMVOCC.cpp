@@ -566,7 +566,7 @@ namespace DSMEngine{
                  remote_addr += start;
                  printf("Issue write request from %lu to %lu\n", start, end);
                  fflush(stdout);
-                rdma_mg->RDMA_Write_xcompute(&local_mr, remote_addr + start, receive_msg_buf->rkey,
+                rdma_mg->RDMA_Write_xcompute(&local_mr, remote_addr, receive_msg_buf->rkey,
                                             write_size,
                                             requester_node_id, qp_id, async);
              }
