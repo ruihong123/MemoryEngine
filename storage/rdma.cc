@@ -140,7 +140,7 @@ static uint64_t  round_to_cacheline(uint64_t size) {
   uint64_t message_size = round_to_cacheline(std::max(sizeof(RDMA_Request), sizeof(RDMA_Reply)));
   Mempool_initialize(Message,
                      message_size, RECEIVE_OUTSTANDING_SIZE * message_size);
-  Mempool_initialize(BigPage, 2*1024ull*1024ull, 16 * 1024 * 1024);
+  Mempool_initialize(BigPage, BIGPAGESIZE, 16 * 1024 * 1024);
   Mempool_initialize(Regular_Page, remote_block_size, 256ull*1024ull*1024);
     Mempool_initialize(DeltaChunk, delta_section_size, 32*delta_section_size);
     printf("atomic uint8_t, uint16_t, uint32_t and uint64_t are, %lu %lu %lu %lu\n ", sizeof(std::atomic<uint8_t>), sizeof(std::atomic<uint16_t>), sizeof(std::atomic<uint32_t>), sizeof(std::atomic<uint64_t>));
@@ -6524,6 +6524,7 @@ inv_resend:
                     count = 0;
                 }
                 if (starv_level <= 2 ){
+                    // todo: add spinwait or sleep between every pending message.
                     if (timer.GetElapsedMicroSeconds() > 13){
                         send_pointer->content.inv_message.pending_reminder = true;
                         goto inv_resend;

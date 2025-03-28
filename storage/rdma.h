@@ -526,14 +526,14 @@ class RDMA_Manager {
             auto rdma_mg = RDMA_Manager::Get_Instance();
             for (int i = 0; i < SEND_OUTSTANDING_SIZE_XCOMPUTE - 1; ++i) {
                 ibv_mr* mr = new ibv_mr{};
-                rdma_mg->Allocate_Local_RDMA_Slot(*mr, Regular_Page);
+                rdma_mg->Allocate_Local_RDMA_Slot(*mr, BigPage);
                 mrs[i] = mr;
             }
         }
         ~Async_Xcompute_Tasks(){
             auto rdma_mg = RDMA_Manager::Get_Instance();
             for (int i = 0; i < SEND_OUTSTANDING_SIZE_XCOMPUTE - 1; ++i) {
-                rdma_mg->Deallocate_Local_RDMA_Slot(mrs[i]->addr, Regular_Page);
+                rdma_mg->Deallocate_Local_RDMA_Slot(mrs[i]->addr, BigPage);
             }
         }
 

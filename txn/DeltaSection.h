@@ -236,6 +236,165 @@ namespace DSMEngine {
 
 
         }
+        void CalculateWriteBoundaries(std::vector<std::pair<size_t, size_t>> & boundaries, uint64_t old_h, uint64_t old_t, uint64_t old_epoch){
+            //todo: the logic need carefully proofread.
+            assert(inner_section->head_!= inner_section->tail_ || inner_section->is_empty_);
+            uint64_t merge_thre = 4096;
+            uint64_t start = 0;
+            uint64_t end = 0;
+
+            if(UNLIKELY(old_epoch < inner_section->epoch )){
+                if (inner_section->tail_ > inner_section->head_) {
+                    end = STRUCT_OFFSET(DeltaSection, local_seg_addr_);
+                    boundaries.push_back(std::make_pair(start, end));
+
+                    start = STRUCT_OFFSET(DeltaSection, local_seg_addr_) + inner_section->head_;
+                    end = STRUCT_OFFSET(DeltaSection, local_seg_addr_) + inner_section->tail_;
+                    boundaries.push_back(std::make_pair(start, end));
+
+                    start = STRUCT_OFFSET(DeltaSection, local_seg_addr_) + seg_real_size_ - 1;
+                    end = STRUCT_OFFSET(DeltaSection, local_seg_addr_) + seg_real_size_;
+                    boundaries.push_back(std::make_pair(start, end));
+
+                    // prune the result.
+                    if (boundaries[2].first - boundaries[1].second <= merge_thre){
+                        // merge the third and the second one.
+                        boundaries[1].second = boundaries[2].second;
+                        boundaries.pop_back();
+                    }
+                    if (boundaries[1].first - boundaries[0].second <= merge_thre){
+                        // merge the second and the first one.
+                        boundaries[0].second = boundaries[1].second;
+                        boundaries.erase(boundaries.begin() + 1);
+                    }
+                    return;
+
+//                    if (inner_section->head_ <= merge_thre && seg_real_size_ - inner_section->tail_ <= merge_thre) {
+//                        // transfer the whole delta section.
+//                        end = STRUCT_OFFSET(DeltaSection, local_seg_addr_) + seg_real_size_;
+//                        assert(end - start == rdma_mg_->delta_section_size);
+//                        return;
+//                    }
+//                    if (inner_section->head_ > merge_thre && seg_real_size_ - inner_section->tail_ > merge_thre){
+//                        // transfer by three parts.
+//                        end = STRUCT_OFFSET(DeltaSection, local_seg_addr_);
+//                        boundaries.push_back(std::make_pair(start, end));
+//
+//                        start = STRUCT_OFFSET(DeltaSection, local_seg_addr_) + inner_section->head_;
+//                        end = STRUCT_OFFSET(DeltaSection, local_seg_addr_) + inner_section->tail_;
+//                        boundaries.push_back(std::make_pair(start, end));
+//
+//                        start = STRUCT_OFFSET(DeltaSection, local_seg_addr_) + seg_real_size_ - 1;
+//                        end = STRUCT_OFFSET(DeltaSection, local_seg_addr_) + seg_real_size_;
+//                        boundaries.push_back(std::make_pair(start, end));
+//                        return;
+//                    }
+//                    if(inner_section->head_ > merge_thre){
+//                        assert(seg_real_size_ - inner_section->tail_ <= merge_thre);
+//                        end = STRUCT_OFFSET(DeltaSection, local_seg_addr_) + inner_section->head_;
+//                        end = STRUCT_OFFSET(DeltaSection, local_seg_addr_) + inner_section->tail_;
+//                        boundaries.push_back(std::make_pair(start, end));
+//
+//                        start = STRUCT_OFFSET(DeltaSection, local_seg_addr_) + inner_section->tail_;
+//                        end = STRUCT_OFFSET(DeltaSection, local_seg_addr_) + seg_real_size_;
+//                        boundaries.push_back(std::make_pair(start, end));
+//                        return;
+//                    }
+//                    if (seg_real_size_ - inner_section->tail_ > merge_thre){
+//                        assert(inner_section->head_ <= merge_thre);
+//                        end = STRUCT_OFFSET(DeltaSection, local_seg_addr_) + inner_section->tail_;
+//                        boundaries.push_back(std::make_pair(start, end));
+//
+//                        start = STRUCT_OFFSET(DeltaSection, local_seg_addr_) + seg_real_size_ - 1;
+//                        end = STRUCT_OFFSET(DeltaSection, local_seg_addr_) + seg_real_size_;
+//                        boundaries.push_back(std::make_pair(start, end));
+//                        return;
+//                    }
+                }else{
+                    // write the header and first half.
+                    end = STRUCT_OFFSET(DeltaSection, local_seg_addr_) + inner_section->tail_;
+                    assert(end - start < rdma_mg_->delta_section_size);
+                    boundaries.push_back(std::make_pair(start, end));
+                    if (old_epoch == inner_section->epoch - 1){
+                        // if the epoch is the previous epoch, we may reduce the data size that we need to transfer.
+                        start = old_t > inner_section->head_? (STRUCT_OFFSET(DeltaSection, local_seg_addr_) + old_t):(STRUCT_OFFSET(DeltaSection, local_seg_addr_) + inner_section->head_);
+                    }else{
+                        start = STRUCT_OFFSET(DeltaSection, local_seg_addr_) + inner_section->head_;
+                    }
+                    end = STRUCT_OFFSET(DeltaSection, local_seg_addr_) + seg_real_size_;
+                    boundaries.push_back(std::make_pair(start, end));
+                    // pruning the result.
+                    if (boundaries[1].first - boundaries[0].second <= merge_thre){
+                        boundaries[0].second = boundaries[1].second;
+                        boundaries.pop_back();
+                        assert(boundaries[0].second == STRUCT_OFFSET(DeltaSection, local_seg_addr_) + seg_real_size_);
+                    }
+                    return;
+                }
+
+            }else{
+                if (inner_section->tail_ > inner_section->head_) {
+                    end = STRUCT_OFFSET(DeltaSection, local_seg_addr_);
+                    boundaries.push_back(std::make_pair(start, end));
+                    if (old_t > inner_section->head_){
+                        start = STRUCT_OFFSET(DeltaSection, local_seg_addr_) + old_t;
+                    }else{
+                        start = STRUCT_OFFSET(DeltaSection, local_seg_addr_) + inner_section->head_;
+                    }
+                    start = STRUCT_OFFSET(DeltaSection, local_seg_addr_) + inner_section->head_;
+                    end = STRUCT_OFFSET(DeltaSection, local_seg_addr_) + inner_section->tail_;
+                    boundaries.push_back(std::make_pair(start, end));
+
+                    start = STRUCT_OFFSET(DeltaSection, local_seg_addr_) + seg_real_size_ - 1;
+                    end = STRUCT_OFFSET(DeltaSection, local_seg_addr_) + seg_real_size_;
+                    boundaries.push_back(std::make_pair(start, end));
+
+                    // prune the result.
+                    if (boundaries[2].first - boundaries[1].second <= merge_thre){
+                        // merge the third and the second one.
+                        boundaries[1].second = boundaries[2].second;
+                        boundaries.pop_back();
+                    }
+                    if (boundaries[1].first - boundaries[0].second <= merge_thre){
+                        // merge the second and the first one.
+                        boundaries[0].second = boundaries[1].second;
+                        boundaries.erase(boundaries.begin() + 1);
+                    }
+                    return;
+                }else{
+                    assert(old_h <= inner_section->head_);
+                    // write the header and first half.
+                    end = STRUCT_OFFSET(DeltaSection, local_seg_addr_) + inner_section->tail_;
+                    assert(end - start < rdma_mg_->delta_section_size);
+                    boundaries.push_back(std::make_pair(start, end));
+
+                    // we may reduce the data size that we need to transfer.
+                    start = (STRUCT_OFFSET(DeltaSection, local_seg_addr_) + old_t);
+                    end = STRUCT_OFFSET(DeltaSection, local_seg_addr_) + inner_section->tail_;
+                    boundaries.push_back(std::make_pair(start, end));
+
+                    // The third part only contain the polling byte, because the old head has to smaller than the current head.
+                    // There is no need to transfer the data for the second half of the delta section.
+                    start = STRUCT_OFFSET(DeltaSection, local_seg_addr_) + seg_real_size_ - 1;
+                    end = STRUCT_OFFSET(DeltaSection, local_seg_addr_) + seg_real_size_;
+                    boundaries.push_back(std::make_pair(start, end));
+
+                    // pruning the result.
+                    // prune the result.
+                    if (boundaries[2].first - boundaries[1].second <= merge_thre){
+                        // merge the third and the second one.
+                        boundaries[1].second = boundaries[2].second;
+                        boundaries.pop_back();
+                    }
+                    if (boundaries[1].first - boundaries[0].second <= merge_thre){
+                        // merge the second and the first one.
+                        boundaries[0].second = boundaries[1].second;
+                        boundaries.erase(boundaries.begin() + 1);
+                    }
+                    return;
+                }
+            }
+        }
 
     };
 #endif

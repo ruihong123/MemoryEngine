@@ -12,6 +12,8 @@ namespace DSMEngine{
         SpinMutex TransactionManager::c_l_mtx;
         std::map<uint16_t, uint64_t > TransactionManager::cluster_least_sp_;
         std::thread* TransactionManager::gc_thread = nullptr;
+
+
         bool TransactionManager::AllocateNewRecord(TxnContext *context, size_t table_id, Cache::Handle *&handle,
                                                    GlobalAddress &tuple_gaddr, Record*& tuple) {
             char* tuple_buffer;
@@ -512,6 +514,7 @@ namespace DSMEngine{
         }
         delete receive_msg_buf;
     }
+
      void TransactionManager::ProcessDeltaPull(void* args){
 
         auto* rdma_mg = RDMA_Manager::Get_Instance();
@@ -531,30 +534,69 @@ namespace DSMEngine{
             // RDMA write back the most updated delta section.
             std::shared_lock<std::shared_mutex> delta_lck(ds_w->ds_mtx_);
             assert(!ds_w->inner_section->is_empty_);
-            ibv_mr* local_mr = ds_w->seg_local_mr_;
+            ibv_mr local_mr = *ds_w->seg_local_mr_;
+            char* remote_addr = (char*)receive_msg_buf->buffer;
 //                if (old_epoch < ds_w->inner_section->epoch){
             // the local copy is up to date.
             //todo: develop reply mechanism according to the old epoch, old head and old tail and also try to make the delta
             // write an async operation to minumize the latency.
-            // uint8_t* polling_byte = (uint8_t*)((uint8_t*)local_mr->addr + rdma_mg->delta_section_size - 1);
-            // *polling_byte = 1;
-            //  rdma_mg->RDMA_Write_xcompute(local_mr, receive_msg_buf->buffer, receive_msg_buf->rkey,
-            //                               rdma_mg->delta_section_size,
-            //                               requester_node_id, qp_id, false);
-            int qp_id = rdma_mg->qp_inc_ticket++ % NUM_QP_ACCROSS_COMPUTE;
-            uint8_t* polling_byte = (uint8_t*)((uint8_t*)local_mr->addr + rdma_mg->delta_section_size - 1);
-            *polling_byte = 5;
-            rdma_mg->RDMA_Write_xcompute(local_mr, receive_msg_buf->buffer, receive_msg_buf->rkey,
-                                        rdma_mg->delta_section_size,
-                                        requester_node_id, qp_id, false);
+             int qp_id = rdma_mg->qp_inc_ticket++ % NUM_QP_ACCROSS_COMPUTE;
+             uint8_t* polling_byte = (uint8_t*)((uint8_t*)local_mr.addr + rdma_mg->delta_section_size - 1);
+             assert(ds_w->inner_section->tail_ != ds_w->inner_section->head_ || ds_w->inner_section->is_empty_);
+             *polling_byte = 5;
+            std::vector<std::pair<uint64_t, uint64_t>> boundaries;
+             ds_w->CalculateWriteBoundaries(boundaries, old_head_, old_tail_, old_epoch);
+             bool async = false;
+             for(auto pair : boundaries){
+                 assert(boundaries.size() <= 3);
+                 qp_id = rdma_mg->qp_inc_ticket++ % NUM_QP_ACCROSS_COMPUTE;
+
+                local_mr = *ds_w->seg_local_mr_;
+                remote_addr = (char*)receive_msg_buf->buffer;
+                uint64_t start = pair.first;
+                uint64_t end = pair.second;
+                size_t write_size = end - start;
+                 if (write_size < BIGPAGESIZE){
+                     async = true;
+                 }
+                local_mr.addr = (void*)((char*)local_mr.addr + start);
+                 remote_addr += start;
+                rdma_mg->RDMA_Write_xcompute(&local_mr, remote_addr + start, receive_msg_buf->rkey,
+                                            write_size,
+                                            requester_node_id, qp_id, async);
+             }
+         }
+         delete receive_msg_buf;
+             // todo: implement the async write according to the returned boundaries.
+//             {// write the header.
+//                 size_t write_size = STRUCT_OFFSET(DeltaSection, local_seg_addr_);
+//                 rdma_mg->RDMA_Write_xcompute(&local_mr, remote_addr, receive_msg_buf->rkey,
+//                                              write_size,
+//                                              requester_node_id, qp_id, true);
+//
+//                 // write the active delta section.
+//                 qp_id = rdma_mg->qp_inc_ticket++ % NUM_QP_ACCROSS_COMPUTE;
+//                 bool async = ds_w->inner_section->tail_ - ds_w->inner_section->head_ >= BIGPAGESIZE;
+//                 remote_addr += STRUCT_OFFSET(DeltaSection, local_seg_addr_) + ds_w->inner_section->head_;
+//                 local_mr.addr = (char*)local_mr.addr + STRUCT_OFFSET(DeltaSection, local_seg_addr_) + ds_w->inner_section->head_;
+//                 rdma_mg->RDMA_Write_xcompute(&local_mr, remote_addr, receive_msg_buf->rkey,
+//                                              ds_w->inner_section->tail_ - ds_w->inner_section->head_,
+//                                              requester_node_id, qp_id, async);
+//                 // write the polling byte.
+//                 remote_addr = (char*)receive_msg_buf->buffer + rdma_mg->delta_section_size - 1;
+//                 local_mr.addr = (char*)ds_w->seg_local_mr_->addr + rdma_mg->delta_section_size - 1;
+//                 rdma_mg->RDMA_Write_xcompute(&local_mr, remote_addr, receive_msg_buf->rkey,
+//                                              1, requester_node_id, qp_id, true);
+//             }
+//            *polling_byte = 5;
+//            rdma_mg->RDMA_Write_xcompute(local_mr, receive_msg_buf->buffer, receive_msg_buf->rkey,
+//                                        rdma_mg->delta_section_size,
+//                                        requester_node_id, qp_id, false);
             // ibv_mr* thread_local_mr = rdma_mg->Get_local_send_message_mr();
             // uint8_t* local_uint8 = (uint8_t*)thread_local_mr->addr;
             // *local_uint8 = 5;
             // rdma_mg->RDMA_Write_xcompute(thread_local_mr, receive_msg_buf->buffer + rdma_mg->delta_section_size - 1, receive_msg_buf->rkey,
             //     1, requester_node_id, qp_id, true);
-
-        }
-        delete receive_msg_buf;
     }
 
     void TransactionManager::ProcessSnapshotPush(void* args){

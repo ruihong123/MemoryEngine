@@ -111,6 +111,7 @@ extern bool Show_Me_The_Print;
 #define TIMEPRINTGAP 100000
 //#define GETANALYSIS
 //#define TIMEPRINT
+#define BIGPAGESIZE (512*1024)
 #define ROCKSDB_PTHREAD_ADAPTIVE_MUTEX
 #define RECEIVE_OUTSTANDING_SIZE 128 // used to be 1024
 #define SEND_OUTSTANDING_SIZE_XCOMPUTE 32 //todo: enlarge this
