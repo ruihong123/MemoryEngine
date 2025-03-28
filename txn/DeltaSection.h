@@ -252,9 +252,9 @@ namespace DSMEngine {
                     end = STRUCT_OFFSET(DeltaSection, local_seg_addr_) + inner_section->tail_;
                     boundaries.push_back(std::make_pair(start, end));
 
-                    start = STRUCT_OFFSET(DeltaSection, local_seg_addr_) + seg_real_size_ + 1;
+                    start = STRUCT_OFFSET(DeltaSection, local_seg_addr_) + seg_real_size_;
                     end = start + 1;
-                    assert(end == rdma_mg_->delta_section_size + 1);
+                    assert(end == rdma_mg_->delta_section_size);
                     boundaries.push_back(std::make_pair(start, end));
 
                     // prune the result.
@@ -322,7 +322,7 @@ namespace DSMEngine {
                     }else{
                         start = STRUCT_OFFSET(DeltaSection, local_seg_addr_) + inner_section->head_;
                     }
-                    end = rdma_mg_->delta_section_size + 1;
+                    end = rdma_mg_->delta_section_size;
                     boundaries.push_back(std::make_pair(start, end));
                     // pruning the result.
                     if (boundaries[1].first - boundaries[0].second <= merge_thre){
@@ -346,10 +346,10 @@ namespace DSMEngine {
                     end = STRUCT_OFFSET(DeltaSection, local_seg_addr_) + inner_section->tail_;
                     boundaries.push_back(std::make_pair(start, end));
 
-                    start = STRUCT_OFFSET(DeltaSection, local_seg_addr_) + seg_real_size_ + 1;
+                    start = STRUCT_OFFSET(DeltaSection, local_seg_addr_) + seg_real_size_;
                     end = start + 1;
                     boundaries.push_back(std::make_pair(start, end));
-                    assert(end == rdma_mg_->delta_section_size + 1);
+                    assert(end == rdma_mg_->delta_section_size);
 
                     // prune the result.
                     if (boundaries[2].first - boundaries[1].second <= merge_thre){
@@ -377,9 +377,9 @@ namespace DSMEngine {
 
                     // The third part only contain the polling byte, because the old head has to smaller than the current head.
                     // There is no need to transfer the data for the second half of the delta section.
-                    start = STRUCT_OFFSET(DeltaSection, local_seg_addr_) + seg_real_size_ + 1;
+                    start = STRUCT_OFFSET(DeltaSection, local_seg_addr_) + seg_real_size_;
                     end = start + 1;
-                    assert(end == rdma_mg_->delta_section_size + 1);
+                    assert(end == rdma_mg_->delta_section_size);
                     boundaries.push_back(std::make_pair(start, end));
 
                     // pruning the result.

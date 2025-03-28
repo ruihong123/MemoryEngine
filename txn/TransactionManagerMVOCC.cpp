@@ -559,6 +559,8 @@ namespace DSMEngine{
                 size_t write_size = end - start;
                  if (write_size < BIGPAGESIZE){
                      async = true;
+                 }else{
+                     async = false;
                  }
                 local_mr.addr = (void*)((char*)local_mr.addr + start);
                  remote_addr += start;
