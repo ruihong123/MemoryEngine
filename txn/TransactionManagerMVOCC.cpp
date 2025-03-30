@@ -210,7 +210,7 @@ namespace DSMEngine{
 
             if (delta_section->inner_section->is_empty_ || !delta_section->isOffsetValid(prev_delta, meta.prev_delta_epoch_)){
                 // fetch the latest version of the delta section.
-                // use double checked locking to avoid conflict.
+                // use double-checked locking to avoid conflict.
                 std::unique_lock<std::shared_mutex> lck(delta_section->ds_mtx_);
                 if (delta_section->inner_section->is_empty_ || !delta_section->isOffsetValid(prev_delta, meta.prev_delta_epoch_)){
                     assert(delta_section->owner_compute_node_id_ != RDMA_Manager::node_id);

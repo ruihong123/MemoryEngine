@@ -208,7 +208,7 @@ namespace DSMEngine {
             uint8_t * receive_pointer = (uint8_t*)((uint8_t*)recv_mr->addr + rdma_mg->delta_section_size - 1);
             //Clear the reply buffer for the polling.
             *receive_pointer = 0;
-            memset((void*)recv_mr->addr, 0, rdma_mg->delta_section_size);
+//            memset((void*)recv_mr->addr, 0, rdma_mg->delta_section_size);
 //        *receive_pointer = {};
 
             int qp_id = rdma_mg->qp_inc_ticket++ % NUM_QP_ACCROSS_COMPUTE;
@@ -328,7 +328,7 @@ namespace DSMEngine {
                     if (boundaries[1].first - boundaries[0].second <= merge_thre){
                         boundaries[0].second = boundaries[1].second;
                         boundaries.pop_back();
-                        assert(boundaries[0].second == STRUCT_OFFSET(DeltaSection, local_seg_addr_) + seg_real_size_);
+                        assert(boundaries[0].second == STRUCT_OFFSET(DeltaSection, local_seg_addr_) + seg_real_size_ + 1);
                     }
                     return;
                 }
