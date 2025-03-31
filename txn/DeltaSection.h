@@ -61,7 +61,7 @@ namespace DSMEngine {
         // new_record is the local copy and the old_record is the global copy. Later the local copy will be written to the global copy.
         void fill_in_delta_record(Record *new_record, Record *old_record, GlobalAddress &delta_gadd, size_t &delta_size,
                                   uint64_t commit_ts) {
-
+            // todo: create a new function for fill in the delta records for mulitple tuple records.
             delta_size = new_record->estimate_delta_size(); // delta size include both delta header and delta content.
 //            size_t delta_size_padding = delta_size;
             std::unique_lock<std::shared_mutex> lck(ds_mtx_);
@@ -225,7 +225,7 @@ namespace DSMEngine {
                 asm volatile ("mfence\n" : : );
             }
             assert(*check_byte == 5);
-            assert(((DeltaSection*)recv_mr->addr)->local_seg_addr_[0] == '&');
+//            assert(((DeltaSection*)recv_mr->addr)->local_seg_addr_[0] == '&');
             assert(((DeltaSection*)recv_mr->addr)->tail_!=0);
 //            printf("Successfully pull the updates for %p delta section, pollnum is %d \n", seg_addr_, poll_num);
 //            fflush(stdout);

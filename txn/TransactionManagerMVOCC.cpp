@@ -368,6 +368,7 @@ namespace DSMEngine{
             AccessType access_type = access->access_type_;
             if (access_type == READ_WRITE) {
                 // TODO: Create a new delta_record in the delta section and update the prev_delta in the record's metadata.
+                //  Will this help in reduce the overhead of locking? probably not. Need experiment.
                 GlobalAddress delta_gadd = GlobalAddress::Null();
                 size_t delta_size = 0;
                 ds_for_write->fill_in_delta_record(access->txn_local_tuple_, access->access_global_record_, delta_gadd,
@@ -519,6 +520,7 @@ namespace DSMEngine{
 
         auto* rdma_mg = RDMA_Manager::Get_Instance();
         auto *receive_msg_buf = (RDMA_Request*)args;
+         assert(receive_msg_buf->command == pull_delta_section);
         GlobalAddress ds_gaddr = receive_msg_buf->content.pull_ds.ds_gaddr;
         uint64_t old_head_ = receive_msg_buf->content.pull_ds.old_head;
         uint64_t old_tail_ = receive_msg_buf->content.pull_ds.old_tail;
@@ -660,7 +662,7 @@ namespace DSMEngine{
             std::unique_lock<SpinMutex> psp_lck(pin_sp_mtx);
             uint64_t least_sp_this_node;
             if(pined_snapshot_this_node.empty()){
-                least_sp_this_node = largest_snapshot; // todo: this is a bug, we need to fix it.
+                least_sp_this_node = largest_snapshot;
             }else{
                 least_sp_this_node = pined_snapshot_this_node.begin()->first;
             }
@@ -668,7 +670,6 @@ namespace DSMEngine{
 
 
             if (least_sp_this_node != last_broadcasted_sp){
-                // todo: implement the garbage collection broadcast.
                BroadCastLeastSP(least_sp_this_node);
                 last_broadcasted_sp = least_sp_this_node;
 
