@@ -1137,6 +1137,8 @@ bool RDMA_Manager::Get_Remote_qp_Info_Then_Connect(uint16_t target_node_id) {
         assert(global_index_table->addr != nullptr);
         timestamp_oracle = new ibv_mr();
         *timestamp_oracle = ((ibv_mr*) temp_receive)[3];
+        printf("timestamp oracle sent to node%u is %p\n", node_id, timestamp_oracle->addr);
+        fflush(stdout);
         assert(timestamp_oracle->addr != nullptr);
     }
 
