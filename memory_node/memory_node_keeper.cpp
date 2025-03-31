@@ -151,6 +151,8 @@ DSMEngine::Memory_Node_Keeper::Memory_Node_Keeper(bool use_sub_compaction, uint3
           memcpy(temp_send+ 2*sizeof(ibv_mr), rdma_mg->global_index_table, sizeof(ibv_mr));
           rdma_mg->timestamp_oracle = rdma_mg->create_timestamp_oracle();
           memcpy(temp_send+ 3*sizeof(ibv_mr), rdma_mg->timestamp_oracle, sizeof(ibv_mr));
+          printf("timestamp oracle sent to node%u is %p\n", compute_node_id, rdma_mg->timestamp_oracle);
+          fflush(stdout);
 
       }
 
