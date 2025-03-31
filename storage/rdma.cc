@@ -1516,6 +1516,7 @@ ibv_mr *RDMA_Manager::create_lock_table() {
 
 }
     ibv_mr *RDMA_Manager::create_timestamp_oracle() {
+        std::unique_lock<std::mutex> lck(global_resources_mtx);
         if (timestamp_oracle == nullptr){
             int mr_flags = 0;
             size_t size = 8;
