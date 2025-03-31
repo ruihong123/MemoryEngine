@@ -56,7 +56,7 @@ namespace DSMEngine{
          * (see HugePages_Free in /proc/meminfo), or mmap will fail. (https://stackoverflow.com/questions/30470972/using-mmap-and-madvise-for-huge-pages)
          */
         if (is_mmap_work){
-            int ret = munmap(ptr, size);
+//            int ret = munmap(ptr, size);
         }else{
 
             printf("mmap is not enabled from the beginning\n");

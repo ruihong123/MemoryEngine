@@ -672,6 +672,8 @@ class RDMA_Manager {
                  uint16_t target_node_id);
   int RDMA_Write_xcompute(ibv_mr *local_mr, void *addr, uint32_t rkey, size_t msg_size, uint16_t target_node_id,
                           int num_of_qp, bool async);
+    int RDMA_Write_xcompute_imm(ibv_mr *local_mr, void *addr, uint32_t rkey, size_t msg_size, uint16_t target_node_id,
+                            int num_of_qp, bool async);
   int post_send_xcompute(ibv_mr *mr, uint16_t target_node_id, int num_of_qp, size_t msg_size);
 
   int RDMA_Write_Imme(void* addr, uint32_t rkey, ibv_mr* local_mr,
