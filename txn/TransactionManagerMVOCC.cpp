@@ -164,11 +164,11 @@ namespace DSMEngine{
         record = new Record(schema_ptr);
         record->CopyFrom(access->access_global_record_);
 
-        uint64_t ts = record->GetWTS();
+        volatile uint64_t ts = record->GetWTS();
         assert(buffer_is_not_all_zero(record->data_ptr_, schema_ptr->GetSchemaSize()));
         // todo: for serializable isolation level, a larger tuple timestamps means that we need to abort this txn.
 //#ifndef NDEBUG
-    size_t lc = 0;
+        volatile size_t lc = 0;
 //#endif
         while (ts > snapshot_ts){
 //#ifndef NDEBUG
