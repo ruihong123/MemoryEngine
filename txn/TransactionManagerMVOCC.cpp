@@ -387,6 +387,7 @@ namespace DSMEngine{
 
             }else if(access_type == INSERT_ONLY){
                 access->txn_local_tuple_->PutWTS(commit_ts);
+                assert(commit_ts < 0x100d2c00cbe9);
                 access->access_global_record_->CopyFrom(access->txn_local_tuple_);
 
             }
