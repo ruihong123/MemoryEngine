@@ -9,9 +9,8 @@
 namespace DSMEngine {
     class DeltaRecord {
     public:
-#ifndef NDEBUG
+
         char marker_ = '&';
-#endif
         uint64_t Wts_;
         uint64_t next_delta_wts_;
         GlobalAddress prev_delta_gaddr;
