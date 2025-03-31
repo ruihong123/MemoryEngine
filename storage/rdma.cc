@@ -6353,7 +6353,7 @@ RDMA_Manager::Writer_Invalidate_Modified_RPC(GlobalAddress global_ptr, ibv_mr *p
     send_pointer->content.inv_message.pending_reminder = false;
     bool was_pending = false;
 inv_resend:
-    if(retry_cnt < 20){
+    if(++retry_cnt < 20){
 //                port::AsmVolatilePause();
         //do nothing
     }else if (retry_cnt <40){
@@ -6471,8 +6471,8 @@ inv_resend:
         send_pointer->command = reader_invalidate_modified;
         send_pointer->content.inv_message.pending_reminder = false;
         int qp_id = qp_inc_ticket++ % NUM_QP_ACCROSS_COMPUTE;
-        inv_resend:
-        if(retry_cnt < 20){
+    inv_resend:
+        if(++retry_cnt < 20){
 //                port::AsmVolatilePause();
             //do nothing
         }else if (retry_cnt <40){

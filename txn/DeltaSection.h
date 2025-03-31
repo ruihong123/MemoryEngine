@@ -65,15 +65,11 @@ namespace DSMEngine {
             delta_size = new_record->estimate_delta_size(); // delta size include both delta header and delta content.
 //            size_t delta_size_padding = delta_size;
             std::unique_lock<std::shared_mutex> lck(ds_mtx_);
-            // The code below could be buggy, take care!
-            
-            
             uint64_t  old_head = inner_section->head_;
             // we append new delta record to the tail.
             while (!inner_section->is_empty_ && (old_head + seg_real_size_ - inner_section->tail_) % seg_real_size_ <= delta_size) {
                 // wait until there is enough space for the new delta record.
                 // if full then we clear the whole delta section. (will be changed later)
-                // todo: use condition variable to wait.
                 old_head = inner_section->head_;
                 //todo: wait for the signal of garbage collection.
                 cv.wait(lck, [this, old_head, delta_size]{return ((old_head + seg_real_size_ - inner_section->tail_) % seg_real_size_ > delta_size);});
