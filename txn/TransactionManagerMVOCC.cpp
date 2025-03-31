@@ -167,13 +167,13 @@ namespace DSMEngine{
         uint64_t ts = record->GetWTS();
         assert(buffer_is_not_all_zero(record->data_ptr_, schema_ptr->GetSchemaSize()));
         // todo: for serializable isolation level, a larger tuple timestamps means that we need to abort this txn.
-#ifndef NDEBUG
+//#ifndef NDEBUG
     size_t lc = 0;
-#endif
+//#endif
         while (ts > snapshot_ts){
-#ifndef NDEBUG
+//#ifndef NDEBUG
             lc++;
-#endif
+//#endif
             // TODO: ROll back old version of the data.
             MetaColumn meta = record->GetMeta();
             GlobalAddress prev_delta = meta.prev_delta_;
