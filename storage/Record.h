@@ -17,11 +17,13 @@ public:
     data_size_ = schema_ptr_->GetSchemaSize();
     data_ptr_ = data;
     need_delete_ = false;
+    primary_key = 0;
   }
   Record(RecordSchema *schema_ptr) : schema_ptr_(schema_ptr) {
         data_size_ = schema_ptr_->GetSchemaSize();
         data_ptr_ = new char[data_size_];
         need_delete_ = true;
+        primary_key = 0;
     }
   ~Record() {
       if (need_delete_){

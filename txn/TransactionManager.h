@@ -131,6 +131,7 @@ class TransactionManager {
                     AccessType access_type) {
       PROFILE_TIME_START(thread_id_, INDEX_READ);
       uint16_t target_node_id;
+#if ACCESS_MODE == 2
       if (sharding_ && !IsRecordLocal(primary_key, target_node_id)){
           RecordSchema *schema_ptr = storage_manager_->tables_[table_id]->GetSchema();
 
@@ -155,6 +156,7 @@ class TransactionManager {
           }
 
       }
+#endif
     GlobalAddress data_addr = storage_manager_->tables_[table_id]->SearchPriIndex(
             primary_key);
 //      assert(TOPAGE(data_addr).offset != data_addr.offset);
