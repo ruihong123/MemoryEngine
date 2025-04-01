@@ -131,11 +131,6 @@ namespace DSMEngine {
                 
                 if (delta_record->next_delta_wts_ < snapshot){
                     inner_section->head_ += delta_record->current_record_data_size_;
-                    if(inner_section->head_ >= seg_real_size_){
-                        // this could not happen.
-                        assert(false);
-                        inner_section->head_ = inner_section->head_ % seg_real_size_;
-                    }
                     if (inner_section->head_ == inner_section->tail_){
                         inner_section->is_empty_ = true;
                     }
