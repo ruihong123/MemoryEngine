@@ -130,6 +130,8 @@ namespace DSMEngine {
                 if (delta_record->next_delta_wts_ < snapshot){
                     inner_section->head_ += delta_record->current_record_data_size_;
                     if(inner_section->head_ >= seg_real_size_){
+                        // this could not happen.
+                        assert(false);
                         inner_section->head_ = inner_section->head_ % seg_real_size_;
                     }
                     if (inner_section->head_ == inner_section->tail_){
@@ -227,7 +229,7 @@ namespace DSMEngine {
                 asm volatile ("mfence\n" : : );
             }
             assert(*check_byte == 5);
-            assert(((DeltaSection*)recv_mr->addr)->local_seg_addr_[inner_section->head_] == '&');
+            assert(((DeltaSection*)recv_mr->addr)->local_seg_addr_[inner_section->head_] == '&' || ((DeltaSection*)recv_mr->addr)->local_seg_addr_[inner_section->head_] == '^');
             assert(((DeltaSection*)recv_mr->addr)->tail_!=0);
 //            printf("Successfully pull the updates for %p delta section, pollnum is %d \n", seg_addr_, poll_num);
 //            fflush(stdout);
