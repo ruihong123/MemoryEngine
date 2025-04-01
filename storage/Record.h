@@ -326,6 +326,7 @@ public:
   size_t data_size_;
     bool is_visible_;
     void * handle_ = nullptr;
+    IndexKey primary_key;
     std::set<uint64_t> dirty_col_ids;
 };
 

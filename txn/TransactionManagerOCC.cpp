@@ -99,6 +99,7 @@ namespace DSMEngine{
 
 			record->is_visible_ = false;
             PROFILE_TIME_START(thread_id_, INDEX_INSERT);
+            record->primary_key = keys[0];
             // for OCC, we need to insert to primary index during the commit, otherwise there would be zombie primary pointer,
             // pointing to a roll backed record.
 //            bool ret = storage_manager_->tables_[table_id]->InsertPriIndex(keys, key_num, tuple_gaddr);
@@ -267,9 +268,9 @@ namespace DSMEngine{
             }
             //insert the primary index.
             if (access_type == INSERT_ONLY){
-                IndexKey keys[1];
-                access->txn_local_tuple_->GetPrimaryKey(&keys[0]);
-                storage_manager_->tables_[access->txn_local_tuple_->schema_ptr_->GetTableId()]->InsertPriIndex(keys, 1, access->access_addr_);
+//                IndexKey keys[1];
+//                access->txn_local_tuple_->GetPrimaryKey(&keys[0]);
+                storage_manager_->tables_[access->txn_local_tuple_->schema_ptr_->GetTableId()]->InsertPriIndex(&access->txn_local_tuple_->primary_key, 1, access->access_addr_);
             }
             delete access->access_global_record_;
             access->access_global_record_ = nullptr;
