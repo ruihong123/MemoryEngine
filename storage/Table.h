@@ -62,7 +62,7 @@ public:
   // TODO: return false if the key exists in primary index already
   bool InsertPriIndex(const IndexKey* keys, size_t key_num, GlobalAddress tuple_gaddr) {
       assert(TOPAGE(tuple_gaddr).offset != tuple_gaddr.offset);
-    assert(key_num == secondary_count_ + 1);
+    assert(key_num ==  1);
     char key_value_pair[16] = {0};
     Slice inserted_slice(key_value_pair, 16);
     memcpy(key_value_pair, &keys[0], sizeof(IndexKey));
@@ -72,6 +72,19 @@ public:
       primary_index_->insert(keys[0], inserted_slice);
       return true;
   }
+
+//    bool InsertPriIndex(std::string key, GlobalAddress tuple_gaddr) {
+//        assert(TOPAGE(tuple_gaddr).offset != tuple_gaddr.offset);
+//        char key_value_pair[16] = {0};
+//        Slice inserted_slice(key_value_pair, 16);
+//        assert(key.size() == sizeof(IndexKey));
+//        memcpy(key_value_pair, key.c_str(), key.size());
+//        memcpy(key_value_pair + key.size(), &tuple_gaddr, sizeof(GlobalAddress));
+////      printf("Table INsert INdex has been executed\n");
+////      fflush(stdout);
+//        primary_index_->insert(key, inserted_slice);
+//        return true;
+//    }
 
   GlobalAddress SearchPriIndex(const IndexKey& key) {
       GlobalAddress tuple_gaddr = GlobalAddress::Null();
