@@ -204,12 +204,12 @@ RDMA_Manager::~RDMA_Manager() {
       if (ibv_destroy_cq(it->second.first)) {
         fprintf(stderr, "failed to destroy CQ\n");
       }else{
-        delete it->second.first;
+//        delete it->second.first;
       }
       if (it->second.second!= nullptr && ibv_destroy_cq(it->second.second)){
         fprintf(stderr, "failed to destroy CQ\n");
       }else{
-        delete it->second.second;
+//        delete it->second.second;
       }
     }
   if (!res->qp_map.empty())
