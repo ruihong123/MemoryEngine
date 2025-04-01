@@ -279,6 +279,8 @@ class NewOrderProcedure : public StoredProcedure {
     district_record->GetColumn(8, &d_tax);
     int o_id = d_next_o_id + 1;
     district_record->SetColumn(10, &o_id);
+      printf("District table is changed over o_id %d with snapshotnumber %llu\n", o_id, transaction_manager_->snapshot_ts);
+      fflush(stdout);
 #if defined(TO)
       held_handle_ = ((Cache::Handle*)district_record->Get_Handle());
       assert(held_handle_->gptr!=GlobalAddress::Null());
@@ -462,6 +464,8 @@ class PaymentProcedure : public StoredProcedure {
     Record *district_record = nullptr;
     DB_QUERY(
         SearchRecord(&context_, DISTRICT_TABLE_ID, district_key, district_record, (AccessType)payment_param->district_access_type_));
+      printf("District table is changed over d_ytd with snapshotnumber %llu\n", transaction_manager_->snapshot_ts);
+      fflush(stdout);
     double d_ytd = 0;
     district_record->GetColumn(9, &d_ytd);
     ret.Memcpy(ret.size_, (char*) (&d_ytd), sizeof(d_ytd));

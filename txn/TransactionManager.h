@@ -286,6 +286,7 @@ protected:
 #endif
 
 #if defined(MVOCC)
+public: // todo: make it private after debugging.
   uint64_t snapshot_ts = 0;
   bool is_first_access_ = true;
   bool pure_read_txn = true;
