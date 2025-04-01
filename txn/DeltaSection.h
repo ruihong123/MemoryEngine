@@ -82,8 +82,10 @@ namespace DSMEngine {
 
             if (seg_real_size_ - inner_section->tail_ < delta_size)
             {
-                //mark that the parser need to move to 0 postion of this ring buffer
-                *((char*)(inner_section->local_seg_addr_ + inner_section->tail_)) = '^';
+                if (inner_section->tail_ < seg_real_size_){
+                    //mark that the parser need to move to 0 postion of this ring buffer
+                    *((char*)(inner_section->local_seg_addr_ + inner_section->tail_)) = '^';
+                }
                 inner_section->tail_ = 0;
                 inner_section->epoch++;
             }
@@ -120,7 +122,7 @@ namespace DSMEngine {
                     break;
                 }
                 DeltaRecord* delta_record = (DeltaRecord*)(inner_section->local_seg_addr_ + inner_section->head_);
-                if (delta_record->marker_ == '^'){
+                if (delta_record->marker_ == '^'|| inner_section->head_ == seg_real_size_){
                     // move the head to 0 position. Reset the head and delta_record.
                     inner_section->head_ = 0;
                     delta_record = (DeltaRecord*)(inner_section->local_seg_addr_ + inner_section->head_);
