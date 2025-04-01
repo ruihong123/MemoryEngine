@@ -59,6 +59,7 @@ namespace DSMEngine {
             delete seg_local_mr_;
         }
         // new_record is the local copy and the old_record is the global copy. Later the local copy will be written to the global copy.
+        // and the global copy's modified columns should be written to the delta section.
         void fill_in_delta_record(Record *new_record, Record *old_record, GlobalAddress &delta_gadd, size_t &delta_size,
                                   uint64_t commit_ts) {
             // todo: create a new function for fill in the delta records for mulitple tuple records.
@@ -94,7 +95,8 @@ namespace DSMEngine {
             DeltaRecord * delta_record = new(inner_section->local_seg_addr_ + inner_section->tail_) DeltaRecord(
                     meta_col.Wts_, delta_size, meta_col.prev_delta_, commit_ts,
                     meta_col.prev_delta_epoch_, meta_col.prev_delta_data_size_ );
-            new_record->serialize_to_delta(delta_record);
+            old_record->dirty_col_ids = std::move(new_record->dirty_col_ids);
+            old_record->serialize_to_delta(delta_record);
 #ifndef NDEBUG
                Record* record = new Record(new_record->schema_ptr_);
                 record->roll_back(delta_record);
