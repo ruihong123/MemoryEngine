@@ -312,8 +312,7 @@ DSMEngine::Memory_Node_Keeper::Memory_Node_Keeper(bool use_sub_compaction, uint3
         buffer_position++;
       }
     }
-    assert(false);
-    // TODO: Build up a exit method for shared memory side, don't forget to destroy all the RDMA resourses.
+//    assert(false);
   }
   void Memory_Node_Keeper::Server_to_Client_Communication() {
   if (rdma_mg->resources_create()) {
