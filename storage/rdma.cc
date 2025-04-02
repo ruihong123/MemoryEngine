@@ -164,12 +164,12 @@ static uint64_t  round_to_cacheline(uint64_t size) {
 ******************************************************************************/
 RDMA_Manager::~RDMA_Manager() {
     exit_flag = true;
-  if (!res->qp_map.empty())
-    for (auto it = res->qp_map.begin(); it != res->qp_map.end(); it++) {
-      if (ibv_destroy_qp(it->second)) {
-        fprintf(stderr, "failed to destroy QP\n");
-      }
-    }
+//  if (!res->qp_map.empty())
+//    for (auto it = res->qp_map.begin(); it != res->qp_map.end(); it++) {
+//      if (ibv_destroy_qp(it->second)) {
+//        fprintf(stderr, "failed to destroy QP\n");
+//      }
+//    }
   printf("RDMA Manager get destroyed\n");
   if (!local_mem_regions.empty()) {
     for (ibv_mr* p : local_mem_regions) {
