@@ -886,6 +886,7 @@ class RDMA_Manager {
   //TODO: remove the page cache from RDMA manager. make the communicaiton thread exectute a function variable
   // which contains a pointer to the page_cache
   DSMEngine::Cache* page_cache_;
+  bool exit_flag = false;
   std::unordered_map<uint16_t, ibv_mr*> comm_thread_recv_mrs;
   std::unordered_map<uint16_t , int> comm_thread_buffer;
 //  std::map<uint16_t, uint64_t*> deallocation_buffers;

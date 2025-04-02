@@ -163,6 +163,7 @@ static uint64_t  round_to_cacheline(uint64_t size) {
 * Cleanup and deallocate all resources used for RDMA
 ******************************************************************************/
 RDMA_Manager::~RDMA_Manager() {
+        exit_flag = true;
   if (!res->qp_map.empty())
     for (auto it = res->qp_map.begin(); it != res->qp_map.end(); it++) {
       if (ibv_destroy_qp(it->second)) {
