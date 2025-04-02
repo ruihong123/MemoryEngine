@@ -20,7 +20,7 @@
 // DO not enable the two at the same time otherwise there will be a bug.
 
 
-uint64_t cache_miss[MAX_APP_THREAD][8];
+uint64_t cache_miss[MAX_APP_THREAD][8]; // cache miss include invalidation.
 uint64_t cache_hit_valid[MAX_APP_THREAD][8];
 uint64_t invalid_counter[MAX_APP_THREAD][8];
 
