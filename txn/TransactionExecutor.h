@@ -214,12 +214,14 @@ class TransactionExecutor {
     is_ready_[thread_id] = true;
     while (is_begin_ == false)
       ;
+#if defined(MVOCC)
     static SpinMutex spin_mutex;
     spin_mutex.lock();
     if (TransactionManager::gc_thread == nullptr){
         TransactionManager::gc_thread = new std::thread(&TransactionManager::GarbageCollection);
     }
     spin_mutex.unlock();
+#endif
     int count = 0;
     int abort_count = 0;
     uint32_t backoff_shifts = 0;

@@ -248,6 +248,7 @@ public:
             SetColumn(meta_col_id, &meta);
         }
 #endif
+
         void SetVisible(bool val) {
             size_t meta_col_id = schema_ptr_->GetMetaColumnId();
             MetaColumn meta_col;
@@ -255,6 +256,7 @@ public:
             meta_col.is_visible_ = val;
             this->SetColumn(meta_col_id, &meta_col);
         }
+#if defined(MVOCC)
         void roll_back(DeltaRecord *delta_record){
             assert(delta_record->current_record_data_size_ != 0);
             // roll back the record to the previous version.
@@ -314,7 +316,7 @@ public:
             size_t delta_size = field_size + STRUCT_OFFSET(DeltaRecord, data_);
             return delta_size;
         }
-
+#endif
 
 private:
     Record(const Record&);

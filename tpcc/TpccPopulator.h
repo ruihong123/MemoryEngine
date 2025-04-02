@@ -395,7 +395,10 @@ class TpccPopulator : public BenchmarkPopulator {
       meta.prev_delta_epoch_ = 0;
       meta.prev_delta_data_size_ = 0;
 #endif
+
+#if defined(TO) || defined(OCC) || defined(MVOCC)
       record_in_cache.PutMeta(meta);
+#endif
     IndexKey key = GetItemPrimaryKey(record_ptr->i_id_, record_ptr->w_id_);
 
       storage_manager_->tables_[ITEM_TABLE_ID]->InsertPriIndex(
@@ -440,8 +443,10 @@ class TpccPopulator : public BenchmarkPopulator {
       meta.prev_delta_epoch_ = 0;
       meta.prev_delta_data_size_ = 0;
 #endif
+#if defined(TO) || defined(OCC) || defined(MVOCC)
       record_in_cache.PutMeta(meta);
-    IndexKey k = GetWarehousePrimaryKey(record_ptr->w_id_);
+#endif
+      IndexKey k = GetWarehousePrimaryKey(record_ptr->w_id_);
       storage_manager_->tables_[WAREHOUSE_TABLE_ID]->InsertPriIndex(
               &k, 1, tuple_gaddr);
 #ifndef NDEBUG
@@ -486,7 +491,9 @@ class TpccPopulator : public BenchmarkPopulator {
       meta.prev_delta_epoch_ = 0;
       meta.prev_delta_data_size_ = 0;
 #endif
+#if defined(TO) || defined(OCC) || defined(MVOCC)
       record_in_cache.PutMeta(meta);
+#endif
       assert(record_ptr->d_next_o_id_ > 0);
     IndexKey k = GetDistrictPrimaryKey(record_ptr->d_id_, record_ptr->d_w_id_);
       storage_manager_->tables_[DISTRICT_TABLE_ID]->InsertPriIndex(
@@ -544,7 +551,9 @@ class TpccPopulator : public BenchmarkPopulator {
       meta.prev_delta_epoch_ = 0;
       meta.prev_delta_data_size_ = 0;
 #endif
+#if defined(TO) || defined(OCC) || defined(MVOCC)
       record_in_cache.PutMeta(meta);
+#endif
     IndexKey key = GetCustomerPrimaryKey(record_ptr->c_id_, record_ptr->c_d_id_,
                                          record_ptr->c_w_id_);
       storage_manager_->tables_[CUSTOMER_TABLE_ID]->InsertPriIndex(
@@ -590,7 +599,9 @@ class TpccPopulator : public BenchmarkPopulator {
       meta.prev_delta_epoch_ = 0;
       meta.prev_delta_data_size_ = 0;
 #endif
+#if defined(TO) || defined(OCC) || defined(MVOCC)
       record_in_cache.PutMeta(meta);
+#endif
     IndexKey key = GetStockPrimaryKey(record_ptr->s_i_id_, record_ptr->s_w_id_);
       storage_manager_->tables_[STOCK_TABLE_ID]->InsertPriIndex(
               &key, 1, tuple_gaddr);
@@ -633,7 +644,9 @@ class TpccPopulator : public BenchmarkPopulator {
       meta.prev_delta_epoch_ = 0;
       meta.prev_delta_data_size_ = 0;
 #endif
+#if defined(TO) || defined(OCC) || defined(MVOCC)
       record_in_cache.PutMeta(meta);
+#endif
     IndexKey key = GetOrderPrimaryKey(record_ptr->o_id_, record_ptr->o_d_id_,
                                       record_ptr->o_w_id_);
       storage_manager_->tables_[ORDER_TABLE_ID]->InsertPriIndex(
@@ -667,7 +680,9 @@ class TpccPopulator : public BenchmarkPopulator {
       meta.prev_delta_epoch_ = 0;
       meta.prev_delta_data_size_ = 0;
 #endif
+#if defined(TO) || defined(OCC) || defined(MVOCC)
       record_in_cache.PutMeta(meta);
+#endif
     IndexKey key = GetNewOrderPrimaryKey(record_ptr->o_id_, record_ptr->d_id_,
                                          record_ptr->w_id_);
       storage_manager_->tables_[NEW_ORDER_TABLE_ID]->InsertPriIndex(
@@ -707,7 +722,9 @@ class TpccPopulator : public BenchmarkPopulator {
       meta.prev_delta_epoch_ = 0;
       meta.prev_delta_data_size_ = 0;
 #endif
+#if defined(TO) || defined(OCC) || defined(MVOCC)
       record_in_cache.PutMeta(meta);
+#endif
     IndexKey key = GetOrderLinePrimaryKey(record_ptr->ol_o_id_,
                                           record_ptr->ol_d_id_,
                                           record_ptr->ol_w_id_,
@@ -748,7 +765,9 @@ class TpccPopulator : public BenchmarkPopulator {
       meta.prev_delta_epoch_ = 0;
       meta.prev_delta_data_size_ = 0;
 #endif
+#if defined(TO) || defined(OCC) || defined(MVOCC)
       record_in_cache.PutMeta(meta);
+#endif
     IndexKey key = GetHistoryPrimaryKey(record_ptr->h_c_id_,
                                         record_ptr->h_d_id_,
                                         record_ptr->h_w_id_);
@@ -783,7 +802,9 @@ class TpccPopulator : public BenchmarkPopulator {
       meta.prev_delta_epoch_ = 0;
       meta.prev_delta_data_size_ = 0;
 #endif
+#if defined(TO) || defined(OCC) || defined(MVOCC)
       record_in_cache.PutMeta(meta);
+#endif
     IndexKey key = GetDistrictNewOrderPrimaryKey(record_ptr->d_id_,
                                                  record_ptr->w_id_);
       storage_manager_->tables_[DISTRICT_NEW_ORDER_TABLE_ID]->InsertPriIndex(
