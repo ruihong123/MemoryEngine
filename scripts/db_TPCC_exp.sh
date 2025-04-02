@@ -31,7 +31,7 @@ output_dir="$proj_dir/scripts/data"
 
 # working environment
 
-bin_dir="${proj_dir}/debug"
+bin_dir="${proj_dir}/release"
 script_dir="${proj_dir}/database/scripts"
 ssh_opts="-o StrictHostKeyChecking=no"
 
@@ -143,7 +143,7 @@ vary_query_ratio () {
   FREQUENCY_ORDER_STATUS=(0 0 0 100 0 1)
   FREQUENCY_STOCK_LEVEL=(0 0 0 0 100 1)
   for ware_num in ${WarehouseNum[@]}; do
-    for qr_index in 5; do
+    for qr_index in 0 1 2 3 4 5; do
       for thread_n in ${thread_number[@]}; do
         compute_ARGS="-p$port -sf$ware_num -sf1 -c$thread_n -rde${FREQUENCY_DELIVERY[$qr_index]} -rpa${FREQUENCY_PAYMENT[$qr_index]} -rne${FREQUENCY_NEW_ORDER[$qr_index]} -ror${FREQUENCY_ORDER_STATUS[$qr_index]} -rst${FREQUENCY_STOCK_LEVEL[$qr_index]} -t4000000 -cs$cache_mem_size -f../connection.conf"
         run_tpcc
