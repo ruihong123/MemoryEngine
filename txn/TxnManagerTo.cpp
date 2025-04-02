@@ -110,6 +110,7 @@ namespace DSMEngine{
                 assert(ret == 1);
             }else{
                 (locked_handles_)[page_gaddr].second -= 1;
+                assert((locked_handles_)[page_gaddr].second > 0);
             }
         }else{
             assert(false);
