@@ -1,6 +1,7 @@
 #if defined(MVOCC)
 #include "TransactionManager.h"
 #include "GlobalTimestamp.h"
+#define EARLYABORT
 namespace DSMEngine{
         WritableFile* TransactionManager::log_file = nullptr;
         std::atomic<uint64_t > TransactionManager::largest_sp = 0;
@@ -168,6 +169,12 @@ namespace DSMEngine{
         volatile uint64_t ts = record->GetWTS();
         assert(buffer_is_not_all_zero(record->data_ptr_, schema_ptr->GetSchemaSize()));
         // todo: for serializable isolation level, a larger tuple timestamps means that we need to abort this txn.
+#ifdef EARLYABORT
+        if((isolation_level ==SERIALIZABLE && !pure_read_txn && ts > snapshot_ts ) || (isolation_level == SNAPSHOT_ISOLATION && !pure_read_txn && access_type == READ_WRITE && ts > snapshot_tS )){
+            AbortTransaction();
+            return false;
+        }
+#endif
 //#ifndef NDEBUG
         volatile size_t lc = 0;
 //#endif

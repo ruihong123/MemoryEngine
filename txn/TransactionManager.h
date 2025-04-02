@@ -23,7 +23,13 @@
 
 namespace DSMEngine {
 //extern TpccBenchmark::TpccScaleParams tpcc_scale_params;
-
+enum ISOLATION_LEVEL {
+    READ_COMMITTED = 1,
+    READ_UNCOMMITTED = 2,
+    REPEATABLE_READ = 3,
+    SNAPSHOT_ISOLATION = 4,
+    SERIALIZABLE = 5,
+};
 class TransactionManager {
  public:
   TransactionManager(StorageManager *storage_manager, size_t thread_count, size_t thread_id, bool wal_log = false, bool sharding = false)
@@ -271,6 +277,7 @@ protected:
     int warehouse_bit = 0;
     int num_warehouse_per_par_ = 0;
     std::set<uint16_t> participants;
+    ISOLATION_LEVEL isolation_level = SERIALIZABLE;
 
 //    std::map<uint64_t, Access*> access_list_;
 #if defined(TO)
