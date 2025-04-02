@@ -53,7 +53,6 @@ struct PerfStatistics {
      std::cout << "total throughput=" << agg_throughput_ << "K tps,per node throughput=" 
      << agg_throughput_ / agg_node_num_ << "K tps." << ",per core throughput=" << agg_throughput_ / agg_thread_count_ << std::endl;*/
     std::cout << "==================== end ====================" << std::endl;
-
       fflush(stdout);
   }
   void Print() {
