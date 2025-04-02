@@ -31,7 +31,7 @@ output_dir="$proj_dir/scripts/data"
 
 # working environment
 
-bin_dir="${proj_dir}/release"
+bin_dir="${proj_dir}/debug"
 script_dir="${proj_dir}/database/scripts"
 ssh_opts="-o StrictHostKeyChecking=no"
 
