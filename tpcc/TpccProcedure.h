@@ -201,11 +201,11 @@ class NewOrderProcedure : public StoredProcedure {
       double ol_amount = ol_quantity * price;
       ol_amounts[i] = ol_amount;
       total += ol_amount;
-#if defined(TO)
-        held_handle_ = ((Cache::Handle*)item_record->Get_Handle());
-        assert(held_handle_->gptr!=GlobalAddress::Null());
-        transaction_manager_->ReleaseLatchForGCL(held_handle_->gptr, held_handle_);
-#endif
+//#if defined(TO)
+//        held_handle_ = ((Cache::Handle*)item_record->Get_Handle());
+//        assert(held_handle_->gptr!=GlobalAddress::Null());
+//        transaction_manager_->ReleaseLatchForGCL(held_handle_->gptr, held_handle_);
+//#endif
     }
     // Stock saves the quantity of each item in different warehouse.
     for (size_t i = 0; i < new_order_param->ol_cnt_; ++i) {
@@ -245,11 +245,11 @@ class NewOrderProcedure : public StoredProcedure {
       }
       int dist_column = new_order_param->d_id_ + 2;
       stock_record->GetColumn(dist_column, s_dists[i]);
-#if defined(TO)
-        held_handle_ = ((Cache::Handle*)stock_record->Get_Handle());
-        assert(held_handle_->gptr!=GlobalAddress::Null());
-        transaction_manager_->ReleaseLatchForGCL(held_handle_->gptr, held_handle_);
-#endif
+//#if defined(TO)
+//        held_handle_ = ((Cache::Handle*)stock_record->Get_Handle());
+//        assert(held_handle_->gptr!=GlobalAddress::Null());
+//        transaction_manager_->ReleaseLatchForGCL(held_handle_->gptr, held_handle_);
+//#endif
     }
     // "getWarehouseTaxRate": "SELECT W_TAX FROM WAREHOUSE WHERE W_ID = ?"
     IndexKey warehouse_key = GetWarehousePrimaryKey(new_order_param->w_id_);
@@ -258,11 +258,11 @@ class NewOrderProcedure : public StoredProcedure {
         SearchRecord(&context_, WAREHOUSE_TABLE_ID, warehouse_key, warehouse_record, (AccessType)new_order_param->warehouse_access_type_));
     double w_tax = 0;
     warehouse_record->GetColumn(7, &w_tax);
-#if defined(TO)
-      held_handle_ = ((Cache::Handle*)warehouse_record->Get_Handle());
-      assert(held_handle_->gptr!=GlobalAddress::Null());
-      transaction_manager_->ReleaseLatchForGCL(held_handle_->gptr, held_handle_);
-#endif
+//#if defined(TO)
+//      held_handle_ = ((Cache::Handle*)warehouse_record->Get_Handle());
+//      assert(held_handle_->gptr!=GlobalAddress::Null());
+//      transaction_manager_->ReleaseLatchForGCL(held_handle_->gptr, held_handle_);
+//#endif
     // "getDistrict": "SELECT D_TAX, D_NEXT_O_ID FROM DISTRICT WHERE D_ID = ? AND D_W_ID = ?"
     // "incrementNextOrderId": "UPDATE DISTRICT SET D_NEXT_O_ID = ? WHERE D_ID = ? AND D_W_ID = ?"
     IndexKey district_key = GetDistrictPrimaryKey(new_order_param->d_id_,
@@ -281,11 +281,11 @@ class NewOrderProcedure : public StoredProcedure {
     district_record->SetColumn(10, &o_id);
 //      printf("District table is changed over o_id %d with snapshotnumber %llu\n", o_id, transaction_manager_->snapshot_ts);
 //      fflush(stdout);
-#if defined(TO)
-      held_handle_ = ((Cache::Handle*)district_record->Get_Handle());
-      assert(held_handle_->gptr!=GlobalAddress::Null());
-      transaction_manager_->ReleaseLatchForGCL(held_handle_->gptr, held_handle_);
-#endif
+//#if defined(TO)
+//      held_handle_ = ((Cache::Handle*)district_record->Get_Handle());
+//      assert(held_handle_->gptr!=GlobalAddress::Null());
+//      transaction_manager_->ReleaseLatchForGCL(held_handle_->gptr, held_handle_);
+//#endif
     // "getCustomer": "SELECT C_DISCOUNT, C_LAST, C_CREDIT FROM CUSTOMER WHERE C_W_ID = ? AND C_D_ID = ? AND C_ID = ?"
     IndexKey customer_key = GetCustomerPrimaryKey(new_order_param->c_id_,
                                                   new_order_param->d_id_,
@@ -298,11 +298,11 @@ class NewOrderProcedure : public StoredProcedure {
       for (size_t i = 0; i < new_order_param->ol_cnt_; ++i) {
         ol_amounts[i] *= (1 - c_discount)*(1+w_tax+d_tax);
       }
-#if defined(TO)
-      held_handle_ = ((Cache::Handle*)customer_record->Get_Handle());
-      assert(held_handle_->gptr!=GlobalAddress::Null());
-      transaction_manager_->ReleaseLatchForGCL(held_handle_->gptr, held_handle_);
-#endif
+//#if defined(TO)
+//      held_handle_ = ((Cache::Handle*)customer_record->Get_Handle());
+//      assert(held_handle_->gptr!=GlobalAddress::Null());
+//      transaction_manager_->ReleaseLatchForGCL(held_handle_->gptr, held_handle_);
+//#endif
     //TODO: adjust the ol_amounts[i] by c_discount.
 
     // "createNewOrder": "INSERT INTO NEW_ORDER (NO_O_ID, NO_D_ID, NO_W_ID) VALUES (?, ?, ?)"

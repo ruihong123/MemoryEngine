@@ -127,6 +127,7 @@ namespace DSMEngine{
             // unlock
         }
         if (!locked_handles_.empty()){
+            locked_handles_.erase(locked_handles_.begin(), locked_handles_.end());
             locked_handles_.clear();
         }
     }
