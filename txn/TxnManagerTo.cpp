@@ -126,11 +126,11 @@ namespace DSMEngine{
 //            }
             // unlock
         }
-        if (!locked_handles_.empty()){
-            throw std::runtime_error("There are still some latches hold in the transaction commit.");
-            locked_handles_.erase(locked_handles_.begin(), locked_handles_.end());
-            locked_handles_.clear();
-        }
+//        if (!locked_handles_.empty()){
+//            throw std::runtime_error("There are still some latches hold in the transaction commit.");
+//            locked_handles_.erase(locked_handles_.begin(), locked_handles_.end());
+//            locked_handles_.clear();
+//        }
     }
         bool TransactionManager::AllocateNewRecord(TxnContext *context, size_t table_id, Cache::Handle *&handle,
                                                    GlobalAddress &tuple_gaddr, Record*& tuple) {
