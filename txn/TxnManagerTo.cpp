@@ -116,7 +116,7 @@ namespace DSMEngine{
             assert(false);
         }
     }
-    bool TransactionManager::ClearAllLatches(){
+    inline bool TransactionManager::ClearAllLatches(){
         // todo: why the locked handles are not empty? It seems when I check with gdb it is empty but the program still enter the loop
         // and the if condition below.
 //        assert(!locked_handles_.empty());
