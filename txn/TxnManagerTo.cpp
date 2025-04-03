@@ -40,7 +40,7 @@ namespace DSMEngine{
                 default_gallocator->SELCC_Lock_Upgrade(page_buff, page_gaddr, handle);
                 locked_handles_[page_gaddr].second = access_type;
             }
-  #if ACCESS_MODE == 1
+#if ACCESS_MODE == 1
           page_buff = ((ibv_mr*)handle->value)->addr;
 #elif ACCESS_MODE == 0
             page_buff = handle->value;

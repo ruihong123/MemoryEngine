@@ -420,11 +420,6 @@ class NewOrderProcedure : public StoredProcedure {
     ret.size_ += sizeof(c_discount);
     total *= (1 - c_discount) * (1 + w_tax + d_tax);
     ret.size_ += sizeof(total);
-      if (!transaction_manager_){
-          printf("Transaction manager is null\n");
-            fflush(stdout);
-          assert(false);
-      }
     return transaction_manager_->CommitTransaction(&context_, param, ret);
   }
 
