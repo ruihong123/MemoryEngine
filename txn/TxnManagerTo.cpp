@@ -375,7 +375,7 @@ namespace DSMEngine{
             throw std::runtime_error("There are still some latches hold in the transaction commit.");
             assert(false);
         }
-        ClearAllLatches();
+//        ClearAllLatches();
         is_first_access_ = true;
         PROFILE_TIME_END(thread_id_, CC_COMMIT);
         return true;
