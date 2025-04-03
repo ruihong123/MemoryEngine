@@ -367,6 +367,10 @@ namespace DSMEngine{
             }
         }
         access_list_.Clear();
+        if (!locked_handles_.empty()){
+            throw std::runtime_error("There are still some latches hold in the transaction commit.");
+            assert(false);
+        }
         ClearAllLatches();
         is_first_access_ = true;
         PROFILE_TIME_END(thread_id_, CC_COMMIT);
