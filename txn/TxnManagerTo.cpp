@@ -125,8 +125,6 @@ namespace DSMEngine{
 
         }
         if (!locked_handles_.empty()){
-//            throw std::runtime_error("There are still some latches hold in the transaction commit.");
-//            locked_handles_.erase(locked_handles_.begin(), locked_handles_.end());
             locked_handles_.clear();
         }
     }
@@ -313,7 +311,14 @@ namespace DSMEngine{
             if (wts > start_timestamp_) {
                 // Need to release all the latch of outside. and reacquire the latches
                 // in sequence in the abort function
-                ClearAllLatches();
+                for (auto iter : locked_handles_){
+                    default_gallocator->SELCC_Exclusive_UnLock(iter.second.first->gptr, iter.second.first);
+
+                }
+                if (!locked_handles_.empty()){
+                    locked_handles_.clear();
+                }
+//                ClearAllLatches();
                 this->AbortTransaction();
                 return false;
             } else {
@@ -324,8 +329,14 @@ namespace DSMEngine{
             uint64_t rts = record->GetRTS();
             uint64_t wts = record->GetWTS();
             if (rts > start_timestamp_ || wts > start_timestamp_) {
-//                default_gallocator->SELCC_Exclusive_UnLock(page_gaddr, handle);
-                ClearAllLatches();
+                for (auto iter : locked_handles_){
+                    default_gallocator->SELCC_Exclusive_UnLock(iter.second.first->gptr, iter.second.first);
+
+                }
+                if (!locked_handles_.empty()){
+                    locked_handles_.clear();
+                }
+//                ClearAllLatches();
                 this->AbortTransaction();
                 return false;
             } else {
@@ -429,7 +440,14 @@ namespace DSMEngine{
                 access->access_addr_ = GlobalAddress::Null();
             }
 			access_list_.Clear();
-            ClearAllLatches();
+//            ClearAllLatches();
+            for (auto iter : locked_handles_){
+                default_gallocator->SELCC_Exclusive_UnLock(iter.second.first->gptr, iter.second.first);
+
+            }
+            if (!locked_handles_.empty()){
+                locked_handles_.clear();
+            }
             is_first_access_ = true;
             PROFILE_TIME_END(thread_id_, CC_ABORT);
 
