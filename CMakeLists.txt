@@ -11,7 +11,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused -Wno-format -Wno-missing-fie
 #add_compile_options(-fsanitize=address)
 #add_link_options(-fsanitize=address)
 #set(CMAKE_CXX_FLAGS_RELEASE  "${CMAKE_CXX_FLAGS_RELEASE} -O3 -Wall -Wextra -pthread")
-set(CMAKE_CXX_FLAGS_DEBUG   "${CMAKE_CXX_FLAGS_DEBUG} -O2 -ggdb -Wall -Wextra -pthread")
+#set(CMAKE_CXX_FLAGS_DEBUG   "${CMAKE_CXX_FLAGS_DEBUG} -O2 -ggdb -Wall -Wextra -pthread")
 include_directories(
         "${PROJECT_SOURCE_DIR}"
         "${PROJECT_SOURCE_DIR}/txn"

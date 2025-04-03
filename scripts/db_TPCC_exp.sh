@@ -31,7 +31,7 @@ output_dir="$proj_dir/scripts/data"
 
 # working environment
 
-bin_dir="${proj_dir}/debug"
+bin_dir="${proj_dir}/release"
 script_dir="${proj_dir}/database/scripts"
 ssh_opts="-o StrictHostKeyChecking=no"
 
@@ -77,7 +77,7 @@ launch () {
   echo "start master: ssh ${ssh_opts} ${master_host} '$script_compute -sn$master_host  -nid0 | tee -a ${output_file} "
 #  ssh ${ssh_opts} ${master_host} "echo '$core_dump_dir/core$master_host' | sudo tee /proc/sys/kernel/core_pattern"
 
-  ssh ${ssh_opts} ${master_host} "ulimit -S -c unlimited && $script_compute -sn$master_host -nid0 > ${output_file} 2>&1" &
+  ssh ${ssh_opts} ${master_host} "ulimit -S -c unlimited && $script_compute -sn$master_host -nid0 | tee -a ${output_file}" &
 #  sleep 1
 
   for ((i=1;i<${#compute_nodes[@]};i++)); do
