@@ -126,7 +126,9 @@ namespace DSMEngine{
 //            }
             // unlock
         }
-        locked_handles_.clear();
+        if (!locked_handles_.empty()){
+            locked_handles_.clear();
+        }
     }
         bool TransactionManager::AllocateNewRecord(TxnContext *context, size_t table_id, Cache::Handle *&handle,
                                                    GlobalAddress &tuple_gaddr, Record*& tuple) {
