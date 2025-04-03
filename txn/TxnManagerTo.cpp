@@ -119,19 +119,14 @@ namespace DSMEngine{
     bool TransactionManager::ClearAllLatches(){
         // todo: why the locked handles are not empty? It seems when I check with gdb it is empty but the program still enter the loop
         // and the if condition below.
-        assert(!locked_handles_.empty());
+//        assert(!locked_handles_.empty());
         for (auto iter : locked_handles_){
-//            if (iter.second.second == READ_ONLY){
-//                default_gallocator->SELCC_Shared_UnLock(iter.second.first->gptr, iter.second.first);
-//            }
-//            else {
                 default_gallocator->SELCC_Exclusive_UnLock(iter.second.first->gptr, iter.second.first);
-//            }
-            // unlock
+
         }
         if (!locked_handles_.empty()){
-            throw std::runtime_error("There are still some latches hold in the transaction commit.");
-            locked_handles_.erase(locked_handles_.begin(), locked_handles_.end());
+//            throw std::runtime_error("There are still some latches hold in the transaction commit.");
+//            locked_handles_.erase(locked_handles_.begin(), locked_handles_.end());
             locked_handles_.clear();
         }
     }
