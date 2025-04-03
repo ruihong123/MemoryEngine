@@ -288,8 +288,6 @@ protected:
   // lock handles shall also be used for non-lock based algorithm to avoid acquire the same latch twice during the execution.
 #if defined(LOCK) || defined(OCC) || defined(MVOCC)
   std::unordered_map<uint64_t , std::pair<Cache::Handle*, AccessType>> locked_handles_;
-//  std::vector<std::tuple<size_t, IndexKey*, size_t, GlobalAddress >> to_be_inserted; // table id, keys, key_num, record address
-
 #endif
 
 #if defined(MVOCC)
