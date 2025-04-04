@@ -172,6 +172,7 @@ class TransactionManager {
     if (data_addr != GlobalAddress::Null()) {
       bool ret = SelectRecordCC(context, table_id, record, data_addr,
                                 access_type);
+        assert(buffer_is_not_all_zero(record->data_ptr_, record->GetRecordSize()));
       return ret;
     } else {
 //      printf("table_id=%d cannot find the record with  key=%lx\n",
@@ -244,6 +245,7 @@ class TransactionManager {
     Env* env_;
     static WritableFile* log_file;
     static std::atomic<uint64_t>  largest_sp;
+
 #if defined(MVOCC)
     static std::shared_mutex delta_map_mtx;
     static std::map<GlobalAddress, DeltaSectionWrap*, std::greater<GlobalAddress>> delta_sections;
