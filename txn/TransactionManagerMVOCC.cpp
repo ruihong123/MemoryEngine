@@ -425,11 +425,7 @@ namespace DSMEngine{
             }
             // unlock
         }
-        locked_handles_.clear();
-        ReleaseSnapshot();
-        is_first_access_ = true;
-        pure_read_txn = true;
-        snapshot_ts = 0;
+        ClearStates();
         PROFILE_TIME_END(thread_id_, CC_COMMIT);
         return true;
 		}
@@ -459,11 +455,7 @@ namespace DSMEngine{
                 }
                 // unlock
             }
-            locked_handles_.clear();
-            ReleaseSnapshot();
-            is_first_access_ = true;
-            pure_read_txn = true;;
-            snapshot_ts = 0;
+            ClearStates();
             PROFILE_TIME_END(thread_id_, CC_ABORT);
 
         }

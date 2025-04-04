@@ -261,7 +261,14 @@ class TransactionManager {
         static void ProcessSnapshotPull(void* args);
     static void GarbageCollection();
     static void BroadCastLeastSP(uint64_t least_sp);
-
+    void ClearStates(){
+        locked_handles_.clear();
+        ReleaseSnapshot();
+        is_first_access_ = true;
+        pure_read_txn = true;
+        have_rolled_back = false;
+        snapshot_ts = 0;
+    }
 #endif
 protected:
 //  Env* env_;
@@ -295,6 +302,7 @@ public: // todo: make it private after debugging.
   uint64_t snapshot_ts = 0;
   bool is_first_access_ = true;
   bool pure_read_txn = true;
+  bool have_rolled_back = false;
   DeltaSectionWrap* ds_for_write = nullptr;
 
 
