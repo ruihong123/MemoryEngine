@@ -163,7 +163,7 @@ namespace DSMEngine{
     bool TransactionManager::CommitTransaction(TxnContext* context,
                                                TxnParam* param, CharArray& ret_str) {
         PROFILE_TIME_START(thread_id_, CC_COMMIT);
-        uint64_t commit_ts = GlobalTimestamp::GetMonotoneTimestamp();
+        uint64_t commit_ts = GlobalTimestamp::FetchAddMonotoneTimestamp();
         assert(locked_handles_.empty());
         std::map<uint64_t, Access*> sorted_access;
         // lock the access list in order to avoid deadlock.

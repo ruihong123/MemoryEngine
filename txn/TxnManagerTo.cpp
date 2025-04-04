@@ -137,7 +137,7 @@ namespace DSMEngine{
 				}
 				start_timestamp_ = batch_ts_.GetTimestamp();
 #else
-				start_timestamp_ = GlobalTimestamp::GetMonotoneTimestamp();
+				start_timestamp_ = GlobalTimestamp::FetchAddMonotoneTimestamp();
 #endif
 				is_first_access_ = false;
 			}
@@ -235,7 +235,7 @@ namespace DSMEngine{
 				}
 				start_timestamp_ = batch_ts_.GetTimestamp();
 #else
-				start_timestamp_ = GlobalTimestamp::GetMonotoneTimestamp();
+				start_timestamp_ = GlobalTimestamp::FetchAddMonotoneTimestamp();
 #endif
 				is_first_access_ = false;
 			}
@@ -263,7 +263,7 @@ namespace DSMEngine{
 
         if (is_first_access_ == true){
 
-            start_timestamp_ = GlobalTimestamp::GetMonotoneTimestamp();
+            start_timestamp_ = GlobalTimestamp::FetchAddMonotoneTimestamp();
             assert(start_timestamp_ < 0x700066737575);
             is_first_access_ = false;
         }
