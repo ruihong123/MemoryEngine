@@ -23,12 +23,6 @@
 uint64_t cache_miss[MAX_APP_THREAD][8]; // cache miss include invalidation.
 uint64_t cache_hit_valid[MAX_APP_THREAD][8];
 uint64_t invalid_counter[MAX_APP_THREAD][8];
-
-uint64_t lock_fail[MAX_APP_THREAD][8];
-uint64_t pattern[MAX_APP_THREAD][8];
-uint64_t hierarchy_lock[MAX_APP_THREAD][8];
-uint64_t handover_count[MAX_APP_THREAD][8];
-uint64_t hot_filter_count[MAX_APP_THREAD][8];
 uint64_t latency[MAX_APP_THREAD][LATENCY_WINDOWS];
 extern bool Show_Me_The_Print;
 #ifdef TIMEPRINT

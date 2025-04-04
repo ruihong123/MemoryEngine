@@ -8,6 +8,9 @@
 extern uint64_t cache_invalidation[MAX_APP_THREAD];
 extern uint64_t cache_hit_valid[MAX_APP_THREAD][8];
 extern uint64_t cache_miss[MAX_APP_THREAD][8];
+//#if defined(MVOCC)
+//extern uint64_t delta_pull_num[MAX_APP_THREAD];
+//#endif
 namespace DSMEngine {
 struct PerfStatistics {
   PerfStatistics() {
@@ -42,13 +45,23 @@ struct PerfStatistics {
     uint64_t invalidation_num = 0;
     uint64_t hit_valid_num = 0;
     uint64_t miss_num = 0;
+#if defined(MVOCC)
+    uint64_t delta_pull_count = 0;
+#endif
     for (int i = 0; i < MAX_APP_THREAD; ++i) {
         invalidation_num = cache_invalidation[i] + invalidation_num;
         hit_valid_num = cache_hit_valid[i][0] + hit_valid_num;
         miss_num = cache_miss[i][0] + miss_num;
+#if defined(MVOCC)
+        delta_pull_count = delta_pull_count + delta_pull_num[i];
+#endif
     }
       printf("cache invalidation messages are %lu, cache hit numbers are %lu, cache miss numbers are %lu, avg latency is %lf\n", invalidation_num, hit_valid_num, miss_num, agg_thread_count_/agg_throughput_); //agg_thread_count_/agg_throughput_
-    /*std::cout << "agg_total_count=" << agg_total_count_ <<", agg_total_abort_count=" << agg_total_abort_count_ <<", abort_rate=" << abort_rate << std::endl;
+#if defined(MVOCC)
+      printf("delta_pull count is %lu \n", delta_pull_count);
+#endif
+
+      /*std::cout << "agg_total_count=" << agg_total_count_ <<", agg_total_abort_count=" << agg_total_abort_count_ <<", abort_rate=" << abort_rate << std::endl;
      std::cout << "per node elapsed time=" << agg_elapsed_time_ * 1.0 / agg_node_num_ << "ms." << std::endl;
      std::cout << "total throughput=" << agg_throughput_ << "K tps,per node throughput=" 
      << agg_throughput_ / agg_node_num_ << "K tps." << ",per core throughput=" << agg_throughput_ / agg_thread_count_ << std::endl;*/

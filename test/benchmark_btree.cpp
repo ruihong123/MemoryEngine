@@ -18,12 +18,6 @@ const int kTthreadUpper = 23;
 
 extern uint64_t cache_miss[MAX_APP_THREAD][8];
 extern uint64_t cache_hit_valid[MAX_APP_THREAD][8];
-extern uint64_t invalid_counter[MAX_APP_THREAD][8];
-extern uint64_t lock_fail[MAX_APP_THREAD][8];
-extern uint64_t pattern[MAX_APP_THREAD][8];
-extern uint64_t hot_filter_count[MAX_APP_THREAD][8];
-extern uint64_t hierarchy_lock[MAX_APP_THREAD][8];
-extern uint64_t handover_count[MAX_APP_THREAD][8];
 extern bool Show_Me_The_Print;
 const int kMaxThread = 32;
 
@@ -442,43 +436,6 @@ int main(int argc, char *argv[]) {
         cache_miss[i][0] = 0;
 //      realhit += invalid_counter[i][0];
     }
-
-    uint64_t fail_locks_cnt = 0;
-    for (int i = 0; i < MAX_APP_THREAD; ++i) {
-      fail_locks_cnt += lock_fail[i][0];
-      lock_fail[i][0] = 0;
-    }
-    // if (fail_locks_cnt > 500000) {
-    //   // need_stop = true;
-    // }
-
-    //  pattern
-    uint64_t pp[8];
-    memset(pp, 0, sizeof(pp));
-    for (int i = 0; i < 8; ++i) {
-      for (int t = 0; t < MAX_APP_THREAD; ++t) {
-        pp[i] += pattern[t][i];
-        pattern[t][i] = 0;
-      }
-    }
-
-//    uint64_t hot_count = 0;
-//    for (int i = 0; i < MAX_APP_THREAD; ++i) {
-//      hot_count += hot_filter_count[i][0];
-//      hot_filter_count[i][0] = 0;
-//    }
-//
-//    uint64_t hier_count = 0;
-//    for (int i = 0; i < MAX_APP_THREAD; ++i) {
-//      hier_count += hierarchy_lock[i][0];
-//      hierarchy_lock[i][0] = 0;
-//    }
-//
-//    uint64_t ho_count = 0;
-//    for (int i = 0; i < MAX_APP_THREAD; ++i) {
-//      ho_count += handover_count[i][0];
-//      handover_count[i][0] = 0;
-//    }
 
     clock_gettime(CLOCK_REALTIME, &s);
 

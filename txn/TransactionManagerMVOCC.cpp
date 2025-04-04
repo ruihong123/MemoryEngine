@@ -3,6 +3,7 @@
 #include "GlobalTimestamp.h"
 //#define EARLYABORT
 namespace DSMEngine{
+
         WritableFile* TransactionManager::log_file = nullptr;
         std::atomic<uint64_t > TransactionManager::largest_sp = 0;
         std::shared_mutex TransactionManager::delta_map_mtx;
@@ -13,7 +14,7 @@ namespace DSMEngine{
         SpinMutex TransactionManager::c_l_mtx;
         std::map<uint16_t, uint64_t > TransactionManager::cluster_least_sp_;
         std::thread* TransactionManager::gc_thread = nullptr;
-
+        uint64_t delta_pull_num[MAX_APP_THREAD];
 
         bool TransactionManager::AllocateNewRecord(TxnContext *context, size_t table_id, Cache::Handle *&handle,
                                                    GlobalAddress &tuple_gaddr, Record*& tuple) {
@@ -223,6 +224,8 @@ namespace DSMEngine{
                 if (delta_section->inner_section->is_empty_ || !delta_section->isOffsetValid(prev_delta, meta.prev_delta_epoch_)){
                     assert(delta_section->owner_compute_node_id_ != RDMA_Manager::node_id);
                     delta_section->PullUpdates();
+                    delta_pull_num[thread_id_]++;
+
 #ifndef NDEBUG
                     pull_update = true;
 #endif
@@ -464,8 +467,9 @@ namespace DSMEngine{
             // todo: there is a potential bug. If the snapshot is acquire but this thread is yield, then the global cluster may not detect that this snapshot number is pinned and the background thread may clean up
             // the old version for this snapshot number. We can make the timestamp acquire inside the spin lock, but it may cause the performance issue.
             // Another solution could be using another spin mutex to use a shared lock to block the garbage collector when we are calling Get snapshot function
-            std::unique_lock<SpinMutex> psp_lck(pin_sp_mtx);
             snapshot_ts = GlobalTimestamp::GetMonotoneTimestamp();
+
+            std::unique_lock<SpinMutex> psp_lck(pin_sp_mtx);
             largest_sp.store( largest_sp.load() < snapshot_ts ?  snapshot_ts: largest_sp.load()); // atomic is actually not necessary here.
             if(pined_snapshot_this_node.count(snapshot_ts) == 0){
                 pined_snapshot_this_node[snapshot_ts] = 1;

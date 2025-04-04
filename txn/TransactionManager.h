@@ -23,6 +23,7 @@
 
 namespace DSMEngine {
 //extern TpccBenchmark::TpccScaleParams tpcc_scale_params;
+    extern uint64_t delta_pull_num[MAX_APP_THREAD];
 enum ISOLATION_LEVEL {
     READ_COMMITTED = 1,
     READ_UNCOMMITTED = 2,
