@@ -1,13 +1,14 @@
 #if defined(MVOCC)
 #include "TransactionManager.h"
 #include "GlobalTimestamp.h"
-//#define EARLYABORT
+#define EARLYABORT
 namespace DSMEngine{
 
         WritableFile* TransactionManager::log_file = nullptr;
-        std::atomic<uint64_t > TransactionManager::largest_sp = 0;
+        std::atomic<uint64_t > TransactionManager::largest_sp_acquired = 0;
         std::shared_mutex TransactionManager::delta_map_mtx;
         std::map<GlobalAddress, DeltaSectionWrap*, std::greater<GlobalAddress>> TransactionManager::delta_sections;
+        RWSpinLock TransactionManager::garb_mtx;
         SpinMutex TransactionManager::pin_sp_mtx;
         std::map<uint64_t, uint16_t> TransactionManager::pined_snapshot_this_node;
 //        uint64_t TransactionManager::last_broadcasted_sp = 0;
@@ -467,16 +468,19 @@ namespace DSMEngine{
             // todo: there is a potential bug. If the snapshot is acquire but this thread is yield, then the global cluster may not detect that this snapshot number is pinned and the background thread may clean up
             // the old version for this snapshot number. We can make the timestamp acquire inside the spin lock, but it may cause the performance issue.
             // Another solution could be using another spin mutex to use a shared lock to block the garbage collector when we are calling Get snapshot function
+            garb_mtx.lock_shared(); // this garb_mtx is necessary to guarantee the correctness of garbage collection.
             snapshot_ts = GlobalTimestamp::GetMonotoneTimestamp();
 
             std::unique_lock<SpinMutex> psp_lck(pin_sp_mtx);
-            largest_sp.store( largest_sp.load() < snapshot_ts ?  snapshot_ts: largest_sp.load()); // atomic is actually not necessary here.
+
+            largest_sp_acquired.store(largest_sp_acquired.load() < snapshot_ts ? snapshot_ts : largest_sp_acquired.load()); // atomic is actually not necessary here.
             if(pined_snapshot_this_node.count(snapshot_ts) == 0){
                 pined_snapshot_this_node[snapshot_ts] = 1;
             }else{
                 pined_snapshot_this_node[snapshot_ts]++;
             }
             psp_lck.unlock();
+            garb_mtx.unlock_shared();
             // todo: may I insert this snapshot to the cluster_least_sp_?
         }
         void TransactionManager::ReleaseSnapshot() {
@@ -654,19 +658,20 @@ namespace DSMEngine{
         auto rdma_mg = RDMA_Manager::Get_Instance();
         uint64_t last_broadcasted_sp = 0;
         uint64_t last_gc_ts = 0;
-        uint64_t largest_snapshot = largest_sp.load();
+        uint64_t largest_snapshot = largest_sp_acquired.load();
         while(1){
-            if (largest_snapshot <  largest_sp.load()){
+            if (largest_snapshot < largest_sp_acquired.load()){
                 // Get the largest snapshot till now in this compute node.
-                largest_snapshot = largest_sp.load();
+                largest_snapshot = largest_sp_acquired.load();
             }else{
                 std::unique_lock<SpinMutex> psp_lck(pin_sp_mtx);
                 largest_snapshot = GlobalTimestamp::GetMonotoneTimestamp();
-                largest_sp.store(largest_snapshot);
+                largest_sp_acquired.store(largest_snapshot);
             }
 
 
             //step 1: update the least sp of this node and broadcast.
+            garb_mtx.lock();
             std::unique_lock<SpinMutex> psp_lck(pin_sp_mtx);
             uint64_t least_sp_this_node;
             if(pined_snapshot_this_node.empty()){
@@ -675,7 +680,7 @@ namespace DSMEngine{
                 least_sp_this_node = pined_snapshot_this_node.begin()->first;
             }
             psp_lck.unlock();
-
+            garb_mtx.unlock();
 
             if (least_sp_this_node != last_broadcasted_sp){
                BroadCastLeastSP(least_sp_this_node);

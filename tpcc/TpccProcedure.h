@@ -444,7 +444,7 @@ class PaymentProcedure : public StoredProcedure {
     IndexKey warehouse_key = GetWarehousePrimaryKey(payment_param->w_id_);
     Record *warehouse_record = nullptr;
     DB_QUERY(
-        SearchRecord(&context_, WAREHOUSE_TABLE_ID, warehouse_key, warehouse_record, (AccessType)payment_param->warehouse_access_type_));
+        SearchRecord(&context_, WAREHOUSE_TABLE_ID, warehouse_key, warehouse_record, READ_WRITE));
     double w_ytd = 0;
     warehouse_record->GetColumn(8, &w_ytd);
     ret.Memcpy(ret.size_, (char*) (&w_ytd), sizeof(w_ytd));
@@ -462,7 +462,7 @@ class PaymentProcedure : public StoredProcedure {
                                                   payment_param->w_id_);
     Record *district_record = nullptr;
     DB_QUERY(
-        SearchRecord(&context_, DISTRICT_TABLE_ID, district_key, district_record, (AccessType)payment_param->district_access_type_));
+        SearchRecord(&context_, DISTRICT_TABLE_ID, district_key, district_record, READ_WRITE));
 //      printf("District table is changed over d_ytd with snapshotnumber %llu\n", transaction_manager_->snapshot_ts);
 //      fflush(stdout);
     double d_ytd = 0;
@@ -486,7 +486,7 @@ class PaymentProcedure : public StoredProcedure {
                                                     payment_param->c_d_id_,
                                                     payment_param->c_w_id_);
       DB_QUERY(
-          SearchRecord(&context_, CUSTOMER_TABLE_ID, customer_key, customer_record, (AccessType)payment_param->customer_access_type_));
+              SearchRecord(&context_, CUSTOMER_TABLE_ID, customer_key, customer_record, READ_WRITE));
     }
     // "updateBCCustomer": "UPDATE CUSTOMER SET C_BALANCE = ?, C_YTD_PAYMENT = ?, C_PAYMENT_CNT = ?, C_DATA = ? WHERE C_W_ID = ? AND C_D_ID = ? AND C_ID = ?"
     // "updateGCCustomer": "UPDATE CUSTOMER SET C_BALANCE = ?, C_YTD_PAYMENT = ?, C_PAYMENT_CNT = ? WHERE C_W_ID = ? AND C_D_ID = ? AND C_ID = ?"
