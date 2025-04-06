@@ -1,7 +1,7 @@
 #if defined(MVOCC)
 #include "TransactionManager.h"
 #include "GlobalTimestamp.h"
-#define EARLYABORT
+//#define EARLYABORT
 namespace DSMEngine{
 
         WritableFile* TransactionManager::log_file = nullptr;
