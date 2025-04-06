@@ -70,17 +70,13 @@ namespace DSMEngine {
                 old_head = inner_section->head_;
                 //todo: wait for the signal of garbage collection.
                 cv.wait(lck, [this, old_head, delta_size]{return ((old_head + seg_real_size_ - inner_section->tail_allocated) % seg_real_size_ > delta_size);});
-                //     // fake garbage collecion code. should be cleared.
-                //    inner_section->tail_ = inner_section->head_;
-                //    inner_section->is_empty_ = true;
-                //    inner_section->epoch++;
             }
 
             if (seg_real_size_ - inner_section->tail_allocated < delta_size)
             {
                 if (inner_section->tail_allocated < seg_real_size_){
                     //mark that the parser need to move to 0 postion of this ring buffer
-                    *((char*)(inner_section->local_seg_addr_ + inner_section->tail_)) = '^';
+                    *((char*)(inner_section->local_seg_addr_ + inner_section->tail_allocated)) = '^';
                 }
                 inner_section->tail_allocated = 0;
                 inner_section->epoch++;
@@ -230,8 +226,6 @@ namespace DSMEngine {
             send_pointer->content.pull_ds.requester_node_id = rdma_mg->node_id;
             send_pointer->buffer = recv_mr->addr;
             send_pointer->rkey = recv_mr->rkey;
-            printf("Pull update from remote\n");
-            fflush(stdout);
 
             uint8_t * receive_pointer = (uint8_t*)((uint8_t*)recv_mr->addr + rdma_mg->delta_section_size - 1);
             //Clear the reply buffer for the polling.
