@@ -8,17 +8,37 @@
 #include "storage/rdma.h"
 //#include "../Meta/MetaTypes.h"
 
+#define BETTER_TS_ACQUIRE
 namespace DSMEngine{
 		class GlobalTimestamp{
 		public:
 			///////////////////////
 			static uint64_t FetchAddMonotoneTimestamp(){
                 static RDMA_Manager* rdma_mg = RDMA_Manager::Get_Instance();
+
 				return rdma_mg->FetchAddNextTimestamp();
 			}
             static uint64_t GetMonotoneTimestamp(){
                 static RDMA_Manager* rdma_mg = RDMA_Manager::Get_Instance();
+#ifdef BETTER_TS_ACQUIRE
+                // this optimization can reduce unnecessary RDMA read over the network.
+                uint64_t to_ret = 0;
+                if (!time_stamp_mtx.try_lock()){
+                    latest_snapshot = rdma_mg->GetTimestamp();
+                    time_stamp_mtx.lock();
+                    to_ret = latest_snapshot;
+                    time_stamp_mtx.unlock();
+                    return to_ret;
+                }else{
+                    latest_snapshot = rdma_mg->GetTimestamp();
+                    to_ret = latest_snapshot;
+                }
+                time_stamp_mtx.unlock();
+                return to_ret;
+
+#else
                 return rdma_mg->GetTimestamp();
+#endif
             }
 
 //			static uint64_t GetBatchMonotoneTimestamp(){
@@ -63,6 +83,8 @@ namespace DSMEngine{
             static RDMA_Manager* rdma_mg;
 //			static std::atomic<uint64_t> monotone_timestamp_;
             static GlobalAddress time_stamp_gaddr;
+            static uint64_t latest_snapshot;
+            static RWSpinLock time_stamp_mtx;
 //			static std::atomic<uint64_t> *thread_timestamp_[kMaxThreadNum];
 			static size_t thread_count_;
 		};

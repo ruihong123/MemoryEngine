@@ -353,7 +353,8 @@ namespace DSMEngine{
 //                access->access_global_record_->CopyFrom(access->txn_local_tuple_);
 //                access->access_global_record_->PutWTS(commit_ts);
 
-                }else {
+                }else if (isolation_level == SERIALIZABLE){
+                    // only check the read set for serializable isolation level.
                     if (locked_handles_.find(page_gaddr) == locked_handles_.end()){
                         //No matter write or read we need acquire exclusive latch.
                         assert(page_gaddr.offset - tuple_gaddr.offset > STRUCT_OFFSET(DataPage, data_));
@@ -395,8 +396,9 @@ namespace DSMEngine{
                 //  Will this help in reduce the overhead of locking? probably not. Need experiment.
                 GlobalAddress delta_gadd = GlobalAddress::Null();
                 size_t delta_size = 0;
-                ds_for_write->fill_in_delta_record(access->txn_local_tuple_, access->access_global_record_, delta_gadd,
-                                                   delta_size, commit_ts);
+                ds_for_write->fill_in_delta_record_thread_local(access->txn_local_tuple_, access->access_global_record_,
+                                                                delta_gadd,
+                                                                delta_size, commit_ts);
                 MetaColumn meta = access->txn_local_tuple_->GetMeta();
                 meta.prev_delta_ = delta_gadd;
                 meta.prev_delta_epoch_ = ds_for_write->GetEpoch();
@@ -721,7 +723,7 @@ namespace DSMEngine{
                 }
             }
             // do garbage collection.
-            usleep(1000);
+            usleep(1000); //todo: tune the sleep time or make the sleep time
         }
     }
     bool TransactionManager::CoordinatorPrepare() {

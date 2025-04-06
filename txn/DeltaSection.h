@@ -63,6 +63,7 @@ namespace DSMEngine {
         uint64_t AllocateDelta(size_t delta_size) {
             std::unique_lock<std::shared_mutex> lck(ds_mtx_);
             uint64_t  old_head = inner_section->head_;
+            uint64_t return_offset = 0;
             // we append new delta record to the tail.
             while (!inner_section->is_empty_ && (old_head + seg_real_size_ - inner_section->tail_allocated) % seg_real_size_ <= delta_size) {
                 // wait until there is enough space for the new delta record.
@@ -81,13 +82,39 @@ namespace DSMEngine {
                 inner_section->tail_allocated = 0;
                 inner_section->epoch++;
             }
-            return inner_section->tail_allocated;
+            return_offset = inner_section->tail_allocated;
+            inner_section->tail_allocated += delta_size;
+            if (inner_section->is_empty_){
+                inner_section->is_empty_ = false;
+            }
+            return return_offset;
+
+        }
+        void fill_in_delta_record_single(Record *new_record, Record *old_record, GlobalAddress &delta_gadd, size_t &delta_size,
+                                               uint64_t commit_ts) {
+            delta_size = new_record->estimate_delta_size(); // delta size include both delta header and delta content.
+//            uint64_t prev_offset;
+            uint64_t offset = AllocateDelta(delta_size);
+            //todo the max_ts need to be guarded by a mtx.
+            MetaColumn meta_col = old_record->GetMeta();
+            // update the max time stamp.
+            if (inner_section->max_ts < meta_col.Wts_){
+                inner_section->max_ts = meta_col.Wts_;
+            }
+            DeltaRecord * delta_record = new(inner_section->local_seg_addr_ + offset) DeltaRecord(
+                    meta_col.Wts_, delta_size, meta_col.prev_delta_, commit_ts,
+                    meta_col.prev_delta_epoch_, meta_col.prev_delta_data_size_ );
+            old_record->dirty_col_ids = std::move(new_record->dirty_col_ids);
+            old_record->serialize_to_delta(delta_record);
+            while(__atomic_compare_exchange_n(&inner_section->tail_, &offset, offset + delta_size, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)){
+                _mm_pause();
+            };
 
         }
         // new_record is the local copy and the old_record is the global copy. Later the local copy will be written to the global copy.
         // and the global copy's modified columns should be written to the delta section.
-        void fill_in_delta_record(Record *new_record, Record *old_record, GlobalAddress &delta_gadd, size_t &delta_size,
-                                  uint64_t commit_ts) {
+        void fill_in_delta_record_thread_local(Record *new_record, Record *old_record, GlobalAddress &delta_gadd, size_t &delta_size,
+                                               uint64_t commit_ts) {
             // todo: create a new function for fill in the delta records for mulitple tuple records.
             delta_size = new_record->estimate_delta_size(); // delta size include both delta header and delta content.
 //            size_t delta_size_padding = delta_size;
