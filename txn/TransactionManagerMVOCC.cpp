@@ -1,7 +1,7 @@
 #if defined(MVOCC)
 #include "TransactionManager.h"
 #include "GlobalTimestamp.h"
-//#define EARLYABORT
+#define EARLYABORT
 namespace DSMEngine{
 
         WritableFile* TransactionManager::log_file = nullptr;
@@ -174,11 +174,14 @@ namespace DSMEngine{
 #ifdef EARLYABORT
         if((isolation_level ==SERIALIZABLE && !pure_read_txn && ts > snapshot_ts ) || (isolation_level == SNAPSHOT_ISOLATION && !pure_read_txn && access_type == READ_WRITE && ts > snapshot_ts )){
             // release the SELCC latch.
-            if (access_type == READ_ONLY){
+            if (access_type == READ_ONLY) {
+//                uint64_t wts = record->GetWTS();
                 default_gallocator->SELCC_Shared_UnLock(page_gaddr, handle);
-            }
-            else {
-                default_gallocator->SELCC_Exclusive_UnLock(page_gaddr, handle);
+
+            } else  {
+                //Read_Write, Delete_Only, Insert_Only
+                default_gallocator->SELCC_Shared_UnLock(page_gaddr, handle);
+
             }
             AbortTransaction();
             return false;
