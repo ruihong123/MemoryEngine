@@ -14,12 +14,17 @@ namespace DSMEngine{
 		public:
 			///////////////////////
 			static uint64_t FetchAddMonotoneTimestamp(){
-                static RDMA_Manager* rdma_mg = RDMA_Manager::Get_Instance();
+                if (!rdma_mg){
+                    rdma_mg = RDMA_Manager::Get_Instance();
+                }
+
 
 				return rdma_mg->FetchAddNextTimestamp();
 			}
             static uint64_t GetMonotoneTimestamp(){
-                static RDMA_Manager* rdma_mg = RDMA_Manager::Get_Instance();
+                if (!rdma_mg){
+                    rdma_mg = RDMA_Manager::Get_Instance();
+                }
 #ifdef BETTER_TS_ACQUIRE
                 // this optimization can reduce unnecessary RDMA read over the network.
                 uint64_t to_ret = 0;
