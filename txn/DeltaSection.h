@@ -41,6 +41,7 @@ namespace DSMEngine {
         DeltaSectionWrap(uint8_t compute_node_id, GlobalAddress seg_addr, size_t seg_size, ibv_mr *seg_local_mr) {
             seg_local_mr_ = seg_local_mr;
             inner_section = (DeltaSection *) seg_local_mr_->addr;
+            assert(((uint64_t)seg_local_mr_->addr)%8 == 0);
             inner_section->head_ = 0;
             inner_section->tail_ = 0;
             inner_section->is_empty_ = true;
@@ -57,6 +58,33 @@ namespace DSMEngine {
             //TODO: need to deallocate the remote memory.
             rdma_mg_->Deallocate_Local_RDMA_Slot(seg_local_mr_->addr, DeltaChunk);
             delete seg_local_mr_;
+        }
+        uint64_t AllocateDelta(size_t delta_size) {
+            std::unique_lock<std::shared_mutex> lck(ds_mtx_);
+            uint64_t  old_head = inner_section->head_;
+            // we append new delta record to the tail.
+            while (!inner_section->is_empty_ && (old_head + seg_real_size_ - inner_section->tail_) % seg_real_size_ <= delta_size) {
+                // wait until there is enough space for the new delta record.
+                // if full then we clear the whole delta section. (will be changed later)
+                old_head = inner_section->head_;
+                //todo: wait for the signal of garbage collection.
+                cv.wait(lck, [this, old_head, delta_size]{return ((old_head + seg_real_size_ - inner_section->tail_) % seg_real_size_ > delta_size);});
+                //     // fake garbage collecion code. should be cleared.
+                //    inner_section->tail_ = inner_section->head_;
+                //    inner_section->is_empty_ = true;
+                //    inner_section->epoch++;
+            }
+
+            if (seg_real_size_ - inner_section->tail_ < delta_size)
+            {
+                if (inner_section->tail_ < seg_real_size_){
+                    //mark that the parser need to move to 0 postion of this ring buffer
+                    *((char*)(inner_section->local_seg_addr_ + inner_section->tail_)) = '^';
+                }
+                inner_section->tail_ = 0;
+                inner_section->epoch++;
+            }
+
         }
         // new_record is the local copy and the old_record is the global copy. Later the local copy will be written to the global copy.
         // and the global copy's modified columns should be written to the delta section.
@@ -200,7 +228,8 @@ namespace DSMEngine {
             send_pointer->content.pull_ds.requester_node_id = rdma_mg->node_id;
             send_pointer->buffer = recv_mr->addr;
             send_pointer->rkey = recv_mr->rkey;
-
+            printf("Pull update from remote\n");
+            fflush(stdout);
 
             uint8_t * receive_pointer = (uint8_t*)((uint8_t*)recv_mr->addr + rdma_mg->delta_section_size - 1);
             //Clear the reply buffer for the polling.
