@@ -296,6 +296,7 @@ namespace DSMEngine{
             GlobalAddress g_addr = access->access_addr_;
             sorted_access.insert({g_addr, access});
         }
+        uint64_t commit_ts = GlobalTimestamp::FetchAddMonotoneTimestamp();
         // First let us check whether the transaciton need to abort. (validate stage)
         if (!pure_read_txn){
             for (auto iter : sorted_access){
@@ -382,8 +383,9 @@ namespace DSMEngine{
                 }
             }
         }
-        // get the commit timestamp right before the commit phase.
-        uint64_t commit_ts = GlobalTimestamp::FetchAddMonotoneTimestamp();
+//        // get the commit timestamp right before the commit phase.
+//        uint64_t commit_ts = GlobalTimestamp::FetchAddMonotoneTimestamp();
+
         // Then let us write the data and commit. (commit stage)
         for (size_t i = 0; i < access_list_.access_count_; ++i) {
             Access* access = access_list_.GetAccess(i);
