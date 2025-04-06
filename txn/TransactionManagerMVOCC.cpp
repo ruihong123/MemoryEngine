@@ -173,6 +173,13 @@ namespace DSMEngine{
         // todo: for serializable isolation level, a larger tuple timestamps means that we need to abort this txn.
 #ifdef EARLYABORT
         if((isolation_level ==SERIALIZABLE && !pure_read_txn && ts > snapshot_ts ) || (isolation_level == SNAPSHOT_ISOLATION && !pure_read_txn && access_type == READ_WRITE && ts > snapshot_ts )){
+            // release the SELCC latch.
+            if (access_type == READ_ONLY){
+                default_gallocator->SELCC_Shared_UnLock(page_gaddr, handle);
+            }
+            else {
+                default_gallocator->SELCC_Exclusive_UnLock(page_gaddr, handle);
+            }
             AbortTransaction();
             return false;
         }
