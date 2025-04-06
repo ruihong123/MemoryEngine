@@ -24,7 +24,9 @@ extern uint64_t cache_miss[MAX_APP_THREAD][8];
 void clear_cache_statistics() {
     for (int i = 0; i < MAX_APP_THREAD; ++i) {
         cache_invalidation[i] = 0;
+#if defined(MVOCC)
         delta_pull_num[i] = 0;
+#endif
         for (int j = 0; j < 8; ++j) {
             cache_hit_valid[i][j] = 0;
             cache_miss[i][j] = 0;
