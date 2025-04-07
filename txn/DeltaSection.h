@@ -98,14 +98,14 @@ namespace DSMEngine {
             delta_size = new_record->estimate_delta_size(); // delta size include both delta header and delta content.
             uint64_t prev_offset;
             uint64_t next_offset;
-            uint64_t offset = AllocateDelta(delta_size, prev_offset,next_offset);
+            uint64_t offset_to_write = AllocateDelta(delta_size, prev_offset, next_offset);
             //todo the max_ts need to be guarded by a mtx.
             MetaColumn meta_col = old_record->GetMeta();
             // update the max time stamp.
             if (inner_section->max_ts < meta_col.Wts_){
                 inner_section->max_ts = meta_col.Wts_;
             }
-            DeltaRecord * delta_record = new(inner_section->local_seg_addr_ + offset) DeltaRecord(
+            DeltaRecord * delta_record = new(inner_section->local_seg_addr_ + offset_to_write) DeltaRecord(
                     meta_col.Wts_, delta_size, meta_col.prev_delta_, commit_ts,
                     meta_col.prev_delta_epoch_, meta_col.prev_delta_data_size_ );
             old_record->dirty_col_ids = std::move(new_record->dirty_col_ids);
@@ -115,6 +115,10 @@ namespace DSMEngine {
                 assert(*((char*)(inner_section->local_seg_addr_ + prev_offset)) == '^');
             }
 #endif
+
+            assert((char*)delta_record + delta_size <= (char*)seg_local_mr_->addr + seg_local_mr_->length);
+            delta_gadd = seg_addr_;
+            delta_gadd.offset += offset_to_write + STRUCT_OFFSET(DeltaSection, local_seg_addr_);
             while(inner_section->tail_.compare_exchange_weak(prev_offset, next_offset, std::memory_order_release,
                                                              std::memory_order_relaxed)){
                 _mm_pause();
