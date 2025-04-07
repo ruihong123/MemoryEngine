@@ -154,7 +154,7 @@ namespace DSMEngine{
             }
             //Read_Write, Delete_Only, Insert_Only
             // There is no actual update on the record temporarily, so we can use shared lock.
-            default_gallocator->SELCC_Shared_Lock(page_buff, page_gaddr, handle);
+            default_gallocator->SELCC_Exclusive_Lock(page_buff, page_gaddr, handle);
 
         }
         assert((tuple_gaddr.offset - handle->gptr.offset) > STRUCT_OFFSET(DataPage, data_));
