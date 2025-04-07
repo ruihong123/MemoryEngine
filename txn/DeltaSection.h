@@ -8,7 +8,7 @@
 #define SINGLE_DELTA_PER_NODE
 #include <infiniband/verbs.h>
 #include <pmmintrin.h>
-#include <stdatomic.h>
+#include <atomic>
 #include "Common.h"
 #include "Record.h"
 #include "rdma.h"
