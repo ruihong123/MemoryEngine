@@ -399,9 +399,16 @@ namespace DSMEngine{
                 //  Will this help in reduce the overhead of locking? probably not. Need experiment.
                 GlobalAddress delta_gadd = GlobalAddress::Null();
                 size_t delta_size = 0;
+
+#ifdef SINGLE_DELTA_PER_NODE
+                ds_for_write->fill_in_delta_record_single(access->txn_local_tuple_, access->access_global_record_,
+                                                                delta_gadd,
+                                                                delta_size, commit_ts);
+#else
                 ds_for_write->fill_in_delta_record_thread_local(access->txn_local_tuple_, access->access_global_record_,
                                                                 delta_gadd,
                                                                 delta_size, commit_ts);
+#endif
                 MetaColumn meta = access->txn_local_tuple_->GetMeta();
                 meta.prev_delta_ = delta_gadd;
                 meta.prev_delta_epoch_ = ds_for_write->GetEpoch();
