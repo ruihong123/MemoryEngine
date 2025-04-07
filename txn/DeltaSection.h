@@ -119,7 +119,7 @@ namespace DSMEngine {
             assert((char*)delta_record + delta_size <= (char*)seg_local_mr_->addr + seg_local_mr_->length);
             delta_gadd = seg_addr_;
             delta_gadd.offset += offset_to_write + STRUCT_OFFSET(DeltaSection, local_seg_addr_);
-            while(inner_section->tail_.compare_exchange_weak(prev_offset, next_offset, std::memory_order_release,
+            while(!inner_section->tail_.compare_exchange_weak(prev_offset, next_offset, std::memory_order_release,
                                                              std::memory_order_relaxed)){
                 _mm_pause();
             };
