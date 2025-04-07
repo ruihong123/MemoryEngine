@@ -1,7 +1,7 @@
 #if defined(MVOCC)
 #include "TransactionManager.h"
 #include "GlobalTimestamp.h"
-#define EARLYABORT
+
 namespace DSMEngine{
 
         WritableFile* TransactionManager::log_file = nullptr;
@@ -16,6 +16,9 @@ namespace DSMEngine{
         std::map<uint16_t, uint64_t > TransactionManager::cluster_least_sp_;
         std::thread* TransactionManager::gc_thread = nullptr;
         uint64_t delta_pull_num[MAX_APP_THREAD];
+#ifdef SINGLE_DELTA_PER_NODE
+        DeltaSectionWrap* ds_for_write = nullptr;
+#endif
 
         bool TransactionManager::AllocateNewRecord(TxnContext *context, size_t table_id, Cache::Handle *&handle,
                                                    GlobalAddress &tuple_gaddr, Record*& tuple) {
@@ -534,10 +537,10 @@ namespace DSMEngine{
         rdma_mg->Allocate_Local_RDMA_Slot(*local_mr, DeltaChunk);
         // TODO: there is compilation error becuae DSMengine does not contain defination for transaction.
         // we need to wrap the funciton to a function pointer or funciton object.
-        auto* ds_for_write= new DeltaSectionWrap(compute_node_id, ds_gaddr, rdma_mg->delta_section_size, local_mr);
+        auto* ds_= new DeltaSectionWrap(compute_node_id, ds_gaddr, rdma_mg->delta_section_size, local_mr);
         {
             std::unique_lock<std::shared_mutex> lck(TransactionManager::delta_map_mtx);
-            TransactionManager::delta_sections.insert(std::make_pair(ds_gaddr, ds_for_write));
+            TransactionManager::delta_sections.insert(std::make_pair(ds_gaddr, ds_));
         }
         delete receive_msg_buf;
     }
@@ -715,15 +718,21 @@ namespace DSMEngine{
             if (least_sp_across_cluster > last_gc_ts){
                 // do garbage collection.
                 last_gc_ts = least_sp_across_cluster;
+#ifdef SINGLE_DELTA_PER_NODE
+                ds_for_write->GarbageCollectionBySnapshot(least_sp_across_cluster);
+                assert(ds_for_write->owner_compute_node_id_ == rdma_mg->node_id);
+#else
                 std::shared_lock<std::shared_mutex> lck(delta_map_mtx);
                 for (auto iter = delta_sections.begin(); iter != delta_sections.end(); iter++){
                     if (iter->second->owner_compute_node_id_ == rdma_mg->node_id){
                         iter->second->GarbageCollectionBySnapshot(least_sp_across_cluster);
                     }
                 }
+#endif
+
             }
             // do garbage collection.
-            usleep(1000); //todo: tune the sleep time or make the sleep time
+            usleep(500); //todo: tune the sleep time or make the sleep time
         }
     }
     bool TransactionManager::CoordinatorPrepare() {

@@ -5,19 +5,20 @@
 #ifndef SELCC_DELTASECTION_H
 #define SELCC_DELTASECTION_H
 
-
+#define SINGLE_DELTA_PER_NODE
 #include <infiniband/verbs.h>
 #include <pmmintrin.h>
+#include <stdatomic.h>
 #include "Common.h"
 #include "Record.h"
 #include "rdma.h"
 
 namespace DSMEngine {
 #if defined(MVOCC)
-    class DeltaSection{
+    class alignas(8) DeltaSection{
     public:
         uint64_t head_;
-        uint64_t tail_;
+        alignas(8) std::atomic<uint64_t> tail_;
         uint64_t tail_allocated;
         uint64_t epoch;
         uint64_t max_ts;// this may be depracated later
@@ -114,7 +115,8 @@ namespace DSMEngine {
                 assert(*((char*)(inner_section->local_seg_addr_ + prev_offset)) == '^');
             }
 #endif
-            while(__atomic_compare_exchange_n(&inner_section->tail_, &prev_offset, next_offset, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)){
+            while(inner_section->tail_.compare_exchange_weak(prev_offset, next_offset, std::memory_order_release,
+                                                             std::memory_order_relaxed)){
                 _mm_pause();
             };
 
@@ -178,8 +180,9 @@ namespace DSMEngine {
             // todo: this garbage collection logic is not correct. We need to fix it.
             std::unique_lock<std::shared_mutex> lck(ds_mtx_);
             while(1){
+                //todo: think about the single delta case, when should we mark empty?
                 if (inner_section->is_empty_ ){
-                    assert(inner_section->head_ == inner_section->tail_);
+                    assert(inner_section->head_ == inner_section->tail_allocated);
                     break;
                 }
                 DeltaRecord* delta_record = (DeltaRecord*)(inner_section->local_seg_addr_ + inner_section->head_);
@@ -192,9 +195,17 @@ namespace DSMEngine {
                 
                 if (delta_record->next_delta_wts_ < snapshot){
                     inner_section->head_ += delta_record->current_record_data_size_;
+#ifdef SINGLE_DELTA_PER_NODE
+                    if (inner_section->head_ == inner_section->tail_allocated){
+                        assert(inner_section->tail_ == inner_section->tail_allocated);
+                        inner_section->is_empty_ = true;
+                    }
+#else
                     if (inner_section->head_ == inner_section->tail_){
                         inner_section->is_empty_ = true;
                     }
+#endif
+
                 }else{
                     break;
                 }

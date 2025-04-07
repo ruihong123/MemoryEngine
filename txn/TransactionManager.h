@@ -20,6 +20,8 @@
 //#include "TpccConstants.h"
 //#include "log.h"
 #define TWO_PHASE_COMMIT
+#define EARLYABORT
+
 
 namespace DSMEngine {
 //extern TpccBenchmark::TpccScaleParams tpcc_scale_params;
@@ -70,12 +72,24 @@ class TransactionManager {
       assert((remote_addr.offset % 128*define::MB)%10*define::MB == 0);
       ibv_mr* local_mr = new ibv_mr{};
       rdma_mg->Allocate_Local_RDMA_Slot(*local_mr, DeltaChunk);
+#ifdef SINGLE_DELTA_PER_NODE
+      std::unique_lock<std::shared_mutex> lck1(delta_map_mtx);
+      if (ds_for_write == nullptr){
+          ds_for_write= new DeltaSectionWrap(rdma_mg->node_id, remote_addr, rdma_mg->delta_section_size, local_mr);
+
+          delta_sections.insert(std::make_pair(remote_addr, ds_for_write));
+          // todo: sync the delta sections to the other nodes.
+          rdma_mg->Sync_Create_Delta_Section_RPC(remote_addr, rdma_mg->node_id);
+      }
+      lck1.unlock();
+#else
       ds_for_write= new DeltaSectionWrap(rdma_mg->node_id, remote_addr, rdma_mg->delta_section_size, local_mr);
       std::unique_lock<std::shared_mutex> lck1(delta_map_mtx);
       delta_sections.insert(std::make_pair(remote_addr, ds_for_write));
       // todo: sync the delta sections to the other nodes.
       rdma_mg->Sync_Create_Delta_Section_RPC(remote_addr, rdma_mg->node_id);
       lck1.unlock();
+#endif
       std::unique_lock<SpinMutex> lck2(c_l_mtx);
       // need to initialize the cluster_least_sp_.
       if (cluster_least_sp_.empty()){
@@ -307,7 +321,12 @@ public: // todo: make it private after debugging.
   bool is_first_access_ = true;
   bool pure_read_txn = true;
   bool have_rolled_back = false;
+#ifdef SINGLE_DELTA_PER_NODE
+  static DeltaSectionWrap* ds_for_write;
+#else
   DeltaSectionWrap* ds_for_write = nullptr;
+
+#endif
 
 
 #endif
