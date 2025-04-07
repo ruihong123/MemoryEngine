@@ -180,7 +180,7 @@ namespace DSMEngine{
 
             } else  {
                 //Read_Write, Delete_Only, Insert_Only
-                default_gallocator->SELCC_Shared_UnLock(page_gaddr, handle);
+                default_gallocator->SELCC_Exclusive_UnLock(page_gaddr, handle);
 
             }
             AbortTransaction();
@@ -277,7 +277,7 @@ namespace DSMEngine{
 
         } else  {
             //Read_Write, Delete_Only, Insert_Only
-            default_gallocator->SELCC_Shared_UnLock(page_gaddr, handle);
+            default_gallocator->SELCC_Exclusive_UnLock(page_gaddr, handle);
 
         }
         PROFILE_TIME_END(thread_id_, CC_SELECT);

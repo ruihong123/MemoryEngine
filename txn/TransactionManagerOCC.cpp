@@ -129,8 +129,8 @@ namespace DSMEngine{
 
             } else  {
                 //Read_Write, Delete_Only, Insert_Only
-//                default_gallocator->SELCC_Exclusive_Lock(page_buff, page_gaddr, handle);
-                default_gallocator->SELCC_Shared_Lock(page_buff, page_gaddr, handle);
+                default_gallocator->SELCC_Exclusive_Lock(page_buff, page_gaddr, handle);
+//                default_gallocator->SELCC_Shared_Lock(page_buff, page_gaddr, handle);
 
             }
         assert((tuple_gaddr.offset - handle->gptr.offset) > STRUCT_OFFSET(DataPage, data_));
@@ -154,8 +154,11 @@ namespace DSMEngine{
 
         } else  {
             //Read_Write, Delete_Only, Insert_Only
-//            default_gallocator->SELCC_Exclusive_UnLock(page_gaddr, handle);
-            default_gallocator->SELCC_Shared_UnLock(page_gaddr, handle);
+            // We can acquire shared latch here, but that result in bad performance, because the commit phase we need
+            // exclusive latch. the shared copy need to be upgraded at that time. However, if we aquire exlcuisve latch
+            // now it is highly possible that the local exclusive copy can be reused at that time..
+            default_gallocator->SELCC_Exclusive_UnLock(page_gaddr, handle);
+//            default_gallocator->SELCC_Shared_UnLock(page_gaddr, handle);
 
 
         }
