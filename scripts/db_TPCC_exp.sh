@@ -137,11 +137,11 @@ vary_query_ratio () {
   #read_ratios=(0 30 50 70 90 100)
   thread_number=(8)
   WarehouseNum=(16)
-  FREQUENCY_DELIVERY=(100 0 0 0 0 1)
-  FREQUENCY_PAYMENT=(0 100 0 0 0 10)
-  FREQUENCY_NEW_ORDER=(0 0 100 0 0 10)
-  FREQUENCY_ORDER_STATUS=(0 0 0 100 0 1)
-  FREQUENCY_STOCK_LEVEL=(0 0 0 0 100 1)
+  FREQUENCY_DELIVERY=(100 0 0 0 0 1 1)
+  FREQUENCY_PAYMENT=(0 100 0 0 0 10 1)
+  FREQUENCY_NEW_ORDER=(0 0 100 0 0 10 1)
+  FREQUENCY_ORDER_STATUS=(0 0 0 100 0 1 10)
+  FREQUENCY_STOCK_LEVEL=(0 0 0 0 100 1 10)
   for ware_num in ${WarehouseNum[@]}; do
     for qr_index in 0 1 2 3 4 5; do
       for thread_n in ${thread_number[@]}; do
