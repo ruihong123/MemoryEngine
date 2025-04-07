@@ -17,7 +17,7 @@ namespace DSMEngine{
         std::thread* TransactionManager::gc_thread = nullptr;
         uint64_t delta_pull_num[MAX_APP_THREAD];
 #ifdef SINGLE_DELTA_PER_NODE
-        DeltaSectionWrap* ds_for_write = nullptr;
+        DeltaSectionWrap* TransactionManager::ds_for_write = nullptr;
 #endif
 
         bool TransactionManager::AllocateNewRecord(TxnContext *context, size_t table_id, Cache::Handle *&handle,
