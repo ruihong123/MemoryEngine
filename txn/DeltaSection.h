@@ -99,6 +99,8 @@ namespace DSMEngine {
             uint64_t prev_offset;
             uint64_t next_offset;
             uint64_t offset_to_write = AllocateDelta(delta_size, prev_offset, next_offset);
+            assert(next_offset <= seg_real_size_);
+            assert(offset_to_write <= seg_real_size_);
             //todo the max_ts need to be guarded by a mtx.
             MetaColumn meta_col = old_record->GetMeta();
             // update the max time stamp.

@@ -410,6 +410,7 @@ namespace DSMEngine{
                                                                 delta_size, commit_ts);
 #endif
                 MetaColumn meta = access->txn_local_tuple_->GetMeta();
+                assert(delta_gadd.offset - ds_for_write->seg_addr_.offset < ds_for_write->seg_real_size_ + STRUCT_OFFSET(DeltaSection, local_seg_addr_));
                 meta.prev_delta_ = delta_gadd;
                 meta.prev_delta_epoch_ = ds_for_write->GetEpoch();
                 meta.prev_delta_data_size_ = delta_size;
