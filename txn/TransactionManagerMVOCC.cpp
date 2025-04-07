@@ -586,6 +586,8 @@ namespace DSMEngine{
             std::vector<std::pair<uint64_t, uint64_t>> boundaries;
              ds_w->CalculateWriteBoundaries(boundaries, old_head_, old_tail_, old_epoch);
              bool async = false;
+             //todo: it is possible that the tail is updated but the boundary is not updated,
+             // as the tail_cahnge is ourside of the latch guard.
              for(auto pair : boundaries){
                  assert(boundaries.size() <= 3);
                  assert(boundaries.size() > 0);
