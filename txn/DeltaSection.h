@@ -60,10 +60,11 @@ namespace DSMEngine {
             rdma_mg_->Deallocate_Local_RDMA_Slot(seg_local_mr_->addr, DeltaChunk);
             delete seg_local_mr_;
         }
-        uint64_t AllocateDelta(size_t delta_size) {
+        uint64_t AllocateDelta(size_t delta_size, size_t& prev_offset, size_t& next_offset) {
             std::unique_lock<std::shared_mutex> lck(ds_mtx_);
             uint64_t  old_head = inner_section->head_;
             uint64_t return_offset = 0;
+            prev_offset = inner_section->tail_allocated;
             // we append new delta record to the tail.
             while (!inner_section->is_empty_ && (old_head + seg_real_size_ - inner_section->tail_allocated) % seg_real_size_ <= delta_size) {
                 // wait until there is enough space for the new delta record.
@@ -87,14 +88,16 @@ namespace DSMEngine {
             if (inner_section->is_empty_){
                 inner_section->is_empty_ = false;
             }
+            next_offset = inner_section->tail_allocated;
             return return_offset;
 
         }
         void fill_in_delta_record_single(Record *new_record, Record *old_record, GlobalAddress &delta_gadd, size_t &delta_size,
                                                uint64_t commit_ts) {
             delta_size = new_record->estimate_delta_size(); // delta size include both delta header and delta content.
-//            uint64_t prev_offset;
-            uint64_t offset = AllocateDelta(delta_size);
+            uint64_t prev_offset;
+            uint64_t next_offset;
+            uint64_t offset = AllocateDelta(delta_size, prev_offset,next_offset);
             //todo the max_ts need to be guarded by a mtx.
             MetaColumn meta_col = old_record->GetMeta();
             // update the max time stamp.
@@ -106,7 +109,12 @@ namespace DSMEngine {
                     meta_col.prev_delta_epoch_, meta_col.prev_delta_data_size_ );
             old_record->dirty_col_ids = std::move(new_record->dirty_col_ids);
             old_record->serialize_to_delta(delta_record);
-            while(__atomic_compare_exchange_n(&inner_section->tail_, &offset, offset + delta_size, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)){
+#ifndef NDEBUG
+            if (next_offset < prev_offset){
+                assert(*((char*)(inner_section->local_seg_addr_ + prev_offset)) == '^');
+            }
+#endif
+            while(__atomic_compare_exchange_n(&inner_section->tail_, &prev_offset, next_offset, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)){
                 _mm_pause();
             };
 
