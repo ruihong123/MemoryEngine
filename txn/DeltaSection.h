@@ -181,6 +181,7 @@ namespace DSMEngine {
             std::unique_lock<std::shared_mutex> lck(ds_mtx_);
             while(1){
                 //todo: think about the single delta case, when should we mark empty?
+                assert(inner_section->head_ <= seg_real_size_);
                 if (inner_section->is_empty_ ){
                     assert(inner_section->head_ == inner_section->tail_allocated);
                     break;
