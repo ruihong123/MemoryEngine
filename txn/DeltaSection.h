@@ -314,7 +314,7 @@ namespace DSMEngine {
         void CalculateWriteBoundaries(std::vector<std::pair<size_t, size_t>> & boundaries, uint64_t old_h, uint64_t old_t, uint64_t old_epoch){
             //todo: the logic need carefully proofread.
             while(inner_section->tail_ != inner_section->tail_allocated){
-                assert(inner_section->tail_ < inner_section->tail_allocated);
+                assert(inner_section->tail_ <= inner_section->tail_allocated);
                 // no ops
                 _mm_pause();
             }
