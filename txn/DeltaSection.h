@@ -199,14 +199,20 @@ namespace DSMEngine {
                     delta_record = (DeltaRecord*)(inner_section->local_seg_addr_ + inner_section->head_);
                     assert(inner_section->tail_ > 0);
                 }
+                if (inner_section->head_ == inner_section->tail_ ){
+                    // if reaching the tail we can stop the garbage collection here
+                    break;
+                }
                 
                 if (delta_record->next_delta_wts_ < snapshot){
                     inner_section->head_ += delta_record->current_record_data_size_;
 #ifdef SINGLE_DELTA_PER_NODE
+
                     if (inner_section->head_ == inner_section->tail_allocated){
                         assert(inner_section->tail_ == inner_section->tail_allocated);
                         inner_section->is_empty_ = true;
                     }
+
 #else
                     if (inner_section->head_ == inner_section->tail_){
                         inner_section->is_empty_ = true;
