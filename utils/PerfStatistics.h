@@ -47,6 +47,7 @@ struct PerfStatistics {
     uint64_t miss_num = 0;
 #if defined(MVOCC)
     uint64_t delta_pull_count = 0;
+    uint64_t roll_back_count = 0;
 #endif
     for (int i = 0; i < MAX_APP_THREAD; ++i) {
         invalidation_num = cache_invalidation[i] + invalidation_num;
@@ -54,11 +55,12 @@ struct PerfStatistics {
         miss_num = cache_miss[i][0] + miss_num;
 #if defined(MVOCC)
         delta_pull_count = delta_pull_count + delta_pull_num[i];
+        roll_back_count = roll_back_num[i] + roll_back_count;
 #endif
     }
       printf("cache invalidation messages are %lu, cache hit numbers are %lu, cache miss numbers are %lu, avg latency is %lf\n", invalidation_num, hit_valid_num, miss_num, agg_thread_count_/agg_throughput_); //agg_thread_count_/agg_throughput_
 #if defined(MVOCC)
-      printf("delta_pull count is %lu \n", delta_pull_count);
+      printf("delta_pull count is %lu, roll back count is %lu \n", delta_pull_count, roll_back_count);
 #endif
 
       /*std::cout << "agg_total_count=" << agg_total_count_ <<", agg_total_abort_count=" << agg_total_abort_count_ <<", abort_rate=" << abort_rate << std::endl;

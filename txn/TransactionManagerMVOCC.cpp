@@ -16,6 +16,7 @@ namespace DSMEngine{
         std::map<uint16_t, uint64_t > TransactionManager::cluster_least_sp_;
         std::thread* TransactionManager::gc_thread = nullptr;
         uint64_t delta_pull_num[MAX_APP_THREAD];
+        uint64_t roll_back_num[MAX_APP_THREAD];
 #ifdef SINGLE_DELTA_PER_NODE
         DeltaSectionWrap* TransactionManager::ds_for_write = nullptr;
 #endif
@@ -189,10 +190,11 @@ namespace DSMEngine{
                 AbortTransaction();
                 return false;
             }
-            if (!pure_read_txn && ((ts > snapshot_ts) && !have_rolled_back) ){
-                // IF we have not roll back and we find the snapshot is too small for current operation, we can simply fall back to the traditional OCC algorithm.
-                snapshot_ts = UINT64_MAX;
-            }
+//            // this is problematic because  the snapshot ts is used for the snapshot release later, simply replace with maxim number is not correct.
+//            if (!pure_read_txn && ((ts > snapshot_ts) && !have_rolled_back) ){
+//                // IF we have not roll back and we find the snapshot is too small for current operation, we can simply fall back to the traditional OCC algorithm.
+//                snapshot_ts = UINT64_MAX;
+//            }
 
         }
         if (isolation_level ==SNAPSHOT_ISOLATION){
@@ -212,6 +214,7 @@ namespace DSMEngine{
                 if (!have_rolled_back) {
                     have_rolled_back = true;
                 }
+                roll_back_num[thread_id_]++;
                 lc++;
                 // TODO: ROll back old version of the data.
                 MetaColumn meta = record->GetMeta();
