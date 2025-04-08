@@ -5,13 +5,13 @@
 #ifndef SELCC_DELTASECTION_H
 #define SELCC_DELTASECTION_H
 
-//#define SINGLE_DELTA_PER_NODE
 #include <infiniband/verbs.h>
 #include <pmmintrin.h>
 #include <atomic>
 #include "Common.h"
 #include "Record.h"
 #include "rdma.h"
+#define SINGLE_DELTA_PER_NODE
 
 namespace DSMEngine {
 #if defined(MVOCC)
