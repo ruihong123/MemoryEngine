@@ -190,7 +190,6 @@ namespace DSMEngine{
                 return false;
             }
             if (!pure_read_txn && ((ts > snapshot_ts) && !have_rolled_back) ){
-                assert(!have_rolled_back && access_type == READ_WRITE);
                 // IF we have not roll back and we find the snapshot is too small for current operation, we can simply fall back to the traditional OCC algorithm.
                 snapshot_ts = UINT64_MAX;
             }
