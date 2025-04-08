@@ -304,7 +304,7 @@ protected:
     int warehouse_bit = 0;
     int num_warehouse_per_par_ = 0;
     std::set<uint16_t> participants;
-    ISOLATION_LEVEL isolation_level = SERIALIZABLE;
+    ISOLATION_LEVEL isolation_level = SNAPSHOT_ISOLATION;
 
 //    std::map<uint64_t, Access*> access_list_;
 #if defined(TO)
