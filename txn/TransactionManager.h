@@ -20,7 +20,7 @@
 //#include "TpccConstants.h"
 //#include "log.h"
 #define TWO_PHASE_COMMIT
-//#define EARLYABORT
+#define EARLYABORT
 
 
 namespace DSMEngine {

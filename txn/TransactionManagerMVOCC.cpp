@@ -175,99 +175,120 @@ namespace DSMEngine{
         assert(buffer_is_not_all_zero(record->data_ptr_, schema_ptr->GetSchemaSize()));
         // todo: for serializable isolation level, a larger tuple timestamps means that we need to abort this txn.
 #ifdef EARLYABORT
-        if((isolation_level ==SERIALIZABLE && !pure_read_txn && ts > snapshot_ts ) || (isolation_level == SNAPSHOT_ISOLATION && !pure_read_txn && access_type == READ_WRITE && ts > snapshot_ts )){
-            // release the SELCC latch.
-            if (access_type == READ_ONLY) {
+        if (isolation_level ==SERIALIZABLE){
+            if (!pure_read_txn && (have_rolled_back) ){
+                if (access_type == READ_ONLY) {
 //                uint64_t wts = record->GetWTS();
-                default_gallocator->SELCC_Shared_UnLock(page_gaddr, handle);
+                    default_gallocator->SELCC_Shared_UnLock(page_gaddr, handle);
 
-            } else  {
+                } else {
+                    //Read_Write, Delete_Only, Insert_Only
+                    default_gallocator->SELCC_Exclusive_UnLock(page_gaddr, handle);
+
+                }
+                AbortTransaction();
+                return false;
+            }
+            if (!pure_read_txn && ((ts > snapshot_ts) && !have_rolled_back) ){
+                assert(!have_rolled_back && access_type == READ_WRITE);
+                // IF we have not roll back and we find the snapshot is too small for current operation, we can simply fall back to the traditional OCC algorithm.
+                snapshot_ts = UINT64_MAX;
+            }
+
+        }
+        if (isolation_level ==SNAPSHOT_ISOLATION){
+            if (!pure_read_txn && ts > snapshot_ts && access_type == READ_WRITE){
                 //Read_Write, Delete_Only, Insert_Only
                 default_gallocator->SELCC_Exclusive_UnLock(page_gaddr, handle);
-
+                AbortTransaction();
+                return false;
             }
-            AbortTransaction();
-            return false;
         }
-#endif
-//#ifndef NDEBUG
-        volatile size_t lc = 0;
-//#endif
-        while (ts > snapshot_ts){
-//#ifndef NDEBUG
-            lc++;
-//#endif
-            // TODO: ROll back old version of the data.
-            MetaColumn meta = record->GetMeta();
-            GlobalAddress prev_delta = meta.prev_delta_;
-            assert(prev_delta != GlobalAddress::Null());
-            // implement a mechanism to detect whether the local copy of delta section is up to date.
-            // if not, we need to fetch the latest version of the delta section.
 
-            DeltaSectionWrap* delta_section = nullptr;
-            uint64_t ds_head = 0;
-            uint64_t ds_tail = 0;
-            uint64_t ds_epoch = 0;
-            {
-                std::shared_lock<std::shared_mutex> l(delta_map_mtx);
-                auto iter = delta_sections.lower_bound(prev_delta);
-                assert(iter != delta_sections.end());
-                delta_section = iter->second;
+
+#endif
+
+            volatile size_t lc = 0;
+            while (ts > snapshot_ts) {
+                if (!have_rolled_back) {
+                    have_rolled_back = true;
+                }
+                lc++;
+                // TODO: ROll back old version of the data.
+                MetaColumn meta = record->GetMeta();
+                GlobalAddress prev_delta = meta.prev_delta_;
+                assert(prev_delta != GlobalAddress::Null());
+                // implement a mechanism to detect whether the local copy of delta section is up to date.
+                // if not, we need to fetch the latest version of the delta section.
+
+                DeltaSectionWrap *delta_section = nullptr;
+                uint64_t ds_head = 0;
+                uint64_t ds_tail = 0;
+                uint64_t ds_epoch = 0;
+                {
+                    std::shared_lock<std::shared_mutex> l(delta_map_mtx);
+                    auto iter = delta_sections.lower_bound(prev_delta);
+                    assert(iter != delta_sections.end());
+                    delta_section = iter->second;
 //                largest_ds_timestamp = delta_section->GetMaxTimestamp();
-                ds_head = delta_section->GetHead();
-                ds_tail = delta_section->GetTail();
-                ds_epoch = delta_section->GetEpoch();
-                assert(iter != delta_sections.end());
-                assert(iter->first.nodeID == prev_delta.nodeID);
-                assert(prev_delta.offset - iter->first.offset  <= ds_for_write->seg_real_size_);
-            }
+                    ds_head = delta_section->GetHead();
+                    ds_tail = delta_section->GetTail();
+                    ds_epoch = delta_section->GetEpoch();
+                    assert(iter != delta_sections.end());
+                    assert(iter->first.nodeID == prev_delta.nodeID);
+                    assert(prev_delta.offset - iter->first.offset <= ds_for_write->seg_real_size_);
+                }
 //            uint64_t delta_offset = prev_delta.offset - delta_section->seg_addr_.offset;
-            // check whether the prev delta is the latest version. check whether the prev_delta is within the head and tail plus checking
-            // whether the epoch is the same.
+                // check whether the prev delta is the latest version. check whether the prev_delta is within the head and tail plus checking
+                // whether the epoch is the same.
 
 
-            //check whether the delta_offset is within the ring buffer by tail and head.
+                //check whether the delta_offset is within the ring buffer by tail and head.
 #ifndef NDEBUG
-            bool pull_update = false;
+                bool pull_update = false;
 #endif
 
-            if (delta_section->inner_section->is_empty_ || !delta_section->isOffsetValid(prev_delta, meta.prev_delta_epoch_)){
-                // fetch the latest version of the delta section.
-                // use double-checked locking to avoid conflict.
-                std::unique_lock<std::shared_mutex> lck(delta_section->ds_mtx_);
-                if (delta_section->inner_section->is_empty_ || !delta_section->isOffsetValid(prev_delta, meta.prev_delta_epoch_)){
-                    assert(delta_section->owner_compute_node_id_ != RDMA_Manager::node_id);
-                    delta_section->PullUpdates();
-                    delta_pull_num[thread_id_]++;
+                if (delta_section->inner_section->is_empty_ ||
+                    !delta_section->isOffsetValid(prev_delta, meta.prev_delta_epoch_)) {
+                    // fetch the latest version of the delta section.
+                    // use double-checked locking to avoid conflict.
+                    std::unique_lock<std::shared_mutex> lck(delta_section->ds_mtx_);
+                    if (delta_section->inner_section->is_empty_ ||
+                        !delta_section->isOffsetValid(prev_delta, meta.prev_delta_epoch_)) {
+                        assert(delta_section->owner_compute_node_id_ != RDMA_Manager::node_id);
+                        delta_section->PullUpdates();
+                        delta_pull_num[thread_id_]++;
 
 #ifndef NDEBUG
-                    pull_update = true;
+                        pull_update = true;
 #endif
+                    }
+
                 }
 
-            }
 
+                std::shared_lock<std::shared_mutex> lck(delta_section->ds_mtx_);
+                assert(meta.prev_delta_epoch_ <= delta_section->inner_section->epoch);
 
-            std::shared_lock<std::shared_mutex> lck(delta_section->ds_mtx_);
-            assert(meta.prev_delta_epoch_ <= delta_section->inner_section->epoch);
+#ifndef NDEBUG
+                ds_tail = delta_section->GetTail();
+                ds_head = delta_section->GetHead();
+                assert(!delta_section->inner_section->is_empty_ &&
+                       delta_section->isOffsetValid(prev_delta, meta.prev_delta_epoch_));
 
-#ifndef NDEBUG  
-            ds_tail = delta_section->GetTail();
-            ds_head = delta_section->GetHead();
-            assert(!delta_section->inner_section->is_empty_&& delta_section->isOffsetValid(prev_delta, meta.prev_delta_epoch_));
-
-            long offset = prev_delta.offset - delta_section->seg_addr_.offset - STRUCT_OFFSET(DeltaSection, local_seg_addr_);
-            if (ds_tail >= ds_head){
-                assert(ds_tail - offset > STRUCT_OFFSET(DeltaRecord, data_));
-            }
+                long offset = prev_delta.offset - delta_section->seg_addr_.offset -
+                              STRUCT_OFFSET(DeltaSection, local_seg_addr_);
+                if (ds_tail >= ds_head) {
+                    assert(ds_tail - offset > STRUCT_OFFSET(DeltaRecord, data_));
+                }
 #endif
-            DeltaRecord* delta_record = (DeltaRecord*)((char*)delta_section->seg_local_mr_->addr + (prev_delta.offset - delta_section->seg_addr_.offset));
-            assert(delta_record->marker_ == '&');
-            record->roll_back(delta_record);
-            ts = record->GetWTS();
-        }
-        assert(buffer_is_not_all_zero(record->data_ptr_, schema_ptr->GetSchemaSize()));
-
+                DeltaRecord *delta_record = (DeltaRecord *) ((char *) delta_section->seg_local_mr_->addr +
+                                                             (prev_delta.offset - delta_section->seg_addr_.offset));
+                assert(delta_record->marker_ == '&');
+                record->roll_back(delta_record);
+                ts = record->GetWTS();
+            }
+            assert(buffer_is_not_all_zero(record->data_ptr_, schema_ptr->GetSchemaSize()));
         access->txn_local_tuple_ = record;
         access->access_addr_ = tuple_gaddr;
         if (access_type == DELETE_ONLY) {
