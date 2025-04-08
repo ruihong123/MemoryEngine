@@ -190,11 +190,12 @@ namespace DSMEngine{
                 AbortTransaction();
                 return false;
             }
-//            // this is problematic because  the snapshot ts is used for the snapshot release later, simply replace with maxim number is not correct.
-//            if (!pure_read_txn && ((ts > snapshot_ts) && !have_rolled_back) ){
-//                // IF we have not roll back and we find the snapshot is too small for current operation, we can simply fall back to the traditional OCC algorithm.
-//                snapshot_ts = UINT64_MAX;
-//            }
+            // this is problematic because  the snapshot ts is used for the snapshot release later, simply replace with maxim number is not correct.
+            if (!pure_read_txn && ((ts > snapshot_ts) && !have_rolled_back) ){
+                // IF we have not roll back and we find the snapshot is too small for current operation, we can simply fall back to the traditional OCC algorithm.
+                plain_occ = true;
+                //todo: we can release the snapshot early here
+            }
 
         }
         if (isolation_level ==SNAPSHOT_ISOLATION){
@@ -210,7 +211,7 @@ namespace DSMEngine{
 #endif
 
             volatile size_t lc = 0;
-            while (ts > snapshot_ts) {
+            while (!plain_occ && ts > snapshot_ts) {
                 if (!have_rolled_back) {
                     have_rolled_back = true;
                 }

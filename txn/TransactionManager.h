@@ -287,6 +287,7 @@ class TransactionManager {
         pure_read_txn = true;
         have_rolled_back = false;
         snapshot_ts = 0;
+        plain_occ = false;
     }
 #endif
 protected:
@@ -322,6 +323,7 @@ public: // todo: make it private after debugging.
   bool is_first_access_ = true;
   bool pure_read_txn = true;
   bool have_rolled_back = false;
+  bool plain_occ = false;
 #ifdef SINGLE_DELTA_PER_NODE
   static DeltaSectionWrap* ds_for_write;
 #else
