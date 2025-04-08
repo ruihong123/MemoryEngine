@@ -121,8 +121,8 @@ namespace DSMEngine {
             assert((char*)delta_record + delta_size <= (char*)seg_local_mr_->addr + seg_local_mr_->length);
             delta_gadd = seg_addr_;
             delta_gadd.offset += offset_to_write + STRUCT_OFFSET(DeltaSection, local_seg_addr_);
-            while(!inner_section->tail_.compare_exchange_weak(prev_offset, next_offset, std::memory_order_release,
-                                                             std::memory_order_relaxed)){
+            while(!inner_section->tail_.compare_exchange_weak(prev_offset, next_offset, std::memory_order_seq_cst,
+                                                             std::memory_order_seq_cst)){
                 _mm_pause();
             };
 
@@ -199,6 +199,7 @@ namespace DSMEngine {
                     delta_record = (DeltaRecord*)(inner_section->local_seg_addr_ + inner_section->head_);
                     assert(inner_section->tail_ > 0);
                 }
+                //todo: below code need verify.
                 if (inner_section->head_ == inner_section->tail_ ){
                     // if reaching the tail we can stop the garbage collection here
                     break;
