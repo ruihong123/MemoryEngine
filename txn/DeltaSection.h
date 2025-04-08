@@ -5,7 +5,7 @@
 #ifndef SELCC_DELTASECTION_H
 #define SELCC_DELTASECTION_H
 
-#define SINGLE_DELTA_PER_NODE
+//#define SINGLE_DELTA_PER_NODE
 #include <infiniband/verbs.h>
 #include <pmmintrin.h>
 #include <atomic>
