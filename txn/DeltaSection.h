@@ -19,7 +19,9 @@ namespace DSMEngine {
     public:
         uint64_t head_;
         alignas(8) std::atomic<uint64_t> tail_;
+#ifdef SINGLE_DELTA_PER_NODE
         uint64_t tail_allocated;
+#endif
         uint64_t epoch;
         uint64_t max_ts;// this may be depracated later
         bool is_empty_;
@@ -61,6 +63,7 @@ namespace DSMEngine {
             rdma_mg_->Deallocate_Local_RDMA_Slot(seg_local_mr_->addr, DeltaChunk);
             delete seg_local_mr_;
         }
+#ifdef SINGLE_DELTA_PER_NODE
         uint64_t AllocateDelta(size_t delta_size, size_t& prev_offset, size_t& next_offset) {
             std::unique_lock<std::shared_mutex> lck(ds_mtx_);
             uint64_t  old_head = inner_section->head_;
@@ -93,6 +96,7 @@ namespace DSMEngine {
             return return_offset;
 
         }
+
         void fill_in_delta_record_single(Record *new_record, Record *old_record, GlobalAddress &delta_gadd, size_t &delta_size,
                                                uint64_t commit_ts) {
             delta_size = new_record->estimate_delta_size(); // delta size include both delta header and delta content.
@@ -127,6 +131,7 @@ namespace DSMEngine {
             };
 
         }
+#endif
         // new_record is the local copy and the old_record is the global copy. Later the local copy will be written to the global copy.
         // and the global copy's modified columns should be written to the delta section.
         void fill_in_delta_record_thread_local(Record *new_record, Record *old_record, GlobalAddress &delta_gadd, size_t &delta_size,
@@ -189,7 +194,9 @@ namespace DSMEngine {
                 //todo: think about the single delta case, when should we mark empty?
                 assert(inner_section->head_ <= seg_real_size_);
                 if (inner_section->is_empty_ ){
+#ifdef SINGLE_DELTA_PER_NODE
                     assert(inner_section->head_ == inner_section->tail_allocated);
+#endif
                     break;
                 }
                 DeltaRecord* delta_record = (DeltaRecord*)(inner_section->local_seg_addr_ + inner_section->head_);
@@ -320,11 +327,13 @@ namespace DSMEngine {
         }
         void CalculateWriteBoundaries(std::vector<std::pair<size_t, size_t>> & boundaries, uint64_t old_h, uint64_t old_t, uint64_t old_epoch){
             //todo: the logic need carefully proofread.
+#ifdef SINGLE_DELTA_PER_NODE
             while(inner_section->tail_ != inner_section->tail_allocated){
                 assert(inner_section->tail_ <= inner_section->tail_allocated);
                 // no ops
                 _mm_pause();
             }
+#endif
             assert(inner_section->head_!= inner_section->tail_ || inner_section->is_empty_);
             uint64_t merge_thre = 4096;
             uint64_t start = 0;
