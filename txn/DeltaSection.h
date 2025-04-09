@@ -93,6 +93,8 @@ namespace DSMEngine {
                 inner_section->is_empty_ = false;
             }
             next_offset = inner_section->tail_allocated;
+            printf("from %lu to %lu\n", prev_offset, next_offset);
+            fflush(stdout);
             return return_offset;
 
         }
