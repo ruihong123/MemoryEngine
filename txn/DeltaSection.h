@@ -83,7 +83,7 @@ namespace DSMEngine {
                 if (inner_section->tail_allocated < seg_real_size_){
                     //mark that the parser need to move to 0 postion of this ring buffer
                     *((char*)(inner_section->local_seg_addr_ + inner_section->tail_allocated)) = '^';
-                    printf("^ is writtern at %lu epoch is\n", inner_section->tail_allocated, inner_section->epoch);
+                    printf("^ is writtern at %lu epoch is %d\n", inner_section->tail_allocated, inner_section->epoch);
                     fflush(stdout);
                 }
                 inner_section->tail_allocated = 0;
@@ -121,7 +121,7 @@ namespace DSMEngine {
             old_record->dirty_col_ids = std::move(new_record->dirty_col_ids);
             old_record->serialize_to_delta(delta_record);
 #ifndef NDEBUG
-            if (next_offset < prev_offset){
+            if (next_offset < prev_offset && prev_offset < seg_real_size_){
                 assert(*((char*)(inner_section->local_seg_addr_ + prev_offset)) == '^');
             }
 #endif
@@ -133,6 +133,8 @@ namespace DSMEngine {
                                                              std::memory_order_seq_cst)){
                 _mm_pause();
             };
+            printf("Node %d thread %d has modified tail_ from %lu to %lu\n", rdma_mg_->node_id, rdma_mg_->thread_id, prev_offset, next_offset);
+            fflush(stdout);
             assert(inner_section->tail_ > prev_offset || prev_offset > next_offset);
 
         }
