@@ -135,7 +135,8 @@ namespace DSMEngine {
             };
             printf("Node %d thread %d has modified tail_ from %lu to %lu\n", rdma_mg_->node_id, rdma_mg_->thread_id, prev_offset, next_offset);
             fflush(stdout);
-            assert(inner_section->tail_ > prev_offset || prev_offset > next_offset);
+            uint64_t  tail_shot = inner_section->tail_;
+            assert(tail_shot > prev_offset || prev_offset > next_offset);
 
         }
 #endif
