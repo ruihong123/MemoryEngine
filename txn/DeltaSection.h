@@ -83,6 +83,8 @@ namespace DSMEngine {
                 if (inner_section->tail_allocated < seg_real_size_){
                     //mark that the parser need to move to 0 postion of this ring buffer
                     *((char*)(inner_section->local_seg_addr_ + inner_section->tail_allocated)) = '^';
+                    printf("^ is writtern at %lu epoch is\n", inner_section->tail_allocated, inner_section->epoch);
+                    fflush(stdout);
                 }
                 inner_section->tail_allocated = 0;
                 inner_section->epoch++;
