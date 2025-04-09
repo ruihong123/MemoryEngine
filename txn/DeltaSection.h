@@ -93,7 +93,7 @@ namespace DSMEngine {
                 inner_section->is_empty_ = false;
             }
             next_offset = inner_section->tail_allocated;
-            printf("from %lu to %lu\n", prev_offset, next_offset);
+            printf("Node %d taile from %lu to %lu\n", rdma_mg_->node_id, prev_offset, next_offset);
             fflush(stdout);
             return return_offset;
 
@@ -131,6 +131,7 @@ namespace DSMEngine {
                                                              std::memory_order_seq_cst)){
                 _mm_pause();
             };
+            assert(inner_section->tail_ > prev_offset || prev_offset > next_offset);
 
         }
 #endif
