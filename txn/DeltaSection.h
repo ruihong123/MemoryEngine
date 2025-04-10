@@ -83,8 +83,8 @@ namespace DSMEngine {
                 if (inner_section->tail_allocated < seg_real_size_){
                     //mark that the parser need to move to 0 postion of this ring buffer
                     *((char*)(inner_section->local_seg_addr_ + inner_section->tail_allocated)) = '^';
-                    printf("^ is writtern at %lu epoch is %d\n", inner_section->tail_allocated, inner_section->epoch);
-                    fflush(stdout);
+//                    printf("^ is writtern at %lu epoch is %d\n", inner_section->tail_allocated, inner_section->epoch);
+//                    fflush(stdout);
                 }
                 inner_section->tail_allocated = 0;
                 inner_section->epoch++;
@@ -95,8 +95,8 @@ namespace DSMEngine {
                 inner_section->is_empty_ = false;
             }
             next_offset = inner_section->tail_allocated;
-            printf("Node %d thread %d modify tail_ from %lu to %lu\n", rdma_mg_->node_id, rdma_mg_->thread_id, prev_offset, next_offset);
-            fflush(stdout);
+//            printf("Node %d thread %d modify tail_ from %lu to %lu\n", rdma_mg_->node_id, rdma_mg_->thread_id, prev_offset, next_offset);
+//            fflush(stdout);
             return return_offset;
 
         }
@@ -133,14 +133,15 @@ namespace DSMEngine {
 //                std::unique_lock<std::shared_mutex> lck(ds_mtx_);
                 uint64_t epoch_before = inner_section->epoch;
                 uint64_t tail_shot_before = inner_section->tail_;
+                //todo: need to understand why CAS method for updating the tail is not working.
 //                while (!inner_section->tail_.compare_exchange_weak(prev_offset, next_offset, std::memory_order_seq_cst,
 //                                                                     std::memory_order_seq_cst)) {
 //                    _mm_pause();
 //                };
                 inner_section->tail_.fetch_add(next_offset - prev_offset, std::memory_order_seq_cst);
-                printf("Node %d thread %d has modified tail_ from %lu to %lu\n", rdma_mg_->node_id, rdma_mg_->thread_id,
-                       prev_offset, next_offset);
-                fflush(stdout);
+//                printf("Node %d thread %d has modified tail_ from %lu to %lu\n", rdma_mg_->node_id, rdma_mg_->thread_id,
+//                       prev_offset, next_offset);
+//                fflush(stdout);
                 uint64_t epoch = inner_section->epoch;
                 uint64_t tail_shot = inner_section->tail_;
 
