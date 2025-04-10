@@ -192,7 +192,7 @@ class TpccRandomGenerator {
   const static int cId_;
   const static int orderlineItemId_;
   const static bool zipfian_ = false;
-  struct zipf_gen_state state;
+//  struct zipf_gen_state state;
 };
 }
 }
