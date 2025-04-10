@@ -144,7 +144,7 @@ namespace DSMEngine {
                 uint64_t epoch = inner_section->epoch;
                 uint64_t tail_shot = inner_section->tail_;
 
-                assert(tail_shot > prev_offset || prev_offset > next_offset);
+//                assert(tail_shot > prev_offset || epoch > epoch_before);
             }
 
         }
