@@ -11,13 +11,13 @@
 #include "Common.h"
 #include "Record.h"
 #include "rdma.h"
-//#define SINGLE_DELTA_PER_NODE
+#define SINGLE_DELTA_PER_NODE
 
 namespace DSMEngine {
 #if defined(MVOCC)
     class alignas(8) DeltaSection{
     public:
-        uint64_t head_;
+        alignas(8) std::atomic<uint64_t> head_;
         alignas(8) std::atomic<uint64_t> tail_;
 #ifdef SINGLE_DELTA_PER_NODE
         uint64_t tail_allocated;
@@ -264,10 +264,20 @@ namespace DSMEngine {
             return inner_section->epoch;
         }
         uint64_t GetHead(){
+#ifdef SINGLE_DELTA_PER_NODE
+            return inner_section->head_.load();
+#else
             return inner_section->head_;
+
+#endif
         }
         uint64_t GetTail(){
+#ifdef SINGLE_DELTA_PER_NODE
+            return inner_section->tail_.load();
+#else
             return inner_section->tail_;
+
+#endif
         }
         bool isOffsetValid(GlobalAddress gaddr, uint64_t epoch)
         {   
