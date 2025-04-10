@@ -3,7 +3,7 @@
 #define __DATABASE_TPCC_RANDOM_GENERATOR_H__
 
 #include "TpccConstants.h"
-#include "test/zipf.h"
+//#include "test/zipf.h"
 #include <string>
 #include <cstring>
 #include <cstdlib>
