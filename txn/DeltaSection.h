@@ -130,7 +130,7 @@ namespace DSMEngine {
             delta_gadd = seg_addr_;
             delta_gadd.offset += offset_to_write + STRUCT_OFFSET(DeltaSection, local_seg_addr_);
             {
-                std::unique_lock<std::shared_mutex> lck(ds_mtx_);
+//                std::unique_lock<std::shared_mutex> lck(ds_mtx_);
                 uint64_t epoch_before = inner_section->epoch;
                 uint64_t tail_shot_before = inner_section->tail_;
 //                while (!inner_section->tail_.compare_exchange_weak(prev_offset, next_offset, std::memory_order_seq_cst,
