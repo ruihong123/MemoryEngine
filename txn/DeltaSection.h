@@ -11,7 +11,7 @@
 #include "Common.h"
 #include "Record.h"
 #include "rdma.h"
-#define SINGLE_DELTA_PER_NODE
+//#define SINGLE_DELTA_PER_NODE
 
 namespace DSMEngine {
 #if defined(MVOCC)
