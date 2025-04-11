@@ -248,11 +248,14 @@ namespace DSMEngine{
 
                 //check whether the delta_offset is within the ring buffer by tail and head.
 #ifndef NDEBUG
-                bool pull_update = false;
+                bool need_pull_update = false;
 #endif
 
                 if (delta_section->inner_section->is_empty_ ||
                     !delta_section->isOffsetValid(prev_delta, meta.prev_delta_epoch_)) {
+#ifndef NDEBUG
+                    need_pull_update = true;
+#endif
                     // fetch the latest version of the delta section.
                     // use double-checked locking to avoid conflict.
                     std::unique_lock<std::shared_mutex> lck(delta_section->ds_mtx_);
@@ -262,9 +265,7 @@ namespace DSMEngine{
                         delta_section->PullUpdates();
                         delta_pull_num[thread_id_]++;
 
-#ifndef NDEBUG
-                        pull_update = true;
-#endif
+
                     }
 
                 }
@@ -285,8 +286,10 @@ namespace DSMEngine{
                     assert(ds_tail - offset > STRUCT_OFFSET(DeltaRecord, data_));
                 }
 #endif
+                std::atomic_thread_fence(std::memory_order_acquire);
                 DeltaRecord *delta_record = (DeltaRecord *) ((char *) delta_section->seg_local_mr_->addr +
                                                              (prev_delta.offset - delta_section->seg_addr_.offset));
+
                 assert(delta_record->marker_ == '&');
                 record->roll_back(delta_record);
                 ts = record->GetWTS();
