@@ -286,7 +286,9 @@ namespace DSMEngine{
                     assert(ds_tail - offset > STRUCT_OFFSET(DeltaRecord, data_));
                 }
 #endif
-                std::atomic_thread_fence(std::memory_order_acquire);
+                asm volatile ("sfence\n" : : );
+                asm volatile ("lfence\n" : : );
+                asm volatile ("mfence\n" : : );
                 DeltaRecord *delta_record = (DeltaRecord *) ((char *) delta_section->seg_local_mr_->addr +
                                                              (prev_delta.offset - delta_section->seg_addr_.offset));
 
