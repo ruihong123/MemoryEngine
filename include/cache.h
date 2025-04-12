@@ -495,9 +495,9 @@ public:
     void Erase(const Slice& key, uint32_t hash);
     void Prune();
     size_t TotalCharge() const {
-//    MutexLock l(&mutex_);
-//    ReadLock l(&mutex_);
-        std::shared_lock<RWSpinMutex> l(mutex_);
+//    MutexLock l(&table_mutex_);
+//    ReadLock l(&table_mutex_);
+        std::shared_lock<RWSpinMutex> l(table_mutex_);
         return usage_;
     }
     //support concurrent access.
@@ -516,27 +516,32 @@ private:
         void Unref(LRUHandle *e);
     void Unref_Inv(LRUHandle *e);
 //    void Unref_WithoutLock(LRUHandle* e);
-    bool FinishErase(LRUHandle *e) EXCLUSIVE_LOCKS_REQUIRED(mutex_);
-    // todo: make the mutex_ a shared mutex. and hence reduce the bottle neck in the cache table.
-//    mutable SpinMutex mutex_;
-        mutable RWSpinMutex mutex_;
+    bool FinishErase(LRUHandle *e) EXCLUSIVE_LOCKS_REQUIRED(table_mutex_);
+    // todo: make the table_mutex_ a shared mutex. and hence reduce the bottle neck in the cache table.
+//    mutable SpinMutex table_mutex_;
     // Initialized before use.
     size_t capacity_;
 
-    // mutex_ protects the following state.
-//  mutable port::RWMutex mutex_;
+    // table_mutex_ protects the following state.
+//  mutable port::RWMutex table_mutex_;
     size_t usage_;
+
+    mutable RWSpinMutex table_mutex_;
+    HandleTable table_;
+
 
     // Dummy head of LRU list.
     // lru.prev is newest entry, lru.next is oldest entry.
     // Entries have refs==1 and in_cache==true.
     LRUHandle lru_;
+    size_t lru_size_ = 0;
 
     // Dummy head of in-use list.
     // Entries are in use by clients, and have refs >= 2 and in_cache==true.
     LRUHandle in_use_;
+    mutable SpinMutex list_mutex_;
 
-    HandleTable table_;
+
 #ifdef PAGE_FREE_LIST
     mutable SpinMutex free_list_mtx_;
     LRUHandle free_list_;

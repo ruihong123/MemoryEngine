@@ -323,7 +323,7 @@ class PosixWritableFile final : public WritableFile {
 
   Status Append(const Slice& data) override {
       std::unique_lock<SpinMutex> lock(mutex_);
-//      std::unique_lock<std::mutex> lock(mutex_);
+//      std::unique_lock<std::mutex> lock(table_mutex_);
       size_t write_size = data.size();
     const char* write_data = data.data();
 
@@ -364,14 +364,14 @@ class PosixWritableFile final : public WritableFile {
 
   Status Flush() override {
       std::unique_lock<SpinMutex> lock(mutex_);
-//      std::unique_lock<std::mutex> lock(mutex_);
+//      std::unique_lock<std::mutex> lock(table_mutex_);
       return FlushBuffer();
   }
   Status Sync() override {
       // implement a group commit below.
       Status status;
       std::unique_lock<SpinMutex> lock(mutex_);
-//      std::unique_lock<std::mutex> lock(mutex_);
+//      std::unique_lock<std::mutex> lock(table_mutex_);
       int my_wait_number = wait_number.fetch_add(1);
       uint64_t current_ticket = ticket_number.load();
       if(my_wait_number == GROUP_SIZE - 1){
@@ -563,7 +563,7 @@ class PosixWritableFile final : public WritableFile {
   const bool is_manifest_;  // True if the file's name starts with MANIFEST.
   const std::string filename_;
   const std::string dirname_;  // The directory of filename_.
-//  std::mutex mutex_;
+//  std::mutex table_mutex_;
   SpinMutex mutex_;
   std::condition_variable cv_;
 };
