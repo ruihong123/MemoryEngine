@@ -199,7 +199,7 @@ namespace DSMEngine {
         uint16_t leaf_cardinality_ = 0;
         bool secondary_ = false;
     private:
-        RWSpinLock root_mtx;// in case of contention in the root cache
+        RWSpinMutex root_mtx;// in case of contention in the root cache
         uint64_t tree_id;
         GlobalAddress left_most_leaf = GlobalAddress::Null();
         // The cached_root_handle_ref is to keep track of the number of reference to the root page handle.
@@ -237,7 +237,7 @@ namespace DSMEngine {
 
         bool update_new_root(GlobalAddress left, const Key &k, GlobalAddress right, int level, GlobalAddress old_root);
         void invalidate_root(GlobalAddress gptr){
-            std::unique_lock<RWSpinLock> l(root_mtx);
+            std::unique_lock<RWSpinMutex> l(root_mtx);
             if (gptr == g_root_ptr.load()) {
                 g_root_ptr.store(GlobalAddress::Null());
             }

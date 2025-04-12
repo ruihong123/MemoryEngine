@@ -76,7 +76,7 @@ class SpinMutex {
   std::atomic<bool> locked_;
 };
 //// TODO: how to config the RW spinlock to prioritize the writer or prioritize the reader.
-//class RWSpinLock{
+//class RWSpinMutex{
 //    std::atomic<int> readers_count{0};
 //    std::atomic<bool> write_now{false};
 //    std::atomic<int> waiting_t{0};
@@ -219,11 +219,11 @@ class SpinMutex {
 //};
 
 
-    class RWSpinLock {
+    class RWSpinMutex {
     public:
         // Constructs the latch with the desired prioritization mode.
         // When 'writerPrioritized' is true, waiting writers will block new readers.
-        explicit RWSpinLock(bool writerPrioritized = true)
+        explicit RWSpinMutex(bool writerPrioritized = true)
                 : state(0), writerPrioritized(writerPrioritized) {}
 
         // Blocking acquisition of a shared (reader) lock.

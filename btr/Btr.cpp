@@ -98,7 +98,7 @@ namespace DSMEngine {
             GlobalAddress Gptr = g_root_ptr.load();
             left_most_leaf = Gptr; // THis will be unchanged.
             Slice page_id((char *) &Gptr, sizeof(GlobalAddress));
-            std::unique_lock<RWSpinLock> lck(root_mtx);
+            std::unique_lock<RWSpinMutex> lck(root_mtx);
             // TODO: make it utilize SELCC APIs.
             // Remember to release the handle when the root page has been changed.
             assert((Gptr.offset % 1ULL*1024ULL*1024ULL*1024ULL)% kLeafPageSize == 0);
@@ -184,7 +184,7 @@ namespace DSMEngine {
         GlobalAddress root_ptr = g_root_ptr.load();
         root_hint_handle = cached_root_page_handle.load();
         if (root_ptr == GlobalAddress::Null()) {
-            std::unique_lock<RWSpinLock> l(root_mtx);
+            std::unique_lock<RWSpinMutex> l(root_mtx);
 
             root_ptr = g_root_ptr.load();
             root_hint_handle = cached_root_page_handle.load();
@@ -423,7 +423,7 @@ namespace DSMEngine {
                 // Since return true will not invalidate the root node, here we manually invalidate it outside,
                 // Otherwise, there will be a deadloop.
                 {
-                    std::unique_lock<RWSpinLock> l(root_mtx);
+                    std::unique_lock<RWSpinMutex> l(root_mtx);
                     g_root_ptr.store(GlobalAddress::Null());
                 }
 
@@ -1532,7 +1532,7 @@ namespace DSMEngine {
             int last_level = 1;
             if (path_stack[last_level] != GlobalAddress::Null()){
             }else{
-                std::unique_lock<RWSpinLock> l(root_mtx);
+                std::unique_lock<RWSpinMutex> l(root_mtx);
                 if (page_addr == g_root_ptr.load()){
                     g_root_ptr.store(GlobalAddress::Null());
                 }
@@ -1742,7 +1742,7 @@ namespace DSMEngine {
             //check whether the node split is for a root node.
             if (UNLIKELY(p == GlobalAddress::Null() )){
                 // First acquire local lock
-                std::unique_lock<RWSpinLock> l(root_mtx);
+                std::unique_lock<RWSpinMutex> l(root_mtx);
                 Cache::Handle* dummy_mr;
                 p = get_root_ptr(dummy_mr);
                 uint8_t height = tree_height.load();
@@ -1887,7 +1887,7 @@ namespace DSMEngine {
                 if (page->hdr.sibling_ptr != GlobalAddress::Null()) {
 //                this->unlock_addr(lock_addr, cxt, coro_id, false);
                     if (path_stack[level + 1] == GlobalAddress::Null()) {
-                        std::unique_lock<RWSpinLock> lck(root_mtx);
+                        std::unique_lock<RWSpinMutex> lck(root_mtx);
                         if (page_addr == g_root_ptr.load()) {
                             g_root_ptr.store(GlobalAddress::Null());
                         }
@@ -1915,7 +1915,7 @@ namespace DSMEngine {
             // upper level. because the sibling pointer only points to larger one.
 
             if (path_stack[level+1] == GlobalAddress::Null()){
-                std::unique_lock<RWSpinLock> lck(root_mtx);
+                std::unique_lock<RWSpinMutex> lck(root_mtx);
                 if (page_addr == g_root_ptr.load()){
                     g_root_ptr.store(GlobalAddress::Null());
                 }
@@ -2061,7 +2061,7 @@ namespace DSMEngine {
             //check whether the node split is for a root node.
             if (UNLIKELY(p == GlobalAddress::Null() )){
                 // First acquire local lock
-                std::unique_lock<RWSpinLock> l(root_mtx);
+                std::unique_lock<RWSpinMutex> l(root_mtx);
 //                refetch_rootnode();
                 // If you find the current root node does not have higher stack, and it is not a outdated root node,
                 // the reason behind is that the inserted key is very small and the leaf node keep sibling shift to the right.

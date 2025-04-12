@@ -89,7 +89,7 @@ namespace DSMEngine{
 //			static std::atomic<uint64_t> monotone_timestamp_;
             static GlobalAddress time_stamp_gaddr;
             static uint64_t latest_snapshot;
-            static RWSpinLock time_stamp_mtx;
+            static RWSpinMutex time_stamp_mtx;
 //			static std::atomic<uint64_t> *thread_timestamp_[kMaxThreadNum];
 			static size_t thread_count_;
 		};

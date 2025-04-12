@@ -265,7 +265,7 @@ class TransactionManager {
 #if defined(MVOCC)
     static std::shared_mutex delta_map_mtx;
     static std::map<GlobalAddress, DeltaSectionWrap*, std::greater<GlobalAddress>> delta_sections;
-    static RWSpinLock garb_mtx;
+    static RWSpinMutex garb_mtx;
     static SpinMutex pin_sp_mtx;
     static std::map<uint64_t, uint16_t> pined_snapshot_this_node; // <snapshotid, count>
 //    static uint64_t last_broadcasted_sp;

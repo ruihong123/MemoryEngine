@@ -215,7 +215,7 @@ void LRUCache::List_Append(LRUHandle* list, LRUHandle* e) {
 //}
 Cache::Handle* LRUCache::Lookup(const Slice& key, uint32_t hash) {
 //  MutexLock l(&mutex_);
-    SpinLock l(&mutex_);
+    std::shared_lock<RWSpinMutex> l(mutex_);
     //TOTHINK(ruihong): shoul we update the lru list after look up a key?
     //  Answer: Ref will refer this key and later, the outer function has to call
     // Unref or release which will update the lRU list.
@@ -232,13 +232,13 @@ void LRUCache::Release(Cache::Handle* handle) {
 //  MutexLock l(&mutex_);
 //  WriteLock l(&mutex_);
     // TODO: the spin mutex below can be removed.
-  SpinLock l(&mutex_);
+    std::unique_lock<RWSpinMutex> l(mutex_);
     Unref(reinterpret_cast<LRUHandle *>(handle));
 //    assert(reinterpret_cast<LRUHandle*>(handle)->refs != 0);
 }
 void LRUCache::Release_Inv(Cache::Handle* handle) {
 
-    SpinLock l(&mutex_);
+    std::unique_lock<RWSpinMutex> l(mutex_);
     Unref_Inv(reinterpret_cast<LRUHandle *>(handle));
 }
 
@@ -326,7 +326,7 @@ void LRUCache::Release_Inv(Cache::Handle* handle) {
 //                e->rw_mtx.lock();
 //                rw_locked = true;
             }
-            std::unique_lock<RWSpinLock> lck(e->rw_mtx);
+            std::unique_lock<RWSpinMutex> lck(e->rw_mtx);
 
             //If there is early lock release, then the handle may be accessed by other threads,
             // before the mr has been dirty flushed. We need to make sure the following accessor,
@@ -415,7 +415,7 @@ Cache::Handle* LRUCache::Insert(const Slice& key, uint32_t hash, void* value,
           already_foward_the_mr = true;
 //          e->rw_mtx.lock();
       }
-      std::unique_lock<RWSpinLock> lck(e->rw_mtx);
+      std::unique_lock<RWSpinMutex> lck(e->rw_mtx);
 #endif
         assert(l.check_own());
     bool erased = FinishErase(table_.Remove(old->key(), old->hash), &l);
@@ -440,7 +440,7 @@ Cache::Handle* LRUCache::Insert(const Slice& key, uint32_t hash, void* value,
     Cache::Handle *DSMEngine::LRUCache::LookupInsert(const Slice &key, uint32_t hash, void *value, size_t charge,
                                                      void (*deleter)(Cache::Handle* handle)) {
         assert(!SpinLock::check_own());
-        SpinLock l(&mutex_);
+        std::shared_lock<RWSpinMutex> l(mutex_);
         //TOTHINK(ruihong): shoul we update the lru list after look up a key?
         //  Answer: Ref will refer this key and later, the outer function has to call
         // Unref or release which will update the lRU list.
@@ -454,6 +454,9 @@ Cache::Handle* LRUCache::Insert(const Slice& key, uint32_t hash, void* value,
         }else{
             // Get from LRU free list.
             e = pop_free_list();
+            l.unlock();
+            std::unique_lock<RWSpinMutex> l2(mutex_);
+
             if (e==&free_list_){
                 // Fail to get a free page from free page list, then get a LRU handle from the end of LRU list.
                 LRUHandle* old = lru_.next; // next is the oldest element in the free list
@@ -515,7 +518,7 @@ Cache::Handle* LRUCache::Insert(const Slice& key, uint32_t hash, void* value,
                                     size_t charge,
                                     void (*deleter)(Cache::Handle* handle)) {
 //  MutexLock l(&mutex_);
-        SpinLock l(&mutex_);
+        std::unique_lock<RWSpinMutex> l(mutex_);
         //TODO: set the LRUHandle within the page, so that we can check the reference, during the direct access, or we reserver
         // a place hodler for the address pointer to the LRU handle of the page.
         LRUHandle* e = pop_free_list();
@@ -591,14 +594,14 @@ Cache::Handle* LRUCache::Insert(const Slice& key, uint32_t hash, void* value,
 void LRUCache::Erase(const Slice& key, uint32_t hash) {
 //  MutexLock l(&mutex_);
 //  WriteLock l(&mutex_);
-  SpinLock l(&mutex_);
+    std::unique_lock<RWSpinMutex> l(mutex_);
     FinishErase(table_.Remove(key, hash));
 }
 
 void LRUCache::Prune() {
 //  MutexLock l(&mutex_);
 //  WriteLock l(&mutex_);
-    SpinLock l(&mutex_);
+    std::unique_lock<RWSpinMutex> l(mutex_);
   while (lru_.next != &lru_) {
     LRUHandle* e = lru_.next;
     assert(e->refs == 1);
@@ -631,7 +634,7 @@ bool LRUCache::need_eviction() {
 }
 
 void LRUCache::prepare_free_list() {
-    SpinLock lck1(&mutex_);
+    std::unique_lock<RWSpinMutex> lck1(mutex_);
     if (need_eviction()){
         int recycle_num = (free_list_trigger_limit_ - free_list_size_)/FREELIST_THREAD_NUM;
         if(recycle_num <= 0){
@@ -646,7 +649,7 @@ void LRUCache::prepare_free_list() {
             table_.Remove(e->key(), e->hash);
             e = e->next;
         }
-        lck1.Unlock();
+        lck1.unlock();
         e = start_end_pair.first;
         while (e != nullptr){
             e->refs--;

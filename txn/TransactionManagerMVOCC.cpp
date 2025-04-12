@@ -8,7 +8,7 @@ namespace DSMEngine{
         std::atomic<uint64_t > TransactionManager::largest_sp_acquired = 0;
         std::shared_mutex TransactionManager::delta_map_mtx;
         std::map<GlobalAddress, DeltaSectionWrap*, std::greater<GlobalAddress>> TransactionManager::delta_sections;
-        RWSpinLock TransactionManager::garb_mtx;
+        RWSpinMutex TransactionManager::garb_mtx;
         SpinMutex TransactionManager::pin_sp_mtx;
         std::map<uint64_t, uint16_t> TransactionManager::pined_snapshot_this_node;
 //        uint64_t TransactionManager::last_broadcasted_sp = 0;

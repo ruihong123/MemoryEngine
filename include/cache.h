@@ -23,10 +23,8 @@
 #include <set>
 #include "Tools/export.h"
 #include "Tools/slice.h"
-//#include <shared_mutex>
 #include <boost/thread.hpp>
 #include <stack>
-
 #include "Config.h"
 #include "storage/rdma.h"
 #ifdef TIMEPRINT
@@ -123,7 +121,7 @@ constexpr uint8_t Invalid_Node_ID = 255;
         uint8_t last_writer_starvation_priority = 0;
 #endif
 //        std::chrono::time_point<std::chrono::high_resolution_clock> timer_begin;
-        RWSpinLock rw_mtx; // low overhead rw spin lock and write have higher priority than read.
+        RWSpinMutex rw_mtx; // low overhead rw spin lock and write have higher priority than read.
         SpinMutex buffered_inv_mtx; // clear state mutex
         std::atomic<uint16_t> read_lock_counter = 0;
         std::atomic<uint16_t> write_lock_counter = 0;
@@ -499,7 +497,7 @@ public:
     size_t TotalCharge() const {
 //    MutexLock l(&mutex_);
 //    ReadLock l(&mutex_);
-        SpinLock l(&mutex_);
+        std::shared_lock<RWSpinMutex> l(mutex_);
         return usage_;
     }
     //support concurrent access.
@@ -520,8 +518,8 @@ private:
 //    void Unref_WithoutLock(LRUHandle* e);
     bool FinishErase(LRUHandle *e) EXCLUSIVE_LOCKS_REQUIRED(mutex_);
     // todo: make the mutex_ a shared mutex. and hence reduce the bottle neck in the cache table.
-    mutable SpinMutex mutex_;
-
+//    mutable SpinMutex mutex_;
+        mutable RWSpinMutex mutex_;
     // Initialized before use.
     size_t capacity_;
 
