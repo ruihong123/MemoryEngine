@@ -105,6 +105,7 @@ void LRUCache::init(){
     void LRUCache::Ref(LRUHandle* e) {
         unsigned int ticket = e->refs.fetch_add(1);
         if (ticket == 1 && e->in_cache) {  // If on lru_ list, move to in_use_ list.
+            SpinLock l(&list_mutex_);
             List_Remove(e);
             lru_size_--;
             List_Append(&in_use_, e);
@@ -151,6 +152,7 @@ void LRUCache::Unref(LRUHandle *e, SpinLock *spin_l) {
             (*e->deleter)(e);
             push_free_list(e);
         } else if (e->in_cache && ticket == 2) {
+            SpinLock l(&list_mutex_);
             // No longer in use; move to lru_ list.
             List_Remove(e);// remove from in_use list move to LRU list.
             List_Append(&lru_, e);
@@ -162,16 +164,16 @@ void LRUCache::Unref(LRUHandle *e, SpinLock *spin_l) {
 
     void LRUCache::Unref_Inv(LRUHandle *e) {
         assert(e->refs > 0);
-        e->refs--;
-        if (e->refs == 0) {  // Deallocate.
+        unsigned int ticket = e->refs.fetch_sub(1);
+        if (ticket == 1) {  // Deallocate.
 
             assert(false);
             assert(!e->in_cache);
             (*e->deleter)(e);
             delete e;
 
-        } else if (e->in_cache && e->refs == 1) {
-
+        } else if (e->in_cache && ticket == 2) {
+            SpinLock l(&list_mutex_);
             // No longer in use; move to lru_ list.
             List_Remove(e);// remove from in_use list move to LRU list.
             List_Append(lru_.next, e);
