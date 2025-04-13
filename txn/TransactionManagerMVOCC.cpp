@@ -445,7 +445,7 @@ namespace DSMEngine{
                                                                 delta_gadd,
                                                                 delta_size, commit_ts);
 #endif
-                printf("The delta record is written at %u, %lu, epoch is %u\n", delta_gadd.nodeID, delta_gadd.offset, ds_for_write->GetEpoch());
+                printf("The delta record is written at %u, %lu, epoch is %u, page_gaddr is %p\n", delta_gadd.nodeID, delta_gadd.offset, ds_for_write->GetEpoch(), access->access_addr_.val);
                 fflush(stdout);
                 MetaColumn meta = access->txn_local_tuple_->GetMeta();
                 assert(delta_gadd.offset - ds_for_write->seg_addr_.offset < ds_for_write->seg_real_size_ + STRUCT_OFFSET(DeltaSection, local_seg_addr_));
