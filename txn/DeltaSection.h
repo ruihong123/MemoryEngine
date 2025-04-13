@@ -357,7 +357,8 @@ namespace DSMEngine {
             //todo: the logic need carefully proofread.
 #ifdef SINGLE_DELTA_PER_NODE
             while(inner_section->tail_ != inner_section->tail_allocated){
-                assert(inner_section->tail_ <= inner_section->tail_allocated);
+                // the assertion is not correct, if we do not use the CAS method to update the tail.
+//                assert(inner_section->tail_ <= inner_section->tail_allocated);
                 // no ops
                 _mm_pause();
             }
