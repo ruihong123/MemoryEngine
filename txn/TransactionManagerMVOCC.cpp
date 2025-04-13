@@ -297,7 +297,7 @@ namespace DSMEngine{
                 void* p = malloc(record_size+200);
                 DeltaRecord* check_record = (DeltaRecord*)p;
                 memcpy(p, (char*)delta_record -200, record_size+200);
-                assert(check_record->marker_ == '&');
+                assert(mark == '&');
                 free(p);
 #endif
                 record->roll_back(delta_record);
