@@ -76,348 +76,348 @@ class SpinMutex {
   std::atomic<bool> locked_;
 };
 // TODO: how to config the RW spinlock to prioritize the writer or prioritize the reader.
-class RWSpinMutex{
-    std::atomic<int> readers_count{0};
-    std::atomic<bool> write_now{false};
-    std::atomic<int> waiting_t{0};
-    size_t thread_id = 0;
-public:
-    void lock(size_t thread_ID = 128) {
-        uint64_t counter = 0;
-        waiting_t.fetch_add(1, std::memory_order_acquire);
-        while (write_now.exchange(true, std::memory_order_acquire)){
-            port::AsmVolatilePause();
-//            if (counter++ > 10000){
+//class RWSpinMutex{
+//    std::atomic<int> readers_count{0};
+//    std::atomic<bool> write_now{false};
+//    std::atomic<int> waiting_t{0};
+//    size_t thread_id = 0;
+//public:
+//    void lock(size_t thread_ID = 128) {
+//        uint64_t counter = 0;
+//        waiting_t.fetch_add(1, std::memory_order_acquire);
+//        while (write_now.exchange(true, std::memory_order_acquire)){
+//            port::AsmVolatilePause();
+////            if (counter++ > 10000){
+////                std::this_thread::yield();
+////                counter = 0;
+////            }
+//            std::this_thread::yield();
+//        }
+//        counter = 0;
+//        // wait for readers to exit
+//        while (readers_count != 0 ){
+//            port::AsmVolatilePause();
+////            if (counter++ > 10000){
+////                std::this_thread::yield();
+////                counter = 0;
+////            }
+//            std::this_thread::yield();
+//        }
+//        thread_id = thread_ID + 1;
+//        waiting_t.fetch_sub(1, std::memory_order_release);
+//    }
+//
+//    void lock_shared() {
+//        // unique_lock have priority
+//        uint64_t counter = 0;
+//        waiting_t.fetch_add(1, std::memory_order_acquire);
+//        while(true) {
+//            while (write_now) {     // wait for unlock
+//                port::AsmVolatilePause();
+////                if (counter++ > 10000){
+////                    std::this_thread::yield();
+////                    counter = 0;
+////                }
 //                std::this_thread::yield();
-//                counter = 0;
 //            }
-            std::this_thread::yield();
-        }
-        counter = 0;
-        // wait for readers to exit
-        while (readers_count != 0 ){
-            port::AsmVolatilePause();
-//            if (counter++ > 10000){
-//                std::this_thread::yield();
-//                counter = 0;
-//            }
-            std::this_thread::yield();
-        }
-        thread_id = thread_ID + 1;
-        waiting_t.fetch_sub(1, std::memory_order_release);
-    }
-
-    void lock_shared() {
-        // unique_lock have priority
-        uint64_t counter = 0;
-        waiting_t.fetch_add(1, std::memory_order_acquire);
-        while(true) {
-            while (write_now) {     // wait for unlock
-                port::AsmVolatilePause();
-//                if (counter++ > 10000){
-//                    std::this_thread::yield();
-//                    counter = 0;
-//                }
-                std::this_thread::yield();
-            }
-
-            readers_count.fetch_add(1, std::memory_order_acquire);
-
-            if (write_now){
-                // locked while transaction? Fallback. Go another round
-                readers_count.fetch_sub(1, std::memory_order_release);
-            } else {
-                // all ok
-                waiting_t.fetch_sub(1, std::memory_order_release);
-                return;
-            }
-        }
-    }
-    // Try atomic upgrade to exclusive latch, if failed, then return false and still hold the shared latch.
-    bool try_upgrade(){
-        auto currently_locked = false;
-        assert(readers_count.load() > 0);
-        if (write_now.compare_exchange_strong(currently_locked, true,
-                                              std::memory_order_acquire,
-                                              std::memory_order_relaxed)){
-            if (readers_count.load() == 1){
-                readers_count.fetch_sub(1, std::memory_order_release);
-                return true;
-            }else{
-                write_now.store(false, std::memory_order_release);
+//
+//            readers_count.fetch_add(1, std::memory_order_acquire);
+//
+//            if (write_now){
+//                // locked while transaction? Fallback. Go another round
 //                readers_count.fetch_sub(1, std::memory_order_release);
-                return false;
-            }
-
-        }else{
-//            readers_count.fetch_sub(1, std::memory_order_release);
-            return false;
-        }
-    }
-    bool try_lock(size_t thread_ID = 128) {
-        auto currently_locked = false;
-        if (waiting_t.load() > 0){
-            return false;
-        }
-
-//        auto currently_locked = write_now.load(std::memory_order_relaxed);
-//        auto currently_readers = readers_count.load(std::memory_order_relaxed);
-//        if (!currently_locked && currently_readers == 0){
-        if( write_now.compare_exchange_strong(currently_locked, true,
-                                              std::memory_order_acquire,
-                                              std::memory_order_relaxed)){
-            if (readers_count.load() == 0){
-                thread_id = 64+thread_ID;
-                return true;
-            }else{
-                write_now.store(false);
-                return false;
-            }
-        }else{
-            return false;
-        }
+//            } else {
+//                // all ok
+//                waiting_t.fetch_sub(1, std::memory_order_release);
+//                return;
+//            }
+//        }
+//    }
+//    // Try atomic upgrade to exclusive latch, if failed, then return false and still hold the shared latch.
+//    bool try_upgrade(){
+//        auto currently_locked = false;
+//        assert(readers_count.load() > 0);
+//        if (write_now.compare_exchange_strong(currently_locked, true,
+//                                              std::memory_order_acquire,
+//                                              std::memory_order_relaxed)){
+//            if (readers_count.load() == 1){
+//                readers_count.fetch_sub(1, std::memory_order_release);
+//                return true;
+//            }else{
+//                write_now.store(false, std::memory_order_release);
+////                readers_count.fetch_sub(1, std::memory_order_release);
+//                return false;
+//            }
+//
+//        }else{
+////            readers_count.fetch_sub(1, std::memory_order_release);
+//            return false;
+//        }
+//    }
+//    bool try_lock(size_t thread_ID = 128) {
+//        auto currently_locked = false;
+//        if (waiting_t.load() > 0){
+//            return false;
+//        }
+//
+////        auto currently_locked = write_now.load(std::memory_order_relaxed);
+////        auto currently_readers = readers_count.load(std::memory_order_relaxed);
+////        if (!currently_locked && currently_readers == 0){
+//        if( write_now.compare_exchange_strong(currently_locked, true,
+//                                              std::memory_order_acquire,
+//                                              std::memory_order_relaxed)){
+//            if (readers_count.load() == 0){
+//                thread_id = 64+thread_ID;
+//                return true;
+//            }else{
+//                write_now.store(false);
+//                return false;
+//            }
 //        }else{
 //            return false;
 //        }
+////        }else{
+////            return false;
+////        }
+//
+//    }
+//    bool try_shared_lock() {
+//        auto currently_locked = write_now.load(std::memory_order_seq_cst);
+////        auto currently_readers = readers_count.load(std::memory_order_relaxed);
+//        if (!currently_locked){
+//            readers_count.fetch_add(1);
+//            if (write_now.load()){
+//                readers_count.fetch_sub(1, std::memory_order_seq_cst);
+//                return false;
+//            }else{
+//                return true;
+//            }
+//        }else{
+//            return false;
+//        }
+//
+//    }
+//
+//    void unlock() {
+//        assert(write_now.load(std::memory_order_relaxed) == true);
+////        assert(readers_count.load(std::memory_order_relaxed) == 0);
+//        thread_id = 0;
+//        write_now.store(false, std::memory_order_release);
+//    }
+//    bool islocked(){
+//        return write_now.load(std::memory_order_relaxed);
+//    }
+//    bool issharelocked(){
+//        return readers_count.load(std::memory_order_relaxed) > 0;
+//    }
+//
+//
+//    int unlock_shared() {
+//        assert(readers_count.load(std::memory_order_relaxed) > 0);
+//        return readers_count.fetch_sub(1, std::memory_order_release);
+//    }
+//};
 
-    }
-    bool try_shared_lock() {
-        auto currently_locked = write_now.load(std::memory_order_seq_cst);
-//        auto currently_readers = readers_count.load(std::memory_order_relaxed);
-        if (!currently_locked){
-            readers_count.fetch_add(1);
-            if (write_now.load()){
-                readers_count.fetch_sub(1, std::memory_order_seq_cst);
-                return false;
-            }else{
-                return true;
+
+    class RWSpinMutex {
+    public:
+        // Constructs the latch with the desired prioritization mode.
+        // When 'writerPrioritized' is true, waiting writers will block new readers.
+        explicit RWSpinMutex(bool writerPrioritized = true)
+                : state(0), writerPrioritized(writerPrioritized) {}
+
+        // Blocking acquisition of a shared (reader) lock.
+        void lock_shared() {
+            int spin = 0;
+            while (true) {
+                uint64_t cur = state.load(std::memory_order_acq_rel);
+                if (writerPrioritized) {
+                    // In writer-prioritized mode, do not proceed if a writer is active or waiting.
+                    if (cur & (WRITER_ACTIVE_MASK | WRITER_WAITING_MASK)) {
+                        if (++spin >= SPIN_THRESHOLD) {
+                            std::this_thread::yield();
+                            spin = 0;
+                        }
+                        continue;
+                    }
+                } else {
+                    // In reader-prioritized mode, only block if a writer is active.
+                    if (cur & WRITER_ACTIVE_MASK) {
+                        if (++spin >= SPIN_THRESHOLD) {
+                            std::this_thread::yield();
+                            spin = 0;
+                        }
+                        continue;
+                    }
+                }
+                // Attempt to increment the reader count (bits 2–63).
+                uint64_t newVal = cur + READER_COUNT_INCREMENT;
+                if (state.compare_exchange_weak(cur, newVal, std::memory_order_acq_rel)) {
+                    break;  // Shared lock acquired.
+                }
+                if (++spin >= SPIN_THRESHOLD) {
+                    std::this_thread::yield();
+                    spin = 0;
+                }
             }
-        }else{
-            return false;
         }
 
-    }
+        // Releases a shared (reader) lock.
+        void unlock_shared() {
+            state.fetch_sub(READER_COUNT_INCREMENT, std::memory_order_release);
+        }
 
-    void unlock() {
-        assert(write_now.load(std::memory_order_relaxed) == true);
-//        assert(readers_count.load(std::memory_order_relaxed) == 0);
-        thread_id = 0;
-        write_now.store(false, std::memory_order_release);
-    }
-    bool islocked(){
-        return write_now.load(std::memory_order_relaxed);
-    }
-    bool issharelocked(){
-        return readers_count.load(std::memory_order_relaxed) > 0;
-    }
+        // Blocking acquisition of an exclusive (writer) lock.
+        void lock(size_t thread_ID = 128) {
+            if (writerPrioritized) {
+                // In writer-prioritized mode, mark intent by setting the waiting flag.
+                set_writer_waiting();
+                int spin = 0;
+                while (true) {
+                    uint64_t cur = state.load(std::memory_order_acq_rel);
+                    // Wait until there are no readers and no active writer.
+                    if ((cur & READER_COUNT_MASK) == 0 && !(cur & WRITER_ACTIVE_MASK)) {
+                        // Attempt to acquire exclusive lock:
+                        // Set the writer active flag and clear the waiting flag.
+                        uint64_t desired = (cur | WRITER_ACTIVE_MASK) & ~WRITER_WAITING_MASK;
+                        if (state.compare_exchange_strong(cur, desired, std::memory_order_acq_rel)) {
+                            break;  // Exclusive lock acquired.
+                        }
+                    } else {
+                        if (++spin >= SPIN_THRESHOLD) {
+                            std::this_thread::yield();
+                            spin = 0;
+                        }
+                    }
+                }
+            } else {
+                // Reader-prioritized mode: simply wait until no readers or active writer.
+                int spin = 0;
+                while (true) {
+                    uint64_t cur = state.load(std::memory_order_acq_rel);
+                    if ((cur & READER_COUNT_MASK) == 0 && !(cur & WRITER_ACTIVE_MASK)) {
+                        uint64_t desired = cur | WRITER_ACTIVE_MASK;
+                        if (state.compare_exchange_weak(cur, desired, std::memory_order_acq_rel)) {
+                            break;  // Exclusive lock acquired.
+                        }
+                    } else {
+                        if (++spin >= SPIN_THRESHOLD) {
+                            std::this_thread::yield();
+                            spin = 0;
+                        }
+                    }
+                }
+            }
+        }
 
+        // Releases an exclusive (writer) lock.
+        void unlock() {
+            state.fetch_and(~WRITER_ACTIVE_MASK, std::memory_order_release);
+        }
 
-    int unlock_shared() {
-        assert(readers_count.load(std::memory_order_relaxed) > 0);
-        return readers_count.fetch_sub(1, std::memory_order_release);
-    }
-};
+        // Non-blocking attempt to acquire a shared (reader) lock.
+        // Returns true on success, false otherwise.
+        bool try_shared_lock() {
+            uint64_t cur = state.load(std::memory_order_acq_rel);
+            if (writerPrioritized) {
+                if (cur & (WRITER_ACTIVE_MASK | WRITER_WAITING_MASK)) {
+                    return false;
+                }
+            } else {
+                if (cur & WRITER_ACTIVE_MASK) {
+                    return false;
+                }
+            }
+            uint64_t desired = cur + READER_COUNT_INCREMENT;
+            return state.compare_exchange_strong(cur, desired, std::memory_order_acq_rel);
+        }
 
+        // Non-blocking attempt to acquire an exclusive (writer) lock.
+        // Returns true on success, false otherwise.
+        bool try_lock(size_t thread_ID = 128) {
+            uint64_t cur = state.load(std::memory_order_acq_rel);
+            if (writerPrioritized) {
+                if (cur & (WRITER_ACTIVE_MASK | WRITER_WAITING_MASK)) {
+                    return false;
+                }
+                // Mark writer waiting.
+                uint64_t desired = cur | WRITER_WAITING_MASK;
+                if (!state.compare_exchange_strong(cur, desired, std::memory_order_acq_rel))
+                    return false;
+                // Re-read the state to ensure no readers or active writer.
+                cur = state.load(std::memory_order_acq_rel);
+                if ((cur & READER_COUNT_MASK) != 0 || (cur & WRITER_ACTIVE_MASK)) {
+                    // Clear waiting flag if conditions are not met.
+                    state.fetch_and(~WRITER_WAITING_MASK, std::memory_order_release);
+                    return false;
+                }
+                // Attempt to acquire exclusive lock: set writer active and clear waiting flag.
+                desired = (cur | WRITER_ACTIVE_MASK) & ~WRITER_WAITING_MASK;
+                if (state.compare_exchange_strong(cur, desired, std::memory_order_acq_rel)) {
+                    return true;
+                } else {
+                    state.fetch_and(~WRITER_WAITING_MASK, std::memory_order_release);
+                    return false;
+                }
+            } else {
+                // In reader-prioritized mode: succeed only if no readers or active writer.
+                if ((cur & READER_COUNT_MASK) != 0 || (cur & WRITER_ACTIVE_MASK)) {
+                    return false;
+                }
+                uint64_t desired = cur | WRITER_ACTIVE_MASK;
+                return state.compare_exchange_strong(cur, desired, std::memory_order_acq_rel);
+            }
+        }
 
-//    class RWSpinMutex {
-//    public:
-//        // Constructs the latch with the desired prioritization mode.
-//        // When 'writerPrioritized' is true, waiting writers will block new readers.
-//        explicit RWSpinMutex(bool writerPrioritized = true)
-//                : state(0), writerPrioritized(writerPrioritized) {}
-//
-//        // Blocking acquisition of a shared (reader) lock.
-//        void lock_shared() {
-//            int spin = 0;
-//            while (true) {
-//                uint64_t cur = state.load(std::memory_order_acquire);
-//                if (writerPrioritized) {
-//                    // In writer-prioritized mode, do not proceed if a writer is active or waiting.
-//                    if (cur & (WRITER_ACTIVE_MASK | WRITER_WAITING_MASK)) {
-//                        if (++spin >= SPIN_THRESHOLD) {
-//                            std::this_thread::yield();
-//                            spin = 0;
-//                        }
-//                        continue;
-//                    }
-//                } else {
-//                    // In reader-prioritized mode, only block if a writer is active.
-//                    if (cur & WRITER_ACTIVE_MASK) {
-//                        if (++spin >= SPIN_THRESHOLD) {
-//                            std::this_thread::yield();
-//                            spin = 0;
-//                        }
-//                        continue;
-//                    }
-//                }
-//                // Attempt to increment the reader count (bits 2–63).
-//                uint64_t newVal = cur + READER_COUNT_INCREMENT;
-//                if (state.compare_exchange_weak(cur, newVal, std::memory_order_acquire)) {
-//                    break;  // Shared lock acquired.
-//                }
-//                if (++spin >= SPIN_THRESHOLD) {
-//                    std::this_thread::yield();
-//                    spin = 0;
-//                }
-//            }
-//        }
-//
-//        // Releases a shared (reader) lock.
-//        void unlock_shared() {
-//            state.fetch_sub(READER_COUNT_INCREMENT, std::memory_order_release);
-//        }
-//
-//        // Blocking acquisition of an exclusive (writer) lock.
-//        void lock(size_t thread_ID = 128) {
-//            if (writerPrioritized) {
-//                // In writer-prioritized mode, mark intent by setting the waiting flag.
-//                set_writer_waiting();
-//                int spin = 0;
-//                while (true) {
-//                    uint64_t cur = state.load(std::memory_order_acquire);
-//                    // Wait until there are no readers and no active writer.
-//                    if ((cur & READER_COUNT_MASK) == 0 && !(cur & WRITER_ACTIVE_MASK)) {
-//                        // Attempt to acquire exclusive lock:
-//                        // Set the writer active flag and clear the waiting flag.
-//                        uint64_t desired = (cur | WRITER_ACTIVE_MASK) & ~WRITER_WAITING_MASK;
-//                        if (state.compare_exchange_strong(cur, desired, std::memory_order_acquire)) {
-//                            break;  // Exclusive lock acquired.
-//                        }
-//                    } else {
-//                        if (++spin >= SPIN_THRESHOLD) {
-//                            std::this_thread::yield();
-//                            spin = 0;
-//                        }
-//                    }
-//                }
-//            } else {
-//                // Reader-prioritized mode: simply wait until no readers or active writer.
-//                int spin = 0;
-//                while (true) {
-//                    uint64_t cur = state.load(std::memory_order_acquire);
-//                    if ((cur & READER_COUNT_MASK) == 0 && !(cur & WRITER_ACTIVE_MASK)) {
-//                        uint64_t desired = cur | WRITER_ACTIVE_MASK;
-//                        if (state.compare_exchange_weak(cur, desired, std::memory_order_acquire)) {
-//                            break;  // Exclusive lock acquired.
-//                        }
-//                    } else {
-//                        if (++spin >= SPIN_THRESHOLD) {
-//                            std::this_thread::yield();
-//                            spin = 0;
-//                        }
-//                    }
-//                }
-//            }
-//        }
-//
-//        // Releases an exclusive (writer) lock.
-//        void unlock() {
-//            state.fetch_and(~WRITER_ACTIVE_MASK, std::memory_order_release);
-//        }
-//
-//        // Non-blocking attempt to acquire a shared (reader) lock.
-//        // Returns true on success, false otherwise.
-//        bool try_shared_lock() {
-//            uint64_t cur = state.load(std::memory_order_acquire);
-//            if (writerPrioritized) {
-//                if (cur & (WRITER_ACTIVE_MASK | WRITER_WAITING_MASK)) {
-//                    return false;
-//                }
-//            } else {
-//                if (cur & WRITER_ACTIVE_MASK) {
-//                    return false;
-//                }
-//            }
-//            uint64_t desired = cur + READER_COUNT_INCREMENT;
-//            return state.compare_exchange_strong(cur, desired, std::memory_order_acquire);
-//        }
-//
-//        // Non-blocking attempt to acquire an exclusive (writer) lock.
-//        // Returns true on success, false otherwise.
-//        bool try_lock(size_t thread_ID = 128) {
-//            uint64_t cur = state.load(std::memory_order_acquire);
-//            if (writerPrioritized) {
-//                if (cur & (WRITER_ACTIVE_MASK | WRITER_WAITING_MASK)) {
-//                    return false;
-//                }
-//                // Mark writer waiting.
-//                uint64_t desired = cur | WRITER_WAITING_MASK;
-//                if (!state.compare_exchange_strong(cur, desired, std::memory_order_acquire))
-//                    return false;
-//                // Re-read the state to ensure no readers or active writer.
-//                cur = state.load(std::memory_order_acquire);
-//                if ((cur & READER_COUNT_MASK) != 0 || (cur & WRITER_ACTIVE_MASK)) {
-//                    // Clear waiting flag if conditions are not met.
-//                    state.fetch_and(~WRITER_WAITING_MASK, std::memory_order_release);
-//                    return false;
-//                }
-//                // Attempt to acquire exclusive lock: set writer active and clear waiting flag.
-//                desired = (cur | WRITER_ACTIVE_MASK) & ~WRITER_WAITING_MASK;
-//                if (state.compare_exchange_strong(cur, desired, std::memory_order_acquire)) {
-//                    return true;
-//                } else {
-//                    state.fetch_and(~WRITER_WAITING_MASK, std::memory_order_release);
-//                    return false;
-//                }
-//            } else {
-//                // In reader-prioritized mode: succeed only if no readers or active writer.
-//                if ((cur & READER_COUNT_MASK) != 0 || (cur & WRITER_ACTIVE_MASK)) {
-//                    return false;
-//                }
-//                uint64_t desired = cur | WRITER_ACTIVE_MASK;
-//                return state.compare_exchange_strong(cur, desired, std::memory_order_acquire);
-//            }
-//        }
-//
-//        // Non-blocking attempt to upgrade a held shared lock to an exclusive lock.
-//        // The caller must already hold a shared lock.
-//        // Upgrade succeeds only if the caller is the sole reader.
-//        // Returns true on success, false otherwise.
-//        bool try_upgrade() {
-//            uint64_t cur = state.load(std::memory_order_acquire);
-//            // Verify that exactly one reader (i.e. the caller) holds the lock and no writer is active.
-//            if (((cur & READER_COUNT_MASK) != READER_COUNT_INCREMENT) || (cur & WRITER_ACTIVE_MASK)) {
-//                return false;
-//            }
-//            // Convert the shared lock into an exclusive lock:
-//            // Subtract the reader count and set the writer active flag.
-//            uint64_t desired = (cur - READER_COUNT_INCREMENT) | WRITER_ACTIVE_MASK;
-//            return state.compare_exchange_strong(cur, desired, std::memory_order_acquire);
-//        }
-//        bool islocked(){
-//            return state.load(std::memory_order_relaxed) & WRITER_ACTIVE_MASK;
-//        }
-//        bool issharelocked(){
-//            return state.load(std::memory_order_relaxed) & READER_COUNT_MASK;
-//        }
-//    private:
-//        // The 64-bit state variable encoding the reader count and writer flags.
-//        std::atomic<uint64_t> state;
-//        // Configures the latch for writer or reader prioritization.
-//        const bool writerPrioritized;
-//
-//        // Bit masks and constants:
-//        static constexpr uint64_t WRITER_ACTIVE_MASK     = 0x1ULL;               // Bit 0
-//        static constexpr uint64_t WRITER_WAITING_MASK    = 0x2ULL;               // Bit 1
-//        static constexpr uint64_t READER_COUNT_MASK      = ~((uint64_t)0x3);       // Bits 2–63
-//        static constexpr uint64_t READER_COUNT_INCREMENT = 0x4ULL;               // One reader = 1 << 2
-//        static constexpr int SPIN_THRESHOLD = 10000;  // Number of spin iterations before yielding
-//
-//        // Helper method to mark that a writer is waiting.
-//        void set_writer_waiting() {
-//            while (true) {
-//                uint64_t cur = state.load(std::memory_order_acquire);
-//                if (cur & WRITER_WAITING_MASK) {
-//                    break;  // Already marked.
-//                }
-//                uint64_t desired = cur | WRITER_WAITING_MASK;
-//                if (state.compare_exchange_weak(cur, desired, std::memory_order_acquire)) {
-//                    break;
-//                }
-//                // In this tight loop, we assume the waiting flag is set quickly.
-//            }
-//        }
-//    };
+        // Non-blocking attempt to upgrade a held shared lock to an exclusive lock.
+        // The caller must already hold a shared lock.
+        // Upgrade succeeds only if the caller is the sole reader.
+        // Returns true on success, false otherwise.
+        bool try_upgrade() {
+            uint64_t cur = state.load(std::memory_order_acq_rel);
+            // Verify that exactly one reader (i.e. the caller) holds the lock and no writer is active.
+            if (((cur & READER_COUNT_MASK) != READER_COUNT_INCREMENT) || (cur & WRITER_ACTIVE_MASK)) {
+                return false;
+            }
+            // Convert the shared lock into an exclusive lock:
+            // Subtract the reader count and set the writer active flag.
+            uint64_t desired = (cur - READER_COUNT_INCREMENT) | WRITER_ACTIVE_MASK;
+            return state.compare_exchange_strong(cur, desired, std::memory_order_acq_rel);
+        }
+        bool islocked(){
+            return state.load(std::memory_order_relaxed) & WRITER_ACTIVE_MASK;
+        }
+        bool issharelocked(){
+            return state.load(std::memory_order_relaxed) & READER_COUNT_MASK;
+        }
+    private:
+        // The 64-bit state variable encoding the reader count and writer flags.
+        std::atomic<uint64_t> state;
+        // Configures the latch for writer or reader prioritization.
+        const bool writerPrioritized;
+
+        // Bit masks and constants:
+        static constexpr uint64_t WRITER_ACTIVE_MASK     = 0x1ULL;               // Bit 0
+        static constexpr uint64_t WRITER_WAITING_MASK    = 0x2ULL;               // Bit 1
+        static constexpr uint64_t READER_COUNT_MASK      = ~((uint64_t)0x3);       // Bits 2–63
+        static constexpr uint64_t READER_COUNT_INCREMENT = 0x4ULL;               // One reader = 1 << 2
+        static constexpr int SPIN_THRESHOLD = 10000;  // Number of spin iterations before yielding
+
+        // Helper method to mark that a writer is waiting.
+        void set_writer_waiting() {
+            while (true) {
+                uint64_t cur = state.load(std::memory_order_acq_rel);
+                if (cur & WRITER_WAITING_MASK) {
+                    break;  // Already marked.
+                }
+                uint64_t desired = cur | WRITER_WAITING_MASK;
+                if (state.compare_exchange_weak(cur, desired, std::memory_order_acq_rel)) {
+                    break;
+                }
+                // In this tight loop, we assume the waiting flag is set quickly.
+            }
+        }
+    };
 
 class SpinLock {
  public:
