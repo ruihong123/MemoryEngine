@@ -271,7 +271,7 @@ namespace DSMEngine{
                 }
 
                 // todo: the shared latch below can be avoided.
-//                std::shared_lock<std::shared_mutex> lck(delta_section->ds_mtx_);
+                std::shared_lock<std::shared_mutex> lck(delta_section->ds_mtx_);
                 assert(meta.prev_delta_epoch_ <= delta_section->inner_section->epoch);
 
 #ifndef NDEBUG
