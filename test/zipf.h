@@ -178,7 +178,7 @@ static uint64_t mehcached_zipf_next(struct zipf_gen_state *state) {
     }
 }
 
-void mehcached_test_zipf(double theta) {
+static void mehcached_test_zipf(double theta) {
 
     (void)(mehcached_test_zipf);
 

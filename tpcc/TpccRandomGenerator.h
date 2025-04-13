@@ -3,7 +3,7 @@
 #define __DATABASE_TPCC_RANDOM_GENERATOR_H__
 
 #include "TpccConstants.h"
-//#include "test/zipf.h"
+#include "test/zipf.h"
 #include <string>
 #include <cstring>
 #include <cstdlib>
@@ -39,7 +39,7 @@ class TpccRandomGenerator {
   }
     static int GenerateZipfianInteger(const int &min, const int &max) {
         // TODO: zipfian distribution!
-
+//        int key = mehcached_zipf_next(&state);
     }
 
   //generate integer that falls inside [min, max] but not equal to excluding.
@@ -192,7 +192,8 @@ class TpccRandomGenerator {
   const static int cId_;
   const static int orderlineItemId_;
   const static bool zipfian_ = false;
-//  struct zipf_gen_state state;
+  static bool zipfian_initialized_;
+  static struct zipf_gen_state zip_state;
 };
 }
 }
