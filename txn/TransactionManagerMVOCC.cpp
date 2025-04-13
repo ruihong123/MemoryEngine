@@ -292,10 +292,13 @@ namespace DSMEngine{
                 DeltaRecord *delta_record = (DeltaRecord *) ((char *) delta_section->seg_local_mr_->addr +
                                                              (prev_delta.offset - delta_section->seg_addr_.offset));
 #ifndef NDEBUG
-                void* p = malloc(delta_record->current_record_data_size_);
+                size_t record_size = delta_record->current_record_data_size_;
+                char mark = delta_record->marker_;
+                void* p = malloc(record_size+200);
                 DeltaRecord* check_record = (DeltaRecord*)p;
-                memcpy(p, delta_record, delta_record->current_record_data_size_);
+                memcpy(p, (char*)delta_record -200, record_size+200);
                 assert(check_record->marker_ == '&');
+                free(p);
 #endif
                 record->roll_back(delta_record);
                 ts = record->GetWTS();
