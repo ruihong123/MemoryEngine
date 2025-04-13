@@ -38,7 +38,8 @@ namespace DSMEngine {
         ibv_mr *seg_local_mr_;
         size_t seg_real_size_; // not include the header size of inner delta section.
         RDMA_Manager *rdma_mg_;
-        std::shared_mutex ds_mtx_; // todo: change it into spinlatch.
+        RWSpinMutex shadow_mtx_; // todo: change it into spinlatch.
+        std::shared_mutex main_mtx_; // todo: change it into spinlatch.
         std::condition_variable_any cv;
 
         DeltaSection* inner_section;
@@ -65,7 +66,7 @@ namespace DSMEngine {
         }
 #ifdef SINGLE_DELTA_PER_NODE
         uint64_t AllocateDelta(size_t delta_size, size_t& prev_offset, size_t& next_offset) {
-            std::unique_lock<std::shared_mutex> lck(ds_mtx_);
+            std::unique_lock<std::shared_mutex> lck(main_mtx_);
             uint64_t  old_head = inner_section->head_;
             uint64_t return_offset = 0;
             prev_offset = inner_section->tail_allocated;
@@ -130,7 +131,7 @@ namespace DSMEngine {
             delta_gadd = seg_addr_;
             delta_gadd.offset += offset_to_write + STRUCT_OFFSET(DeltaSection, local_seg_addr_);
             {
-//                std::unique_lock<std::shared_mutex> lck(ds_mtx_);
+//                std::unique_lock<std::shared_mutex> lck(shadow_mtx_);
                 uint64_t epoch_before = inner_section->epoch;
                 uint64_t tail_shot_before = inner_section->tail_;
                 //todo: need to understand why CAS method for updating the tail is not working.
@@ -157,7 +158,7 @@ namespace DSMEngine {
             // todo: create a new function for fill in the delta records for mulitple tuple records.
             delta_size = new_record->estimate_delta_size(); // delta size include both delta header and delta content.
 //            size_t delta_size_padding = delta_size;
-            std::unique_lock<std::shared_mutex> lck(ds_mtx_);
+            std::unique_lock<std::shared_mutex> lck(main_mtx_);
             uint64_t  old_head = inner_section->head_;
             // we append new delta record to the tail.
             while (!inner_section->is_empty_ && (old_head + seg_real_size_ - inner_section->tail_) % seg_real_size_ <= delta_size) {
@@ -207,7 +208,7 @@ namespace DSMEngine {
         }
         void GarbageCollectionBySnapshot(uint64_t snapshot){
             // todo: this garbage collection logic is not correct. We need to fix it.
-            std::unique_lock<std::shared_mutex> lck(ds_mtx_);
+            std::unique_lock<std::shared_mutex> lck(main_mtx_);
             while(1){
                 //todo: think about the single delta case, when should we mark empty?
                 assert(inner_section->head_ <= seg_real_size_);
@@ -231,7 +232,11 @@ namespace DSMEngine {
                 }
                 
                 if (delta_record->next_delta_wts_ < snapshot){
+#ifndef NDEBUG
+                    memset(inner_section->local_seg_addr_ + inner_section->head_, 0, delta_record->current_record_data_size_);
+#endif
                     inner_section->head_ += delta_record->current_record_data_size_;
+
 #ifdef SINGLE_DELTA_PER_NODE
 
                     if (inner_section->head_ == inner_section->tail_allocated){
@@ -250,12 +255,6 @@ namespace DSMEngine {
                 }
             }
             cv.notify_all();
-        }
-
-        void recover_from_delta_record(Record *record, GlobalAddress& delta_gadd){
-            std::shared_lock<std::shared_mutex> lck(ds_mtx_);
-            DeltaRecord* delta_record = (DeltaRecord*)(inner_section->local_seg_addr_ + (delta_gadd.offset - seg_addr_.offset));
-            record->roll_back(delta_record);
         }
         uint64_t GetMaxTimestamp(){
             return inner_section->max_ts;

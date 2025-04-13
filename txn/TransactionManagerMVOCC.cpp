@@ -256,28 +256,37 @@ namespace DSMEngine{
 #ifndef NDEBUG
                 bool need_pull_update = false;
 #endif
-
-                if (delta_section->inner_section->is_empty_ ||
-                    !delta_section->isOffsetValid(prev_delta, meta.prev_delta_epoch_)) {
-#ifndef NDEBUG
-                    need_pull_update = true;
-#endif
-                    // fetch the latest version of the delta section.
-                    // use double-checked locking to avoid conflict.
-                    std::unique_lock<std::shared_mutex> lck(delta_section->ds_mtx_);
+                {
+                    // we use the latch for shadow copy because the garbage collection or delta appending shall not fail
+                    // the delta section validation in any way. In other word,  the new tail or epoch will not make the prev delta invalid.
+                    // and the garbage collection shall never collect the delta record that this transaciton snapshot can still see.
+                    std::shared_lock<RWSpinMutex> slck(delta_section->shadow_mtx_);
                     if (delta_section->inner_section->is_empty_ ||
                         !delta_section->isOffsetValid(prev_delta, meta.prev_delta_epoch_)) {
-                        assert(delta_section->owner_compute_node_id_ != RDMA_Manager::node_id);
-                        delta_section->PullUpdates();
-                        delta_pull_num[thread_id_]++;
+#ifndef NDEBUG
+                        need_pull_update = true;
+                        slck.unlock();
+#endif
+                        // fetch the latest version of the delta section.
+                        // use double-checked locking to avoid conflict.
+                        std::unique_lock<RWSpinMutex> lck(delta_section->shadow_mtx_);
+                        if (delta_section->inner_section->is_empty_ ||
+                            !delta_section->isOffsetValid(prev_delta, meta.prev_delta_epoch_)) {
+                            assert(delta_section->owner_compute_node_id_ != RDMA_Manager::node_id);
+                            delta_section->PullUpdates();
+                            delta_pull_num[thread_id_]++;
 
+
+                        }
 
                     }
-
                 }
 
-                // todo: the shared latch below can be avoided.
-//                std::shared_lock<std::shared_mutex> lck(delta_section->ds_mtx_);
+
+                // the shared latch below is necessary because the delta section may be under the delta pull by another thread.
+                // in this case the delta may still undering data transfer while the header is transffered first.
+//                std::shared_lock<std::shared_mutex> lck(delta_section->shadow_mtx_);
+
                 assert(meta.prev_delta_epoch_ <= delta_section->inner_section->epoch);
 
 #ifndef NDEBUG
@@ -615,7 +624,7 @@ namespace DSMEngine{
             map_lck.unlock();
             DeltaSectionWrap* ds_w = it->second;
             // RDMA write back the most updated delta section.
-            std::shared_lock<std::shared_mutex> delta_lck(ds_w->ds_mtx_);
+            std::shared_lock<std::shared_mutex> delta_lck(ds_w->main_mtx_);
             assert(!ds_w->inner_section->is_empty_);
             ibv_mr local_mr = *ds_w->seg_local_mr_;
             char* remote_addr = (char*)receive_msg_buf->buffer;
