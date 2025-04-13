@@ -283,8 +283,6 @@ namespace DSMEngine{
                 }
 
 
-                // the shared latch below is necessary because the delta section may be under the delta pull by another thread.
-                // in this case the delta may still undering data transfer while the header is transffered first.
 //                std::shared_lock<std::shared_mutex> lck(delta_section->shadow_mtx_);
 
                 assert(meta.prev_delta_epoch_ <= delta_section->inner_section->epoch);
