@@ -295,7 +295,7 @@ namespace DSMEngine{
                 size_t record_size = delta_record->current_record_data_size_;
                 char mark = delta_record->marker_;
                 void* p = malloc(record_size+200);
-                DeltaRecord* check_record = (DeltaRecord*)p;
+                DeltaRecord* check_record = (DeltaRecord*)((char*)p+200);
                 memcpy(p, (char*)delta_record -200, record_size+200);
                 assert(mark == '&');
                 free(p);
@@ -445,6 +445,8 @@ namespace DSMEngine{
                                                                 delta_gadd,
                                                                 delta_size, commit_ts);
 #endif
+                printf("The delta record is written at %u, %lu, epoch is %u\n", delta_gadd.nodeID, delta_gadd.offset, ds_for_write->GetEpoch());
+                fflush(stdout);
                 MetaColumn meta = access->txn_local_tuple_->GetMeta();
                 assert(delta_gadd.offset - ds_for_write->seg_addr_.offset < ds_for_write->seg_real_size_ + STRUCT_OFFSET(DeltaSection, local_seg_addr_));
                 meta.prev_delta_ = delta_gadd;
