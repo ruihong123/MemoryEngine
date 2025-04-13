@@ -227,6 +227,9 @@ namespace DSMEngine{
                 DeltaSectionWrap *delta_section = nullptr;
                 uint64_t ds_head = 0;
                 uint64_t ds_tail = 0;
+#ifdef SINGLE_DELTA_PER_NODE
+                uint64_t ds_tail_allocate = 0;
+#endif
                 uint64_t ds_epoch = 0;
                 {
                     std::shared_lock<std::shared_mutex> l(delta_map_mtx);
@@ -236,6 +239,9 @@ namespace DSMEngine{
 //                largest_ds_timestamp = delta_section->GetMaxTimestamp();
                     ds_head = delta_section->GetHead();
                     ds_tail = delta_section->GetTail();
+#ifdef SINGLE_DELTA_PER_NODE
+                    ds_tail_allocate = delta_section->GetTailAllocate();
+#endif
                     ds_epoch = delta_section->GetEpoch();
                     assert(iter != delta_sections.end());
                     assert(iter->first.nodeID == prev_delta.nodeID);
@@ -275,8 +281,8 @@ namespace DSMEngine{
                 assert(meta.prev_delta_epoch_ <= delta_section->inner_section->epoch);
 
 #ifndef NDEBUG
-                ds_tail = delta_section->GetTail();
-                ds_head = delta_section->GetHead();
+//                ds_tail = delta_section->GetTail();
+//                ds_head = delta_section->GetHead();
                 assert(!delta_section->inner_section->is_empty_ &&
                        delta_section->isOffsetValid(prev_delta, meta.prev_delta_epoch_));
 

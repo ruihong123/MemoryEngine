@@ -279,6 +279,11 @@ namespace DSMEngine {
 
 #endif
         }
+#ifdef SINGLE_DELTA_PER_NODE
+        uint64_t GetTailAllocate(){
+            return inner_section->tail_allocated;
+        }
+#endif
         bool isOffsetValid(GlobalAddress gaddr, uint64_t epoch)
         {   
             const uint64_t & head = inner_section->head_;
