@@ -355,7 +355,7 @@ namespace DSMEngine{
                     assert(false);
 
                 }else if (access_type == READ_WRITE || access_type == INSERT_ONLY){
-
+                    assert(!pure_read_txn);
                     if (locked_handles_.find(page_gaddr) == locked_handles_.end()){
                         //Acquire the exclusive latch and put the latch in to the lock handles table.
                         assert(page_gaddr.offset - tuple_gaddr.offset > STRUCT_OFFSET(DataPage, data_));
@@ -445,7 +445,7 @@ namespace DSMEngine{
                                                                 delta_gadd,
                                                                 delta_size, commit_ts);
 #endif
-                printf("Node %u The delta record is written at %u, %lu, epoch is %u, tuple_gaddr is %p\n", RDMA_Manager::node_id, delta_gadd.nodeID, delta_gadd.offset, ds_for_write->GetEpoch(), access->access_addr_.val);
+                printf("Node %u thread %u The delta record is written at %u, %lu, epoch is %u, tuple_gaddr is %p\n", RDMA_Manager::node_id, thread_id_, delta_gadd.nodeID, delta_gadd.offset, ds_for_write->GetEpoch(), access->access_addr_.val);
                 fflush(stdout);
                 MetaColumn meta = access->txn_local_tuple_->GetMeta();
                 assert(delta_gadd.offset - ds_for_write->seg_addr_.offset < ds_for_write->seg_real_size_ + STRUCT_OFFSET(DeltaSection, local_seg_addr_));
