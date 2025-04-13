@@ -289,7 +289,7 @@ namespace DSMEngine{
                 long offset = prev_delta.offset - delta_section->seg_addr_.offset -
                               STRUCT_OFFSET(DeltaSection, local_seg_addr_);
                 if (ds_tail >= ds_head) {
-                    assert(ds_tail - offset > STRUCT_OFFSET(DeltaRecord, data_));
+                    assert(delta_section->inner_section->tail_ - offset > STRUCT_OFFSET(DeltaRecord, data_));
                 }
 #endif
                 asm volatile ("sfence\n" : : );
