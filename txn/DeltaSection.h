@@ -232,10 +232,11 @@ namespace DSMEngine {
                 }
                 
                 if (delta_record->next_delta_wts_ < snapshot){
+                    int record_size = delta_record->current_record_data_size_;
 #ifndef NDEBUG
-                    memset(inner_section->local_seg_addr_ + inner_section->head_, 0, delta_record->current_record_data_size_);
+                    memset(inner_section->local_seg_addr_ + inner_section->head_, 0, record_size);
 #endif
-                    inner_section->head_ += delta_record->current_record_data_size_;
+                    inner_section->head_ += record_size;
 
 #ifdef SINGLE_DELTA_PER_NODE
 
