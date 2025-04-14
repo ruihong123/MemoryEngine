@@ -12,5 +12,7 @@ const int TpccRandomGenerator::cId_ = 1;
 //        TpccRandomGenerator::GenerateInteger(0, 1023);
 const int TpccRandomGenerator::orderlineItemId_ = 1;
 //    TpccRandomGenerator::GenerateInteger(0, 8191);
+    std::shared_mutex TpccRandomGenerator::zipfian_mutex_;
+    std::map<std::pair<int, int>, zipf_gen_state>  TpccRandomGenerator::zip_states;
 }
 }
