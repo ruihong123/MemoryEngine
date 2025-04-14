@@ -458,8 +458,8 @@ namespace DSMEngine{
                                                                 delta_gadd,
                                                                 delta_size, commit_ts);
 #endif
-                printf("Node %u thread %u The delta record is written at %u, %lu, epoch is %u, tuple_gaddr is %p\n", RDMA_Manager::node_id, thread_id_, delta_gadd.nodeID, delta_gadd.offset, ds_for_write->GetEpoch(), access->access_addr_.val);
-                fflush(stdout);
+//                printf("Node %u thread %u The delta record is written at %u, %lu, epoch is %u, tuple_gaddr is %p\n", RDMA_Manager::node_id, thread_id_, delta_gadd.nodeID, delta_gadd.offset, ds_for_write->GetEpoch(), access->access_addr_.val);
+//                fflush(stdout);
                 MetaColumn meta = access->txn_local_tuple_->GetMeta();
                 assert(delta_gadd.offset - ds_for_write->seg_addr_.offset < ds_for_write->seg_real_size_ + STRUCT_OFFSET(DeltaSection, local_seg_addr_));
                 meta.prev_delta_ = delta_gadd;
