@@ -9,9 +9,13 @@
 #include <cstdlib>
 #include <chrono>
 #include <unordered_set>
+#include <map>
+#include <shared_mutex>
+#include "BenchmarkArguments.h"
 
 namespace DSMEngine {
 namespace TpccBenchmark {
+//    double tpcc_zipf_theta = 0.99;
 class TpccRandomGenerator {
  public:
   static int GenerateNonuniformInteger(const int &a, const int &x,
@@ -39,7 +43,22 @@ class TpccRandomGenerator {
   }
     static int GenerateZipfianInteger(const int &min, const int &max) {
         // TODO: zipfian distribution!
-//        int key = mehcached_zipf_next(&state);
+        std::shared_lock<std::shared_mutex> lock(zipfian_mutex_);
+        auto checked_pair = std::pair<int, int>(min, max);
+        if (zip_states.count(checked_pair) == 0) {
+            lock.unlock();
+            std::unique_lock<std::shared_mutex> unique_lock(zipfian_mutex_);
+            if (zip_states.count(checked_pair) == 0) {
+                zipf_gen_state zip_state;
+                mehcached_zipf_init(&zip_state, max - min, tpcc_zipf_theta,
+                                    rand());
+                zip_states[checked_pair] = zip_state;
+                return min + mehcached_zipf_next(&zip_state);
+            }
+        }else{
+            return min + mehcached_zipf_next(&zip_states[checked_pair]);
+        }
+
     }
 
   //generate integer that falls inside [min, max] but not equal to excluding.
@@ -161,12 +180,24 @@ class TpccRandomGenerator {
 
   static int GenerateWarehouseId(const int &starting_warehouse,
                                  const int &ending_warehouse) {
-    return TpccRandomGenerator::GenerateInteger(starting_warehouse,
-                                                ending_warehouse);
+      if (tpcc_zipf){
+            return TpccRandomGenerator::GenerateZipfianInteger(starting_warehouse,
+                                             ending_warehouse);
+      }else{
+          return TpccRandomGenerator::GenerateInteger(starting_warehouse,
+                                                      ending_warehouse);
+      }
+
   }
 
   static int GenerateDistrictId(const int &num_districts_per_warehouse) {
-    return TpccRandomGenerator::GenerateInteger(1, num_districts_per_warehouse);
+    if (tpcc_zipf){
+        return TpccRandomGenerator::GenerateZipfianInteger(1,
+                                             num_districts_per_warehouse);
+    }else{
+        return TpccRandomGenerator::GenerateInteger(1,
+                                                    num_districts_per_warehouse);
+    }
   }
 
   static int GenerateCustomerId(const int &num_customers_per_district) {
@@ -191,9 +222,9 @@ class TpccRandomGenerator {
   const static int cLast_;
   const static int cId_;
   const static int orderlineItemId_;
-  const static bool zipfian_ = false;
-  static bool zipfian_initialized_;
-  static struct zipf_gen_state zip_state;
+//  static bool zipfian_initialized_;
+  static std::shared_mutex zipfian_mutex_;
+  static std::map<std::pair<int, int>, zipf_gen_state>  zip_states;
 };
 }
 }

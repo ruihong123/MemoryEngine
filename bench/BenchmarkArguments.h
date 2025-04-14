@@ -15,6 +15,8 @@ namespace DSMEngine {
     extern int dist_ratio;
     extern int num_txn;
     extern int num_core;  // number of cores utilized in a single numa node.
+    extern bool tpcc_zipf;
+    extern double tpcc_zipf_theta;
 
     extern uint64_t cache_size;
     extern std::string my_host_name;
