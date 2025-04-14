@@ -81,13 +81,6 @@ public:
         }
   }
 
-
-//    // set column. type must be varchar.
-//    void SetColumn(const size_t &column_id, void *data_str, const size_t &data_size){
-//        assert(schema_ptr_->GetColumnType(column_id) == ValueType::VARCHAR && schema_ptr_->GetColumnSize(column_id) >= data_size);
-//        memcpy(data_ptr_ + schema_ptr_->GetColumnOffset(column_id), data_str, data_size);
-//    }
-
     // set column. type must be varchar.
     void SetColumn(const size_t &column_id, const std::string &data){
         assert(schema_ptr_->GetColumnType(column_id) == ValueType::VARCHAR && schema_ptr_->GetColumnSize(column_id) >= data.size());
