@@ -252,7 +252,7 @@ class SpinMutex {
                 }
                 // Attempt to increment the reader count (bits 2–63).
                 uint64_t newVal = cur + READER_COUNT_INCREMENT;
-                if (state.compare_exchange_weak(cur, newVal, std::memory_order_acquire)) {
+                if (state.compare_exchange_weak(cur, newVal, std::memory_order_acq_rel)) {
                     break;  // Shared lock acquired.
                 }
                 if (++spin >= SPIN_THRESHOLD) {
@@ -280,7 +280,7 @@ class SpinMutex {
                         // Attempt to acquire exclusive lock:
                         // Set the writer active flag and clear the waiting flag.
                         uint64_t desired = (cur | WRITER_ACTIVE_MASK) & ~WRITER_WAITING_MASK;
-                        if (state.compare_exchange_strong(cur, desired, std::memory_order_acquire)) {
+                        if (state.compare_exchange_strong(cur, desired, std::memory_order_acq_rel)) {
                             break;  // Exclusive lock acquired.
                         }
                     } else {

@@ -265,8 +265,8 @@ namespace DSMEngine{
                         !delta_section->isOffsetValid(prev_delta, meta.prev_delta_epoch_)) {
 #ifndef NDEBUG
                         need_pull_update = true;
-                        slck.unlock();
 #endif
+                        slck.unlock();
                         // fetch the latest version of the delta section.
                         // use double-checked locking to avoid conflict.
                         std::unique_lock<RWSpinMutex> lck(delta_section->shadow_mtx_);
