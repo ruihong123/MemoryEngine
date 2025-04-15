@@ -135,11 +135,11 @@ namespace DSMEngine {
                 uint64_t epoch_before = inner_section->epoch;
                 uint64_t tail_shot_before = inner_section->tail_;
                 //todo: need to understand why CAS method for updating the tail is not working.
-//                while (!inner_section->tail_.compare_exchange_weak(prev_offset, next_offset, std::memory_order_seq_cst,
-//                                                                     std::memory_order_seq_cst)) {
-//                    _mm_pause();
-//                };
-                inner_section->tail_.fetch_add(next_offset - prev_offset, std::memory_order_seq_cst);
+                while (!inner_section->tail_.compare_exchange_weak(prev_offset, next_offset, std::memory_order_seq_cst,
+                                                                     std::memory_order_seq_cst)) {
+                    _mm_pause();
+                };
+//                inner_section->tail_.fetch_add(next_offset - prev_offset, std::memory_order_seq_cst);
 //                printf("Node %d thread %d has modified tail_ from %lu to %lu\n", rdma_mg_->node_id, rdma_mg_->thread_id,
 //                       prev_offset, next_offset);
 //                fflush(stdout);
