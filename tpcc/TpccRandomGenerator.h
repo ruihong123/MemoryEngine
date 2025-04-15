@@ -42,7 +42,6 @@ class TpccRandomGenerator {
     }
   }
     static int GenerateZipfianInteger(const int &min, const int &max) {
-        // TODO: zipfian distribution!
         std::shared_lock<std::shared_mutex> lock(zipfian_mutex_);
         auto checked_pair = std::pair<int, int>(min, max);
         if (zip_states.count(checked_pair) == 0) {
