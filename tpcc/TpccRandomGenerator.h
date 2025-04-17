@@ -52,11 +52,10 @@ class TpccRandomGenerator {
                 mehcached_zipf_init(&zip_state, max - min, tpcc_zipf_theta,
                                     rand());
                 zip_states[checked_pair] = zip_state;
-                return min + mehcached_zipf_next(&zip_state);
+                // return min + mehcached_zipf_next(&zip_state);
             }
-        }else{
-            return min + mehcached_zipf_next(&zip_states[checked_pair]);
         }
+        return min + mehcached_zipf_next(&zip_states[checked_pair]);
 
     }
 
