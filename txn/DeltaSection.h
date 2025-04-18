@@ -140,9 +140,9 @@ namespace DSMEngine {
                     _mm_pause();
                 };
 //                inner_section->tail_.fetch_add(next_offset - prev_offset, std::memory_order_seq_cst);
-//                printf("Node %d thread %d has modified tail_ from %lu to %lu\n", rdma_mg_->node_id, rdma_mg_->thread_id,
-//                       prev_offset, next_offset);
-//                fflush(stdout);
+                printf("Node %d thread %d has modified tail_ from %lu to %lu\n", rdma_mg_->node_id, rdma_mg_->thread_id,
+                       prev_offset, next_offset);
+                fflush(stdout);
                 uint64_t epoch = inner_section->epoch;
                 uint64_t tail_shot = inner_section->tail_;
 
