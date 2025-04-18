@@ -99,11 +99,6 @@ namespace DSMEngine {
                 inner_section->is_empty_ = false;
             }
             next_offset = inner_section->tail_allocated;
-#ifndef NDEBUG
-            printf("Step 1: Node %d thread %d modify tail_allcoate from %lu to %lu\n", rdma_mg_->node_id, rdma_mg_->thread_id, prev_offset, next_offset);
-            fflush(stdout);
-            assert(next_offset >= prev_offset || old_epoch < inner_section->epoch);
-#endif
             return return_offset;
 
         }
@@ -115,8 +110,8 @@ namespace DSMEngine {
             uint64_t prev_offset;
             uint64_t next_offset;
             uint64_t offset_to_write = AllocateDelta(delta_size, prev_offset, next_offset);
-            printf("Step2: Node %d thread %d modify tail_allocate from %lu to %lu (outside allocate delta)\n", rdma_mg_->node_id, rdma_mg_->thread_id, prev_offset, next_offset);
-            fflush(stdout);
+//            printf("Step2: Node %d thread %d modify tail_allocate from %lu to %lu (outside allocate delta)\n", rdma_mg_->node_id, rdma_mg_->thread_id, prev_offset, next_offset);
+//            fflush(stdout);
             assert(next_offset <= seg_real_size_);
             assert(offset_to_write <= seg_real_size_);
             //todo the max_ts need to be guarded by a mtx.
@@ -144,25 +139,21 @@ namespace DSMEngine {
                 uint64_t epoch_before = inner_section->epoch;
                 uint64_t tail_shot_before = inner_section->tail_;
                 //todo: need to understand why CAS method for updating the tail is not working.
-#ifndef NDEBUG
-                size_t old_prev_offset = prev_offset;
-                size_t old_next_offset = next_offset;
-                assert(next_offset > prev_offset || prev_offset - next_offset > 100000);
-#endif
 
-                while (!inner_section->tail_.compare_exchange_weak(prev_offset, next_offset, std::memory_order_seq_cst,
+                size_t expect = prev_offset;
+//                size_t old_next_offset = next_offset;
+                assert(next_offset > prev_offset || prev_offset - next_offset > 100000);
+
+                while (!inner_section->tail_.compare_exchange_weak(expect, next_offset, std::memory_order_seq_cst,
                                                                      std::memory_order_seq_cst)) {
-                    assert(next_offset > prev_offset || prev_offset - next_offset > 100000);
+                    expect = prev_offset;
+//                    assert(next_offset > expect || expect - next_offset > 100000);
                     _mm_pause();
                 };
 //                inner_section->tail_.fetch_add(next_offset - prev_offset, std::memory_order_seq_cst);
                 printf("Step 3: Node %d thread %d has modified tail_ from %lu to %lu, current tail_ is %lu\n", rdma_mg_->node_id, rdma_mg_->thread_id,
                        prev_offset, next_offset, inner_section->tail_.load());
                 fflush(stdout);
-                uint64_t epoch = inner_section->epoch;
-                uint64_t tail_shot = inner_section->tail_;
-
-//                assert(tail_shot > prev_offset || epoch > epoch_before);
             }
 
         }
