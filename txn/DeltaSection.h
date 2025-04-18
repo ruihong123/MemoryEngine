@@ -96,8 +96,8 @@ namespace DSMEngine {
                 inner_section->is_empty_ = false;
             }
             next_offset = inner_section->tail_allocated;
-//            printf("Node %d thread %d modify tail_ from %lu to %lu\n", rdma_mg_->node_id, rdma_mg_->thread_id, prev_offset, next_offset);
-//            fflush(stdout);
+            printf("Node %d thread %d modify tail_ from %lu to %lu\n", rdma_mg_->node_id, rdma_mg_->thread_id, prev_offset, next_offset);
+            fflush(stdout);
             return return_offset;
 
         }
