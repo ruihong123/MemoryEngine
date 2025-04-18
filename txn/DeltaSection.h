@@ -146,14 +146,15 @@ namespace DSMEngine {
 
                 while (!inner_section->tail_.compare_exchange_weak(expect, next_offset, std::memory_order_seq_cst,
                                                                      std::memory_order_seq_cst)) {
+                    // the expect will be changed by the compare exchange, so wee need to update it.
                     expect = prev_offset;
 //                    assert(next_offset > expect || expect - next_offset > 100000);
                     _mm_pause();
                 };
 //                inner_section->tail_.fetch_add(next_offset - prev_offset, std::memory_order_seq_cst);
-                printf("Step 3: Node %d thread %d has modified tail_ from %lu to %lu, current tail_ is %lu\n", rdma_mg_->node_id, rdma_mg_->thread_id,
-                       prev_offset, next_offset, inner_section->tail_.load());
-                fflush(stdout);
+//                printf("Step 3: Node %d thread %d has modified tail_ from %lu to %lu, current tail_ is %lu\n", rdma_mg_->node_id, rdma_mg_->thread_id,
+//                       prev_offset, next_offset, inner_section->tail_.load());
+//                fflush(stdout);
             }
 
         }
