@@ -96,7 +96,7 @@ namespace DSMEngine {
                 inner_section->is_empty_ = false;
             }
             next_offset = inner_section->tail_allocated;
-            printf("Node %d thread %d modify tail_ from %lu to %lu\n", rdma_mg_->node_id, rdma_mg_->thread_id, prev_offset, next_offset);
+            printf("Node %d thread %d modify tail_allcoate from %lu to %lu\n", rdma_mg_->node_id, rdma_mg_->thread_id, prev_offset, next_offset);
             fflush(stdout);
             return return_offset;
 
@@ -105,10 +105,11 @@ namespace DSMEngine {
         void fill_in_delta_record_single(Record *new_record, Record *old_record, GlobalAddress &delta_gadd, size_t &delta_size,
                                                uint64_t commit_ts) {
             delta_size = new_record->estimate_delta_size(); // delta size include both delta header and delta content.
+            assert(delta_size <10000);
             uint64_t prev_offset;
             uint64_t next_offset;
             uint64_t offset_to_write = AllocateDelta(delta_size, prev_offset, next_offset);
-            printf("Node %d thread %d modify tail_ from %lu to %lu(outside allocate delta)\n", rdma_mg_->node_id, rdma_mg_->thread_id, prev_offset, next_offset);
+            printf("Node %d thread %d modify tail_allocate from %lu to %lu (outside allocate delta)\n", rdma_mg_->node_id, rdma_mg_->thread_id, prev_offset, next_offset);
             fflush(stdout);
             assert(next_offset <= seg_real_size_);
             assert(offset_to_write <= seg_real_size_);
