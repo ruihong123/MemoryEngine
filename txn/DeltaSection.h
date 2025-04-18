@@ -69,6 +69,9 @@ namespace DSMEngine {
             std::unique_lock<std::shared_mutex> lck(main_mtx_);
             uint64_t  old_head = inner_section->head_;
             uint64_t return_offset = 0;
+#ifndef NDEBUG
+            size_t old_epoch = inner_section->epoch;
+#endif
             prev_offset = inner_section->tail_allocated;
             // we append new delta record to the tail.
             while (!inner_section->is_empty_ && (old_head + seg_real_size_ - inner_section->tail_allocated) % seg_real_size_ <= delta_size) {
@@ -98,6 +101,7 @@ namespace DSMEngine {
             next_offset = inner_section->tail_allocated;
             printf("Node %d thread %d modify tail_allcoate from %lu to %lu\n", rdma_mg_->node_id, rdma_mg_->thread_id, prev_offset, next_offset);
             fflush(stdout);
+            assert(next_offset >= prev_offset || old_epoch < inner_section->epoch);
             return return_offset;
 
         }
