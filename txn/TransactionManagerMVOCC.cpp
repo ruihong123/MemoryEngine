@@ -453,7 +453,7 @@ namespace DSMEngine{
                 ds_for_write->fill_in_delta_record_single(access->txn_local_tuple_, access->access_global_record_,
                                                                 delta_gadd,
                                                                 delta_size, commit_ts);
-                printf("Node %d thread %d modify tail_ outside fill in delta\n", RDMA_Manager::node_id, thread_id_);
+                printf("Step 4: Node %d thread %d modify tail_ outside fill in delta\n", RDMA_Manager::node_id, thread_id_);
                 fflush(stdout);
 #else
                 ds_for_write->fill_in_delta_record_thread_local(access->txn_local_tuple_, access->access_global_record_,
