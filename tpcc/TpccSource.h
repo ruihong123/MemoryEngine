@@ -13,7 +13,7 @@ namespace TpccBenchmark {
 
 
 
-    class TpccSource : public BenchmarkSource {
+class TpccSource : public BenchmarkSource {
  public:
   TpccSource(TpccScaleParams* scale_params, IORedirector* redirector,
              size_t num_txn, size_t source_type, size_t thread_count,
