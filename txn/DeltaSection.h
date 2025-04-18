@@ -108,6 +108,8 @@ namespace DSMEngine {
             uint64_t prev_offset;
             uint64_t next_offset;
             uint64_t offset_to_write = AllocateDelta(delta_size, prev_offset, next_offset);
+            printf("Node %d thread %d modify tail_ from %lu to %lu(outside allocate delta)\n", rdma_mg_->node_id, rdma_mg_->thread_id, prev_offset, next_offset);
+            fflush(stdout);
             assert(next_offset <= seg_real_size_);
             assert(offset_to_write <= seg_real_size_);
             //todo the max_ts need to be guarded by a mtx.
