@@ -144,9 +144,15 @@ namespace DSMEngine {
                 uint64_t epoch_before = inner_section->epoch;
                 uint64_t tail_shot_before = inner_section->tail_;
                 //todo: need to understand why CAS method for updating the tail is not working.
+#ifndef NDEBUG
+                size_t old_prev_offset = prev_offset;
+                size_t old_next_offset = next_offset;
                 assert(next_offset > prev_offset || prev_offset - next_offset > 100000);
+#endif
+
                 while (!inner_section->tail_.compare_exchange_weak(prev_offset, next_offset, std::memory_order_seq_cst,
                                                                      std::memory_order_seq_cst)) {
+                    assert(next_offset > prev_offset || prev_offset - next_offset > 100000);
                     _mm_pause();
                 };
 //                inner_section->tail_.fetch_add(next_offset - prev_offset, std::memory_order_seq_cst);
