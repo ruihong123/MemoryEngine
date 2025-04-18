@@ -2278,7 +2278,7 @@ End of socket operations
         struct ibv_send_wr sr;
         struct ibv_sge sge;
         struct ibv_send_wr* bad_wr = NULL;
-        int rc;
+        int rc = 0;
         /* prepare the scatter/gather entry */
         memset(&sge, 0, sizeof(sge));
         sge.addr = (uintptr_t)local_mr->addr;
@@ -2386,7 +2386,7 @@ End of socket operations
   struct ibv_send_wr sr;
   struct ibv_sge sge;
   struct ibv_send_wr* bad_wr = NULL;
-  int rc;
+  int rc = 0;
   /* prepare the scatter/gather entry */
   memset(&sge, 0, sizeof(sge));
   sge.addr = (uintptr_t)local_mr->addr;
@@ -6058,9 +6058,9 @@ int RDMA_Manager::poll_completion(ibv_wc* wc_p, int num_entries,
     poll_result = ibv_poll_cq(cq, num_entries, &wc_p[poll_num]);
     if (poll_result < 0)
       break;
-    else
-      poll_num = poll_num + poll_result;
-      
+    else{
+        poll_num = poll_num + poll_result;
+    }
       ibv_qp_attr qp_init_attr;
       ibv_qp_init_attr qp_state;
       if (count++ > 1000000){
