@@ -418,10 +418,7 @@ namespace DSMEngine{
         }
         bool InsertRecord(const Slice &tuple, int &cnt, RecordSchema *record_scheme, GlobalAddress& g_addr);
         bool AllocateRecord(int &cnt, RecordSchema *record_scheme, GlobalAddress& g_addr, char*& data_buffer);
-
         bool DeleteRecord(GlobalAddress g_addr, RecordSchema *record_scheme);
-        bool Data_page_delete(char* local_addr);
-        bool Data_page_delete(Record* out_side_record);
         int find_empty_spot_from_bitmap(uint64_t* bitmap, uint32_t number_of_bits);
         void set_bitmap(uint64_t* bitmap, size_t index);
         void reset_bitmap(uint64_t* bitmap, size_t index);

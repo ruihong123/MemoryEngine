@@ -149,6 +149,7 @@ namespace DSMEngine {
         bool remove(const Key &k);
 
         bool search(const Key &k, const Slice &v);
+        bool remove(const Key &k, const Slice &v);
         //Remember to destroy the iterator after use.
         iterator begin();
         // Finds the first element whose key is not less than key. the iterator always move forward.
@@ -276,6 +277,8 @@ namespace DSMEngine {
 //                           CoroContext *cxt, int coro_id);
 
     };
+
+
 
 }
 #endif //BTR_H

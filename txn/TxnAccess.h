@@ -13,7 +13,7 @@ struct Access {
   AccessType access_type_;
   Record* access_global_record_ = nullptr;
   Record* txn_local_tuple_ = nullptr;
-  GlobalAddress access_addr_;
+  GlobalAddress access_addr_; // tuple global address
 };
 
 template<int N>

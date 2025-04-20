@@ -628,7 +628,70 @@ namespace DSMEngine {
         assert(level == 0);
 
     }
+    template<typename Key>
+    bool Btr<Key>::remove(const Key &k, const Slice &v) {
+        // help me to implement the remove function following the search function
+        before_operation();
 
+        Cache::Handle* page_hint = nullptr;
+        auto root = get_root_ptr_protected(page_hint);
+        assert(root != GlobalAddress::Null());
+        GlobalAddress p = root;
+
+        SearchResult<Key> result{0};
+        char result_buff[16];
+        result.val.Reset(result_buff, 16);
+
+        bool isroot = true;
+        int level = -1;
+
+        next:
+        if (!internal_page_search(p, k, result, level, isroot, page_hint)) {
+            if (isroot || path_stack[result.level + 1] == GlobalAddress::Null()) {
+                isroot = true;
+                p = get_root_ptr_protected(page_hint);
+                level = -1;
+            } else {
+                assert(level == result.level || level == -1);
+                p = path_stack[result.level + 1];
+                if (p == root) {
+                    isroot = true;
+                }
+                page_hint = nullptr;
+                level = result.level + 1;
+            }
+            goto next;
+        } else {
+            assert(level == result.level);
+            isroot = false;
+            page_hint = nullptr;
+
+            if (result.next_level != GlobalAddress::Null()) {
+                p = result.next_level;
+                level = result.level - 1;
+                goto next;
+            }
+        }
+
+        assert(level == 0);
+        if (!leaf_page_delete(p, k, v, level)) {
+            if (path_stack[1] != GlobalAddress::Null()) {
+                p = path_stack[1];
+                if (p == root) {
+                    isroot = true;
+                }
+                level = 1;
+            } else {
+                p = get_root_ptr_protected(page_hint);
+                isroot = true;
+                level = -1;
+            }
+            goto next;
+        }
+
+        return true;
+
+    }
     template <typename Key>
     bool Btr<Key>::search(const Key &k, const Slice &value_buff) {
 //  assert(rdma_mg->is_register());

@@ -521,6 +521,12 @@ namespace DSMEngine{
                 delete access->access_global_record_;
                 access->access_global_record_ = nullptr;
                 access->access_addr_ = GlobalAddress::Null();
+//                if (access->access_type_ == INSERT_ONLY){
+//                    GlobalAddress tuple_addr = access->access_addr_;
+//                    GlobalAddress page_gaddr = TOPAGE(tuple_addr);
+//                    DataPage* page = (DataPage*)access->access_global_record_->data_ptr_ - (tuple_addr.offset - page_gaddr.offset);
+//                    page->DeleteRecord(tuple_addr, access->access_global_record_->schema_ptr_);
+//                }
             }
 			access_list_.Clear();
             // Clear the grabbed SELCC latch.
