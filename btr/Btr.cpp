@@ -674,7 +674,7 @@ namespace DSMEngine {
         }
 
         assert(level == 0);
-        if (!leaf_page_delete(p, k, v, level)) {
+        if (!leaf_page_delete(p, k, result, level)) {
             if (path_stack[1] != GlobalAddress::Null()) {
                 p = path_stack[1];
                 if (p == root) {
