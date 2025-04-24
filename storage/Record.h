@@ -200,7 +200,7 @@ public:
             return meta_col.is_visible_;
         }
 
-#if defined(TO)
+#if defined(TO) || defined(TIMESTAMP)
         [[nodiscard]] uint64_t GetRTS() const {
             size_t meta_col_id = schema_ptr_->GetMetaColumnId();
             MetaColumn meta_col;
@@ -215,7 +215,7 @@ public:
             SetColumn(meta_col_id, &meta_col);
         }
 #endif
-#if defined(TO) || defined(OCC) || defined(MVOCC)
+#if defined(TO) || defined(OCC) || defined(MVOCC)|| defined(TIMESTAMP)
         [[nodiscard]] uint64_t GetWTS() const {
             size_t meta_col_id = schema_ptr_->GetMetaColumnId();
             MetaColumn meta_col;

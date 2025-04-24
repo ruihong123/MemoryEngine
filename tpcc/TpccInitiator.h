@@ -2,15 +2,15 @@
 #ifndef __TPCC_INITIATOR_H__
 #define __TPCC_INITIATOR_H__
 
-#include "BenchmarkInitiator.h"
+#include "EngineInitiator.h"
 #include "Meta.h"
 
 namespace DSMEngine {
 namespace TpccBenchmark {
-class TpccInitiator : public BenchmarkInitiator {
+class TpccInitiator : public EngineInitiator {
  public:
   TpccInitiator(const size_t& thread_count, ClusterConfig* config)
-      : BenchmarkInitiator(thread_count, config) {
+      : EngineInitiator(thread_count, config) {
       printf("Iitialize the TpccInitiator\n");
   }
   ~TpccInitiator() {

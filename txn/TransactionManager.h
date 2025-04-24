@@ -312,8 +312,12 @@ protected:
   bool is_first_access_ = true;
   std::map<uint64_t , std::pair<Cache::Handle*, int>> locked_handles_;
 #endif
+#if defined(TIMESTAMP)
+  uint64_t start_timestamp_ = 0;
+  bool is_first_access_ = true;
+#endif
   // lock handles shall also be used for non-lock based algorithm to avoid acquire the same latch twice during the execution.
-#if defined(LOCK) || defined(OCC) || defined(MVOCC)
+#if defined(LOCK) || defined(OCC) || defined(MVOCC) || defined(TIMESTAMP)
   std::unordered_map<uint64_t , std::pair<Cache::Handle*, AccessType>> locked_handles_;
 #endif
 

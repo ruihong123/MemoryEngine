@@ -23,10 +23,10 @@ enum ValueType
 };
 
 struct MetaColumn {
-#if defined(TO)
+#if defined(TO) || defined(TIMESTAMP)
    uint64_t Rts_;
 #endif
-#if defined(TO) || defined(OCC) || defined(MVOCC)
+#if defined(TO) || defined(OCC) || defined(MVOCC)|| defined(TIMESTAMP)
     uint64_t Wts_;
 #endif
 #if defined(MVOCC)
