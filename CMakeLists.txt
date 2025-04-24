@@ -87,6 +87,7 @@ target_sources(DSMEngine
         "txn/TxnManagerTo.cpp"
         "txn/DeltaSection.cpp"
         "txn/DeltaRecord.cpp"
+        "txn/DeltaRecord.cpp"
 
 
         # Only CMake 3.3+ supports PUBLIC sources in targets exported by "install".
