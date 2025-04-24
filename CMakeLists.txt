@@ -81,6 +81,13 @@ target_sources(DSMEngine
         "utils/status.h"
         "test/zipf.h"
         "include/Tools/env.h"
+        "txn/TransactionManagerMVOCC.cpp"
+        "txn/TransactionManagerOCC.cpp"
+        "txn/TransactionManager2PL.cpp"
+        "txn/TxnManagerTo.cpp"
+        "txn/DeltaSection.cpp"
+        "txn/DeltaRecord.cpp"
+
 
         # Only CMake 3.3+ supports PUBLIC sources in targets exported by "install".
         $<$<VERSION_GREATER:CMAKE_VERSION,3.2>:PUBLIC>
@@ -90,7 +97,13 @@ target_sources(DSMEngine
         "include/HugePageAlloc.h"
         "include/Timer.h"
         "include/DDSM.h"
+        "include/EngineInitiator.h"
+        "txn/TransactionManager.h"
+        "txn/DeltaRecord.h"
+        "txn/DeltaSection.h"
         )
+# add more target sources for DSMEngine here
+#        "include/ThreadPool.h"
 
 target_include_directories(DSMEngine
         PUBLIC
