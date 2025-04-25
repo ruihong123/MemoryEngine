@@ -2,24 +2,25 @@
 #ifndef __DATABASE__TRANSACTION_EXECUTOR_H__
 #define __DATABASE__TRANSACTION_EXECUTOR_H__
 
-#include "StorageManager.h"
-#include "IORedirector.h"
-#include "Meta.h"
-#include "TxnParam.h"
-#include "TimeMeasurer.h"
-#include "StoredProcedure.h"
-#include "Profiler.h"
-#include "PerfStatistics.h"
+#include <xmmintrin.h>
+#include <atomic>
+#include <boost/thread.hpp>
 #include <iostream>
 #include <unordered_map>
-#include <boost/thread.hpp>
-#include <atomic>
-#include <xmmintrin.h>
+#include "IORedirector.h"
+#include "Meta.h"
+#include "PerfStatistics.h"
+#include "Profiler.h"
+#include "StoredProcedure.h"
+#include "TableDirectory.h"
+#include "TimeMeasurer.h"
+#include "TxnParam.h"
 
 namespace DSMEngine {
 class TransactionExecutor {
  public:
-  TransactionExecutor(IORedirector *const redirector, StorageManager *storage_manager, size_t thread_count,
+  TransactionExecutor(IORedirector *const redirector,
+                      TableDirectory *storage_manager, size_t thread_count,
                       bool log_enabled)
       :thread_count_(thread_count),
       storage_manager_(storage_manager),
@@ -52,7 +53,7 @@ class TransactionExecutor {
         uint32_t handler_id = *((uint32_t*)id_p);
         uint32_t dummy_thread_id = 0;
         bindCore(dummy_thread_id);
-        StorageManager* storage_manager_ = (StorageManager*)storage_ptr;
+        TableDirectory * storage_manager_ = (TableDirectory *)storage_ptr;
         size_t thread_count = 0;
         TransactionManager *txn_manager = new TransactionManager(
                 storage_manager_, thread_count, 0, LOGGING, false);
@@ -311,7 +312,7 @@ class TransactionExecutor {
 
  protected:
   size_t thread_count_;
-  StorageManager *storage_manager_;
+  TableDirectory *storage_manager_;
   IORedirector* const redirector_ptr_;
   std::unordered_map<size_t, std::function<StoredProcedure*()>> registers_;
   std::unordered_map<size_t, std::function<void(StoredProcedure*)>> deregisters_;

@@ -10,7 +10,7 @@ namespace DSMEngine {
 namespace TpccBenchmark {
 class TpccPopulator : public BenchmarkPopulator {
  public:
-  TpccPopulator(StorageManager *storage_manager,
+  TpccPopulator(TableDirectory *storage_manager,
                 TpccScaleParams* scale_params)
       : BenchmarkPopulator(storage_manager),
         scale_params_(scale_params) {

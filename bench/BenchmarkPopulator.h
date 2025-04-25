@@ -4,14 +4,14 @@
 
 #include <iostream>
 
-#include "StorageManager.h"
 #include "Meta.h"
+#include "TableDirectory.h"
 #include "TimeMeasurer.h"
 
 namespace DSMEngine {
 class BenchmarkPopulator {
  public:
-  BenchmarkPopulator(StorageManager *storage_manager)
+  BenchmarkPopulator(TableDirectory *storage_manager)
       : storage_manager_(storage_manager) {
   }
 
@@ -35,7 +35,7 @@ class BenchmarkPopulator {
   BenchmarkPopulator& operator=(const BenchmarkPopulator &);
 
  protected:
-  StorageManager *storage_manager_;
+  TableDirectory *storage_manager_;
 };
 }
 

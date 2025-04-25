@@ -5,18 +5,18 @@
 #include <iostream>
 #include <vector>
 
+#include "CharArray.h"
+#include "DeltaSection.h"
 #include "Meta.h"
-#include "StorageManager.h"
+#include "Profiler.h"
 #include "Record.h"
 #include "Records.h"
-#include "TxnParam.h"
-#include "CharArray.h"
-#include "TxnContext.h"
-#include "TxnAccess.h"
-#include "Profiler.h"
-#include "env_posix.h"
+#include "TableDirectory.h"
 #include "TpccParams.h"
-#include "DeltaSection.h"
+#include "TxnAccess.h"
+#include "TxnContext.h"
+#include "TxnParam.h"
+#include "env_posix.h"
 //#include "TpccConstants.h"
 //#include "log.h"
 #define TWO_PHASE_COMMIT
@@ -36,7 +36,7 @@ enum ISOLATION_LEVEL {
 };
 class TransactionManager {
  public:
-  TransactionManager(StorageManager *storage_manager, size_t thread_count, size_t thread_id, bool wal_log = false, bool sharding = false)
+  TransactionManager(TableDirectory *storage_manager, size_t thread_count, size_t thread_id, bool wal_log = false, bool sharding = false)
       : storage_manager_(storage_manager),
         thread_id_(thread_id),
         thread_count_(thread_count),
@@ -257,7 +257,7 @@ class TransactionManager {
                       AccessType access_type);
 
  public:
-  StorageManager* storage_manager_;
+  TableDirectory * storage_manager_;
     Env* env_;
     static WritableFile* log_file;
     static std::atomic<uint64_t>  largest_sp_acquired;

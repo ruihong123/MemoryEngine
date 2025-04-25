@@ -7,13 +7,13 @@
 #include "Table.h"
 
 namespace DSMEngine {
-class StorageManager{
+class TableDirectory {
 public:
-  StorageManager() {
+ TableDirectory() {
     tables_ = nullptr;
     table_count_ = 0;
   }
-  ~StorageManager() {
+  ~TableDirectory() {
     if (tables_) {
       assert(table_count_ > 0);
       for (size_t i = 0; i < table_count_; ++i) {

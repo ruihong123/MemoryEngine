@@ -9,7 +9,7 @@ namespace DSMEngine {
 namespace TpccBenchmark {
 class TpccExecutor : public TransactionExecutor {
  public:
-  TpccExecutor(IORedirector *const redirector, StorageManager *storage_manager, size_t thread_count_,
+  TpccExecutor(IORedirector *const redirector, TableDirectory *storage_manager, size_t thread_count_,
                bool log_enabled)
       : TransactionExecutor(redirector, storage_manager, thread_count_, log_enabled) {
   }

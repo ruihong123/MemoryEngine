@@ -2,10 +2,10 @@
 #ifndef __DATABASE_TXN__STORED_PROCEDURE_H__
 #define __DATABASE_TXN__STORED_PROCEDURE_H__
 
-#include "StorageManager.h"
+#include "Meta.h"
+#include "TableDirectory.h"
 #include "TransactionManager.h"
 #include "TxnContext.h"
-#include "Meta.h"
 
 namespace DSMEngine {
 #define DB_QUERY(statement) \

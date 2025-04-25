@@ -4,12 +4,12 @@
 #ifndef __DATABASE_BENCHMARK_INITIATOR_H__
 #define __DATABASE_BENCHMARK_INITIATOR_H__
 
-#include "DDSM.h"
-#include "ClusterHelper.h"
 #include "ClusterConfig.h"
-#include "StorageManager.h"
-#include "Profiler.h"
+#include "ClusterHelper.h"
+#include "DDSM.h"
 #include "PerfStatistics.h"
+#include "Profiler.h"
+#include "TableDirectory.h"
 
 namespace DSMEngine {
 class EngineInitiator {
@@ -48,7 +48,7 @@ class EngineInitiator {
   }
 
   char* InitStorage() {
-      char* storage_addr = static_cast<char *>(malloc(StorageManager::GetSerializeSize()));
+      char* storage_addr = static_cast<char *>(malloc(TableDirectory::GetSerializeSize()));
       int my_partition_id = config_->GetMyPartitionId();
     int partition_num = config_->GetPartitionNum();
     if (config_->IsMaster()) {

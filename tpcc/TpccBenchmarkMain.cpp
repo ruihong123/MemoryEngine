@@ -52,11 +52,12 @@ int main(int argc, char* argv[]) {
   char* storage_addr = initiator.InitStorage();
     assert(storage_addr);
   char storage_key[16] = "Storage Key";
-//  default_gallocator->memSet(storage_key, 16, storage_addr, StorageManager::GetSerializeSize());
-    synchronizer.MasterBroadcast(storage_key, 16, storage_addr, StorageManager::GetSerializeSize());
+//  default_gallocator->memSet(storage_key, 16, storage_addr, TableDirectory::GetSerializeSize());
+    synchronizer.MasterBroadcast(storage_key, 16, storage_addr,
+                               TableDirectory::GetSerializeSize());
 
     std::cout << "storage_addr=" << storage_addr << std::endl;
-  StorageManager storage_manager;
+    TableDirectory storage_manager;
   storage_manager.Deserialize(storage_addr);
 
   // populate database
