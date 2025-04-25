@@ -21,9 +21,9 @@ struct ServerInfo {
 
 class ClusterConfig {
  public:
-  ClusterConfig(const std::string& my_host_name, const int port,
-      const std::string& config_filename)
-      : my_info_(my_host_name, port), config_filename_(config_filename) {
+  ClusterConfig(const std::string& my_host_name_1, const int port,
+      const std::string& config_filename_1)
+      : my_info_(my_host_name_1, port), config_filename_(config_filename_1) {
     this->ReadConfigFile();
   }
   ~ClusterConfig() {
