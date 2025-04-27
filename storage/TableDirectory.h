@@ -41,7 +41,7 @@ public:
     assert(table_count_ < kMaxTableNum);
     ++table_count_;
     tables_[table_count_] = table;
-    table_name_to_id_map_[table->GetTableName()] = table_count_;
+//    table_name_to_id_map_[table->GetTableName()] = table_count_;
 
   }
   size_t GetTableId(const std::string& table_name) {
