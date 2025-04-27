@@ -57,7 +57,7 @@ protected:
 //#endif
       columns.push_back(new ColumnInfo("meta", ValueType::META));
     schema = new RecordSchema(ITEM_TABLE_ID);
-    schema->InsertColumns(columns);
+      schema->BulkloadColumns(columns);
     size_t col_ids[] = { 0 };
     schema->SetPrimaryColumns(col_ids, 1);
     schema->SetPartitionColumns(col_ids, 1);
@@ -98,7 +98,7 @@ protected:
 
 
     schema = new RecordSchema(WAREHOUSE_TABLE_ID);
-    schema->InsertColumns(columns);
+      schema->BulkloadColumns(columns);
     size_t col_ids[] = { 0 };
     schema->SetPrimaryColumns(col_ids, 1);
     schema->SetPartitionColumns(col_ids, 1);
@@ -134,7 +134,7 @@ protected:
       columns.push_back(new ColumnInfo("meta", ValueType::META));
 
       schema = new RecordSchema(DISTRICT_TABLE_ID);
-    schema->InsertColumns(columns);
+      schema->BulkloadColumns(columns);
     size_t col_ids[] = { 0, 1 };
     schema->SetPrimaryColumns(col_ids, 2);
     size_t par_col_ids[] = { 1 };
@@ -185,7 +185,7 @@ protected:
 //#endif
       columns.push_back(new ColumnInfo("meta", ValueType::META));
     schema = new RecordSchema(CUSTOMER_TABLE_ID);
-    schema->InsertColumns(columns);
+      schema->BulkloadColumns(columns);
     size_t col_ids[] = { 0, 1, 2 };
     schema->SetPrimaryColumns(col_ids, 3);
     size_t par_col_ids[] = { 2 };
@@ -210,7 +210,7 @@ protected:
 //#endif
       columns.push_back(new ColumnInfo("meta", ValueType::META));
     schema = new RecordSchema(ORDER_TABLE_ID);
-    schema->InsertColumns(columns);
+      schema->BulkloadColumns(columns);
     size_t col_ids[] = { 0, 2, 3 };
     schema->SetPrimaryColumns(col_ids, 3);
     size_t par_col_ids[] = { 3 };
@@ -233,7 +233,7 @@ protected:
 //#endif
       columns.push_back(new ColumnInfo("meta", ValueType::META));
     schema = new RecordSchema(DISTRICT_NEW_ORDER_TABLE_ID);
-    schema->InsertColumns(columns);
+      schema->BulkloadColumns(columns);
     size_t col_ids[] = { 0, 1 };
     schema->SetPrimaryColumns(col_ids, 2);
     size_t par_col_ids[] = { 1 };
@@ -253,7 +253,7 @@ protected:
 //#endif
       columns.push_back(new ColumnInfo("meta", ValueType::META));
     schema = new RecordSchema(NEW_ORDER_TABLE_ID);
-    schema->InsertColumns(columns);
+      schema->BulkloadColumns(columns);
     size_t col_ids[] = { 0, 1, 2 };
     schema->SetPrimaryColumns(col_ids, 3);
     size_t par_col_ids[] = { 2 };
@@ -283,7 +283,7 @@ protected:
       columns.push_back(new ColumnInfo("meta", ValueType::META));
 
       schema = new RecordSchema(ORDER_LINE_TABLE_ID);
-    schema->InsertColumns(columns);
+      schema->BulkloadColumns(columns);
     size_t col_ids[] = { 0, 1, 2, 3 };
     schema->SetPrimaryColumns(col_ids, 4);
     //size_t sec_col_ids[] = {0,1,2};
@@ -311,7 +311,7 @@ protected:
 //#endif
       columns.push_back(new ColumnInfo("meta", ValueType::META));
     schema = new RecordSchema(HISTORY_TABLE_ID);
-    schema->InsertColumns(columns);
+      schema->BulkloadColumns(columns);
     size_t col_ids[] = { 3, 4, 5 };
     schema->SetPrimaryColumns(col_ids, 3);
     size_t par_col_ids[] = { 3, 4 };
@@ -342,7 +342,7 @@ protected:
 //#endif
       columns.push_back(new ColumnInfo("meta", ValueType::META));
     schema = new RecordSchema(STOCK_TABLE_ID);
-    schema->InsertColumns(columns);
+      schema->BulkloadColumns(columns);
     size_t col_ids[] = { 0, 1 };
     schema->SetPrimaryColumns(col_ids, 2);
     size_t par_col_ids[] = { 0 };

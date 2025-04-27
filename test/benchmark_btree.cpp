@@ -356,7 +356,7 @@ int main(int argc, char *argv[]) {
     std::vector<DSMEngine::ColumnInfo*> columns;
     columns.push_back(new DSMEngine::ColumnInfo("c_id", DSMEngine::ValueType::UINT64));
     columns.push_back(new DSMEngine::ColumnInfo("c_first", DSMEngine::ValueType::FIXCHAR, static_cast<size_t>(8)));
-    schema_ptr->InsertColumns(columns);
+    schema_ptr->BulkloadColumns(columns);
     size_t column_ids[1] = {0};
     schema_ptr->SetPrimaryColumns(column_ids,1);
     DSMEngine::DDSM ddsm = DSMEngine::DDSM(cache_ptr, rdma_mg);

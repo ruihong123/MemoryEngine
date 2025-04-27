@@ -51,7 +51,7 @@ namespace DSMEngine {
             return table_id_;
         }
 
-        void InsertColumns(const std::vector<ColumnInfo*> &columns){
+        void BulkloadColumns(const std::vector<ColumnInfo*> &columns){
             column_count_ = columns.size();
             columns_ = new ColumnInfo*[column_count_];
             for (size_t i = 0; i < column_count_; ++i){

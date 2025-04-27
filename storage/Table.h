@@ -19,7 +19,7 @@ namespace DSMEngine {
             std::vector<DSMEngine::ColumnInfo*> columns;
             columns.push_back(new DSMEngine::ColumnInfo("primary_id", DSMEngine::ValueType::UINT64));
             columns.push_back(new DSMEngine::ColumnInfo("gptr", DSMEngine::ValueType::UINT64));
-            index_schema_ptr->InsertColumns(columns);
+            index_schema_ptr->BulkloadColumns(columns);
             size_t column_ids[1] = {0};
             index_schema_ptr->SetPrimaryColumns(column_ids,1);
         }
