@@ -21,7 +21,7 @@ protected:
       const std::vector<RecordSchema*>& schemas) {
       printf("schema table count is %d\n", schemas.size());
       TableDirectory storage_manager;
-    storage_manager.RegisterTables(schemas, default_gallocator);
+      storage_manager.BulkRegisterTables(schemas, default_gallocator);
     storage_manager.Serialize(storage_addr);
   }
 

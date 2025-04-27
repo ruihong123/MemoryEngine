@@ -259,6 +259,7 @@ public:
  private:
   size_t table_id_;
   size_t secondary_count_;
+  std::string table_name;
 
   RecordSchema *schema_ptr_;
 //  HashIndex *primary_index_;

@@ -21,8 +21,10 @@ namespace DSMEngine{
         DeltaSectionWrap* TransactionManager::ds_for_write = nullptr;
 #endif
 
-        bool TransactionManager::AllocateNewRecord(TxnContext *context, size_t table_id, Cache::Handle *&handle,
-                                                   GlobalAddress &tuple_gaddr, Record*& tuple) {
+        bool TransactionManager::AllocateNewRecord(size_t table_id,
+                                                   Cache::Handle *&handle,
+                                                   GlobalAddress &tuple_gaddr,
+                                                   Record *&tuple) {
             char* tuple_buffer;
             Table* table = storage_manager_->tables_[table_id];
             void* page_buffer;
@@ -110,9 +112,11 @@ namespace DSMEngine{
 
 //        default_gallocator->SELCC_Exclusive_Lock_noread(page_buffer, gcl_addr, handle);
         }
-		bool TransactionManager::InsertRecord(TxnContext* context,
-                                              size_t table_id, const IndexKey* keys,
-                                              size_t key_num, Record *record, Cache::Handle* handle, const GlobalAddress tuple_gaddr){
+        bool TransactionManager::InsertRecord(size_t table_id,
+                                              const IndexKey *keys,
+                                              size_t key_num, Record *record,
+                                              Cache::Handle *handle,
+                                              const GlobalAddress tuple_gaddr) {
 
 //			record->is_visible_ = false;
             PROFILE_TIME_START(thread_id_, INDEX_INSERT);
@@ -132,8 +136,8 @@ namespace DSMEngine{
 
     // Assert that there is no latch still hold in the before the transaction abort. makesure that txn release the last tuple's,
     // latch access the next one. Never let a transaction holding two latch at the same time!!!!
-    bool TransactionManager::SelectRecordCC(TxnContext* context, size_t table_id,
-        Record *&record, const GlobalAddress &tuple_gaddr, AccessType access_type) {
+        bool TransactionManager::SelectRecordCC(size_t table_id, Record *&record,
+                    const GlobalAddress &tuple_gaddr, AccessType access_type) {
         if (is_first_access_){
             GetSnapshot();
 
@@ -336,8 +340,7 @@ namespace DSMEngine{
         return true;
     }
     // Contain validation and commit stages.
-    bool TransactionManager::CommitTransaction(TxnContext* context,
-                                               TxnParam* param, CharArray& ret_str) {
+    bool TransactionManager::CommitTransaction(CharArray &ret_str) {
         PROFILE_TIME_START(thread_id_, CC_COMMIT);
 
         assert(locked_handles_.empty());

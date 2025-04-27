@@ -27,8 +27,8 @@ class DeliveryProcedure : public StoredProcedure {
       Record *district_new_order_record = nullptr;
       IndexKey district_new_order_key = GetDistrictNewOrderPrimaryKey(
           no_d_id, delivery_param->w_id_);
-      DB_QUERY(
-          SearchRecord(&context_, DISTRICT_NEW_ORDER_TABLE_ID, district_new_order_key, district_new_order_record, READ_WRITE));
+      DB_QUERY(SearchRecord(DISTRICT_NEW_ORDER_TABLE_ID, district_new_order_key,
+                            district_new_order_record, READ_WRITE));
       int no_o_id = 0;
       district_new_order_record->GetColumn(2, &no_o_id);
       assert(no_o_id != 0);
@@ -89,7 +89,7 @@ class DeliveryProcedure : public StoredProcedure {
                                               delivery_param->w_id_);
       Record *order_record = nullptr;
       DB_QUERY(
-          SearchRecord(&context_, ORDER_TABLE_ID, order_key, order_record, READ_WRITE));
+          SearchRecord(ORDER_TABLE_ID, order_key, order_record, READ_WRITE));
       order_record->SetColumn(5, &delivery_param->o_carrier_id_);
       int c_id = 0;
       int ol_cnt = 0;
@@ -113,7 +113,8 @@ class DeliveryProcedure : public StoredProcedure {
          for (int i = 1; i < no_o_ol_cnt[no_d_id - 1] + 1; ++i) {
             IndexKey order_line_key = GetOrderLinePrimaryKey(no_o_ids[no_d_id - 1], no_d_id, delivery_param->w_id_, i);
             Record *order_line_record = nullptr;
-            DB_QUERY(SearchRecord(&context_, ORDER_LINE_TABLE_ID, order_line_key, order_line_record, READ_WRITE));
+            DB_QUERY(SearchRecord(ORDER_LINE_TABLE_ID, order_line_key,
+                                  order_line_record, READ_WRITE));
             order_line_record->SetColumn(6, &delivery_param->ol_delivery_d_);
             order_line_record->GetColumn(8, &tmp);
             sum += tmp;
@@ -135,8 +136,8 @@ class DeliveryProcedure : public StoredProcedure {
       IndexKey customer_key = GetCustomerPrimaryKey(c_ids[no_d_id - 1], no_d_id,
                                                     delivery_param->w_id_);
       Record *customer_record = nullptr;
-      DB_QUERY(
-          SearchRecord(&context_, CUSTOMER_TABLE_ID, customer_key, customer_record, READ_WRITE));
+      DB_QUERY(SearchRecord(CUSTOMER_TABLE_ID, customer_key, customer_record,
+                            READ_WRITE));
       double balance = 0.0;
       customer_record->GetColumn(16, &balance);
       balance += sums[no_d_id - 1];
@@ -154,7 +155,7 @@ class DeliveryProcedure : public StoredProcedure {
       ret.Memcpy(ret.size_, (char*) (&no_d_id), sizeof(int));
       ret.size_ += sizeof(int);
     }
-    return transaction_manager_->CommitTransaction(&context_, param, ret);
+    return transaction_manager_->CommitTransaction(ret);
   }
 
  private:
@@ -181,9 +182,8 @@ class NewOrderProcedure : public StoredProcedure {
       // "getItemInfo": "SELECT I_PRICE, I_NAME, I_DATA FROM ITEM WHERE I_ID = ?"
       IndexKey item_key = GetItemPrimaryKey(item_id, new_order_param->w_id_);
       Record *item_record = nullptr;
-        DB_QUERY(SearchRecord(
-                &context_, ITEM_TABLE_ID, item_key, item_record,
-                (AccessType) new_order_param->item_access_type_[i]))
+        DB_QUERY(SearchRecord(ITEM_TABLE_ID, item_key, item_record,
+                            (AccessType)new_order_param->item_access_type_[i]))
 //      if (transaction_manager_->SearchRecord(
 //          &context_, ITEM_TABLE_ID, item_key, item_record,
 //          (AccessType) new_order_param->item_access_type_[i]) == false) {
@@ -216,8 +216,9 @@ class NewOrderProcedure : public StoredProcedure {
       IndexKey stock_key = GetStockPrimaryKey(ol_i_id, ol_supply_w_id);
       Record *stock_record = nullptr;
       //DB_QUERY(SearchRecord(&context_, STOCK_TABLE_ID, stock_key, stock_record, READ_WRITE));
-      DB_QUERY(
-          SearchRecord(&context_, STOCK_TABLE_ID, stock_key, stock_record, (AccessType)new_order_param->stock_access_type_[i]));  // for testing
+      DB_QUERY(SearchRecord(
+          STOCK_TABLE_ID, stock_key, stock_record,
+          (AccessType)new_order_param->stock_access_type_[i]));  // for testing
 
       int ol_quantity = new_order_param->i_qtys_[i];
       int ytd = 0;
@@ -254,8 +255,8 @@ class NewOrderProcedure : public StoredProcedure {
     // "getWarehouseTaxRate": "SELECT W_TAX FROM WAREHOUSE WHERE W_ID = ?"
     IndexKey warehouse_key = GetWarehousePrimaryKey(new_order_param->w_id_);
     Record *warehouse_record = nullptr;
-    DB_QUERY(
-        SearchRecord(&context_, WAREHOUSE_TABLE_ID, warehouse_key, warehouse_record, (AccessType)new_order_param->warehouse_access_type_));
+    DB_QUERY(SearchRecord(WAREHOUSE_TABLE_ID, warehouse_key, warehouse_record,
+                          (AccessType)new_order_param->warehouse_access_type_));
     double w_tax = 0;
     warehouse_record->GetColumn(7, &w_tax);
 #if defined(TO)
@@ -268,8 +269,8 @@ class NewOrderProcedure : public StoredProcedure {
     IndexKey district_key = GetDistrictPrimaryKey(new_order_param->d_id_,
                                                   new_order_param->w_id_);
     Record *district_record = nullptr;
-    DB_QUERY(
-        SearchRecord(&context_, DISTRICT_TABLE_ID, district_key, district_record, (AccessType)new_order_param->district_access_type_));
+    DB_QUERY(SearchRecord(DISTRICT_TABLE_ID, district_key, district_record,
+                          (AccessType)new_order_param->district_access_type_));
     int d_next_o_id = 0;
     district_record->GetColumn(10, &d_next_o_id);
     assert(d_next_o_id > 0);
@@ -291,8 +292,8 @@ class NewOrderProcedure : public StoredProcedure {
                                                   new_order_param->d_id_,
                                                   new_order_param->w_id_);
     Record *customer_record = nullptr;
-    DB_QUERY(
-        SearchRecord(&context_, CUSTOMER_TABLE_ID, customer_key, customer_record, (AccessType)new_order_param->customer_access_type_));
+    DB_QUERY(SearchRecord(CUSTOMER_TABLE_ID, customer_key, customer_record,
+                          (AccessType)new_order_param->customer_access_type_));
     double c_discount = 0;
     customer_record->GetColumn(15, &c_discount);
       for (size_t i = 0; i < new_order_param->ol_cnt_; ++i) {
@@ -314,8 +315,8 @@ class NewOrderProcedure : public StoredProcedure {
       Record *new_order_record = nullptr;
 //      = new Record(
 //              transaction_manager_->storage_manager_->tables_[NEW_ORDER_TABLE_ID]->GetSchema(), new_order_buffer);
-      DB_QUERY(AllocateNewRecord(&context_, NEW_ORDER_TABLE_ID, new_order_handle, new_order_gaddr,
-                                 new_order_record))
+      DB_QUERY(AllocateNewRecord(NEW_ORDER_TABLE_ID, new_order_handle,
+                                 new_order_gaddr, new_order_record))
 //      printf("Pointer of new_order_buffer: %p, all local this stack is around %p\n", new_order_buffer, &new_order_buffer);
 //      fflush(stdout);
       //    ->storage_manager_->tables_[NEW_ORDER_TABLE_ID]->AllocateNewTuple(
@@ -331,9 +332,8 @@ class NewOrderProcedure : public StoredProcedure {
     IndexKey new_order_key = GetNewOrderPrimaryKey(d_next_o_id,
                                                    new_order_param->d_id_,
                                                    new_order_param->w_id_);
-    DB_QUERY(
-        InsertRecord(&context_, NEW_ORDER_TABLE_ID, 
-          &new_order_key, 1, new_order_record, new_order_handle, new_order_gaddr));
+    DB_QUERY(InsertRecord(NEW_ORDER_TABLE_ID, &new_order_key, 1,
+                          new_order_record, new_order_handle, new_order_gaddr));
 
     int all_local = true;
     for (auto & w_id : new_order_param->i_w_ids_) {
@@ -347,7 +347,8 @@ class NewOrderProcedure : public StoredProcedure {
 //      = new Record(
 //              transaction_manager_->storage_manager_->
 //                      tables_[ORDER_TABLE_ID]->GetSchema(), order_buffer);
-      DB_QUERY(AllocateNewRecord(&context_, ORDER_TABLE_ID, order_handle, order_gaddr, order_record))
+      DB_QUERY(AllocateNewRecord(ORDER_TABLE_ID, order_handle, order_gaddr,
+                                 order_record))
 
 //      GAddr order_addr = gallocators[thread_id_]->Malloc(
 //        transaction_manager_->storage_manager_->
@@ -368,9 +369,8 @@ class NewOrderProcedure : public StoredProcedure {
 //    }
     IndexKey order_key = GetOrderPrimaryKey(d_next_o_id, new_order_param->d_id_,
                                             new_order_param->w_id_);
-    DB_QUERY(
-        InsertRecord(&context_, ORDER_TABLE_ID, 
-          &order_key, 1, order_record, order_handle, order_gaddr));
+    DB_QUERY(InsertRecord(ORDER_TABLE_ID, &order_key, 1, order_record,
+                          order_handle, order_gaddr));
 
     for (size_t i = 0; i < new_order_param->ol_cnt_; ++i) {
       int ol_number = i + 1;
@@ -385,7 +385,8 @@ class NewOrderProcedure : public StoredProcedure {
 //        = new Record(
 //                transaction_manager_->storage_manager_->
 //                        tables_[ORDER_LINE_TABLE_ID]->GetSchema(), order_line_buffer);
-        DB_QUERY(AllocateNewRecord(&context_, ORDER_LINE_TABLE_ID, order_line_handle, order_line_gaddr, order_line_record))
+        DB_QUERY(AllocateNewRecord(ORDER_LINE_TABLE_ID, order_line_handle,
+                                   order_line_gaddr, order_line_record))
 
 
       order_line_record->SetColumn(0, (char*) (&d_next_o_id));
@@ -407,9 +408,9 @@ class NewOrderProcedure : public StoredProcedure {
                                                        new_order_param->w_id_,
                                                        ol_number);
       //order_line_keys[1] = GetOrderLineSecondaryKey(d_next_o_id, new_order_param->d_id_, new_order_param->w_id_);
-      DB_QUERY(
-          InsertRecord(&context_, ORDER_LINE_TABLE_ID, 
-            &order_line_key, 1, order_line_record, order_line_handle, order_line_gaddr));
+      DB_QUERY(InsertRecord(ORDER_LINE_TABLE_ID, &order_line_key, 1,
+                            order_line_record, order_line_handle,
+                            order_line_gaddr));
     }
 
     ret.Memcpy(ret.size_, (char*) (&w_tax), sizeof(w_tax));
@@ -420,7 +421,7 @@ class NewOrderProcedure : public StoredProcedure {
     ret.size_ += sizeof(c_discount);
     total *= (1 - c_discount) * (1 + w_tax + d_tax);
     ret.size_ += sizeof(total);
-    return transaction_manager_->CommitTransaction(&context_, param, ret);
+    return transaction_manager_->CommitTransaction(ret);
   }
 
  private:
@@ -443,8 +444,8 @@ class PaymentProcedure : public StoredProcedure {
     // "updateWarehouseBalance": "UPDATE WAREHOUSE SET W_YTD = W_YTD + ? WHERE W_ID = ?"
     IndexKey warehouse_key = GetWarehousePrimaryKey(payment_param->w_id_);
     Record *warehouse_record = nullptr;
-    DB_QUERY(
-        SearchRecord(&context_, WAREHOUSE_TABLE_ID, warehouse_key, warehouse_record, READ_WRITE));
+    DB_QUERY(SearchRecord(WAREHOUSE_TABLE_ID, warehouse_key, warehouse_record,
+                          READ_WRITE));
     double w_ytd = 0;
     warehouse_record->GetColumn(8, &w_ytd);
     ret.Memcpy(ret.size_, (char*) (&w_ytd), sizeof(w_ytd));
@@ -461,8 +462,8 @@ class PaymentProcedure : public StoredProcedure {
     IndexKey district_key = GetDistrictPrimaryKey(payment_param->d_id_,
                                                   payment_param->w_id_);
     Record *district_record = nullptr;
-    DB_QUERY(
-        SearchRecord(&context_, DISTRICT_TABLE_ID, district_key, district_record, READ_WRITE));
+    DB_QUERY(SearchRecord(DISTRICT_TABLE_ID, district_key, district_record,
+                          READ_WRITE));
 //      printf("District table is changed over d_ytd with snapshotnumber %llu\n", transaction_manager_->snapshot_ts);
 //      fflush(stdout);
     double d_ytd = 0;
@@ -485,8 +486,8 @@ class PaymentProcedure : public StoredProcedure {
       IndexKey customer_key = GetCustomerPrimaryKey(payment_param->c_id_,
                                                     payment_param->c_d_id_,
                                                     payment_param->c_w_id_);
-      DB_QUERY(
-              SearchRecord(&context_, CUSTOMER_TABLE_ID, customer_key, customer_record, READ_WRITE));
+      DB_QUERY(SearchRecord(CUSTOMER_TABLE_ID, customer_key, customer_record,
+                            READ_WRITE));
     }
     // "updateBCCustomer": "UPDATE CUSTOMER SET C_BALANCE = ?, C_YTD_PAYMENT = ?, C_PAYMENT_CNT = ?, C_DATA = ? WHERE C_W_ID = ? AND C_D_ID = ? AND C_ID = ?"
     // "updateGCCustomer": "UPDATE CUSTOMER SET C_BALANCE = ?, C_YTD_PAYMENT = ?, C_PAYMENT_CNT = ? WHERE C_W_ID = ? AND C_D_ID = ? AND C_ID = ?"
@@ -515,7 +516,8 @@ class PaymentProcedure : public StoredProcedure {
 //      = new Record(
 //              transaction_manager_->storage_manager_->
 //                      tables_[HISTORY_TABLE_ID]->GetSchema(), history_buffer);
-      DB_QUERY(AllocateNewRecord(&context_, HISTORY_TABLE_ID, history_handle, history_gaddr, history_record))
+      DB_QUERY(AllocateNewRecord(HISTORY_TABLE_ID, history_handle,
+                                 history_gaddr, history_record))
 
 
     history_record->SetColumn(0, (char*) (&payment_param->c_id_));
@@ -532,11 +534,10 @@ class PaymentProcedure : public StoredProcedure {
     IndexKey history_key = GetHistoryPrimaryKey(payment_param->c_id_,
                                                 payment_param->d_id_,
                                                 payment_param->w_id_);
-    DB_QUERY(
-        InsertRecord(&context_, HISTORY_TABLE_ID, 
-          &history_key, 1, history_record, history_handle, history_gaddr));
+    DB_QUERY(InsertRecord(HISTORY_TABLE_ID, &history_key, 1, history_record,
+                          history_handle, history_gaddr));
 
-    return transaction_manager_->CommitTransaction(&context_, param, ret);
+    return transaction_manager_->CommitTransaction(ret);
   }
 
 };
@@ -563,7 +564,7 @@ class OrderStatusProcedure : public StoredProcedure {
     IndexKey order_key = GetOrderPrimaryKey(order_status_param->c_id_, order_status_param->d_id_, order_status_param->w_id_);
      Record *order_record = nullptr;
 
-     DB_QUERY(SearchRecord(&context_, ORDER_TABLE_ID, order_key, order_record, READ_ONLY));
+     DB_QUERY(SearchRecord(ORDER_TABLE_ID, order_key, order_record, READ_ONLY));
 
      //"getOrderLines": "SELECT OL_SUPPLY_W_ID, OL_I_ID, OL_QUANTITY, OL_AMOUNT, OL_DELIVERY_D FROM ORDER_LINE WHERE OL_W_ID = ? AND OL_D_ID = ? AND OL_O_ID = ?"
      int o_id = 0;
@@ -584,7 +585,8 @@ class OrderStatusProcedure : public StoredProcedure {
                                                            order_status_param->d_id_,
                                                            order_status_param->w_id_,
                                                            i);
-            DB_QUERY(SearchRecord(&context_, ORDER_LINE_TABLE_ID, order_line_key, order_line_record, READ_ONLY));
+            DB_QUERY(SearchRecord(ORDER_LINE_TABLE_ID, order_line_key,
+                                order_line_record, READ_ONLY));
           int i_id = 0;
           order_line_record->GetColumn(4, &i_id);
           assert(i_id != 0);
@@ -597,7 +599,7 @@ class OrderStatusProcedure : public StoredProcedure {
 #endif
       }
 
-    return transaction_manager_->CommitTransaction(&context_, param, ret);
+    return transaction_manager_->CommitTransaction(ret);
   }
  
 };
@@ -615,7 +617,8 @@ class StockLevelProcedure : public StoredProcedure {
 //     "getOId": "SELECT D_NEXT_O_ID FROM DISTRICT WHERE D_W_ID = ? AND D_ID = ?"
      IndexKey district_key = GetDistrictPrimaryKey(stock_level_param->d_id_, stock_level_param->w_id_);
      Record* district_record = nullptr;
-     DB_QUERY(SearchRecord(&context_, DISTRICT_TABLE_ID, district_key, district_record, READ_ONLY));
+     DB_QUERY(SearchRecord(DISTRICT_TABLE_ID, district_key, district_record,
+                           READ_ONLY));
      int d_next_o_id = 0;
      district_record->GetColumn(10, &d_next_o_id);
      assert(d_next_o_id != 0);
@@ -630,7 +633,8 @@ class StockLevelProcedure : public StoredProcedure {
      	// "getStockCount": "SELECT COUNT(DISTINCT(OL_I_ID)) FROM ORDER_LINE, STOCK WHERE OL_W_ID = ? AND OL_D_ID = ? AND OL_O_ID < ? AND OL_O_ID >= ? AND S_W_ID = ? AND S_I_ID = OL_I_ID AND S_QUANTITY < ?"
      	IndexKey order_key = GetOrderPrimaryKey(o_id, stock_level_param->d_id_, stock_level_param->w_id_);
          Record *order_record = nullptr;
-         DB_QUERY(SearchRecord(&context_, ORDER_TABLE_ID, order_key, order_record, READ_ONLY));
+         DB_QUERY(
+             SearchRecord(ORDER_TABLE_ID, order_key, order_record, READ_ONLY));
          //It is possible that the new order first modify the district next o id, but the real new order was not inserted to the DB yet.
          if (!order_record){
              transaction_manager_->AbortTransaction();
@@ -651,7 +655,7 @@ class StockLevelProcedure : public StoredProcedure {
      ret.Memcpy(ret.size_, (char*)(&count), sizeof(size_t));
      ret.size_ += sizeof(size_t);
 
-    return transaction_manager_->CommitTransaction(&context_, param, ret);
+    return transaction_manager_->CommitTransaction(ret);
   }
 };
 

@@ -124,11 +124,12 @@ class TransactionManager {
 //        *result = new PosixWritableFile(filename, fd);
 //        return Status::OK();
 //    }
-    bool AllocateNewRecord(TxnContext *context, size_t table_id, Cache::Handle *&handle,
-                           GlobalAddress &data_addr, Record*& tuple);
+  bool AllocateNewRecord(size_t table_id, Cache::Handle *&handle,
+                         GlobalAddress &data_addr, Record *&tuple);
 
-  bool InsertRecord(TxnContext* context, size_t table_id, const IndexKey* keys,
-                    size_t key_num, Record *record, Cache::Handle* handle, const GlobalAddress tuple_gaddr);
+  bool InsertRecord(size_t table_id, const IndexKey *keys, size_t key_num,
+                    Record *record, Cache::Handle *handle,
+                    const GlobalAddress tuple_gaddr);
   // Merge the Latch and unlatch request for tuples within the same global cache line.
   bool AcquireLatchForTuple(char*& tuple_buffer,GlobalAddress tuple_gaddr, AccessType access_type);
   bool AcquireXLatchForTuple(char *&tuple_buffer, GlobalAddress tuple_gaddr, Cache::Handle*& handle);
@@ -148,9 +149,8 @@ class TransactionManager {
     void DisableLog(){
         log_enabled_ = false;
     }
-  bool SearchRecord(TxnContext* context, size_t table_id,
-                    const IndexKey& primary_key, Record*& record,
-                    AccessType access_type) {
+    bool SearchRecord(size_t table_id, const IndexKey &primary_key,
+                      Record *&record, AccessType access_type) {
       PROFILE_TIME_START(thread_id_, INDEX_READ);
       uint16_t target_node_id;
 #if ACCESS_MODE == 2
@@ -186,8 +186,7 @@ class TransactionManager {
 //      fflush(stdout);
       PROFILE_TIME_END(thread_id_, INDEX_READ);
     if (data_addr != GlobalAddress::Null()) {
-      bool ret = SelectRecordCC(context, table_id, record, data_addr,
-                                access_type);
+      bool ret = SelectRecordCC(table_id, record, data_addr, access_type);
         assert(buffer_is_not_all_zero(record->data_ptr_, record->GetRecordSize()));
       return ret;
     } else {
@@ -207,8 +206,7 @@ class TransactionManager {
     return true;
   }
 
-  bool CommitTransaction(TxnContext* context, TxnParam* param,
-                         CharArray& ret_str);
+  bool CommitTransaction(CharArray &ret_str);
     bool CoordinatorPrepare();
     void WritePrepareLog(){
         //TODO: WE can accumulate the REDO log in thread local buffer and then allocate a log buffer
@@ -252,12 +250,11 @@ class TransactionManager {
   }
 
  private:
-  bool SelectRecordCC(TxnContext* context, size_t table_id,
-                      Record *&record, const GlobalAddress &tuple_gaddr,
-                      AccessType access_type);
+  bool SelectRecordCC(size_t table_id, Record *&record,
+                      const GlobalAddress &tuple_gaddr, AccessType access_type);
 
  public:
-  TableDirectory * storage_manager_;
+    TableDirectory * storage_manager_;
     Env* env_;
     static WritableFile* log_file;
     static std::atomic<uint64_t>  largest_sp_acquired;

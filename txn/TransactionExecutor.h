@@ -95,7 +95,12 @@ class TransactionExecutor {
             switch (received_rdma_request.command) {
                 case tuple_read_2pc:
                     // process the request
-                    success = txn_manager->SearchRecord(nullptr, received_rdma_request.content.tuple_info.table_id, received_rdma_request.content.tuple_info.primary_key, record, (DSMEngine::AccessType)received_rdma_request.content.tuple_info.access_type);
+                    success = txn_manager->SearchRecord(
+                        received_rdma_request.content.tuple_info.table_id,
+                        received_rdma_request.content.tuple_info.primary_key,
+                        record,
+                        (DSMEngine::AccessType)received_rdma_request.content
+                            .tuple_info.access_type);
                     break;
                 case prepare_2pc:
                     success = txn_manager->CoordinatorPrepare();

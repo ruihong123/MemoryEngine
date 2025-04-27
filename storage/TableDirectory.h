@@ -25,7 +25,7 @@ public:
     }
   }
 
-  void RegisterTables(const std::vector<RecordSchema*>& schemas, 
+  void BulkRegisterTables(const std::vector<RecordSchema*>& schemas,
       DDSM* gallocator) {
     table_count_ = schemas.size();
     assert(table_count_ < kMaxTableNum);
@@ -35,6 +35,21 @@ public:
       table->Init(i, schemas[i], gallocator);
       tables_[i] = table;
     }
+  }
+  void RegisterTable(Table* table) {
+    // do we need to consider concurrency issues?
+    assert(table_count_ < kMaxTableNum);
+    ++table_count_;
+    tables_[table_count_] = table;
+    table_name_to_id_map_[table->GetTableName()] = table_count_;
+
+  }
+  size_t GetTableId(const std::string& table_name) {
+    auto it = table_name_to_id_map_.find(table_name);
+    if (it != table_name_to_id_map_.end()) {
+      return it->second;
+    }
+    return -1;
   }
 
   size_t GetTableCount() const {
@@ -68,6 +83,7 @@ public:
 
 public:
   Table **tables_;
+  std::map<std::string, int> table_name_to_id_map_;
 private:
   size_t table_count_;
 };
