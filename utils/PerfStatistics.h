@@ -5,6 +5,7 @@
 #include <iostream>
 #include <cstdio>
 #include "TpccSource.h"
+#include "TransactionManager.h"
 extern uint64_t cache_invalidation[MAX_APP_THREAD];
 extern uint64_t cache_hit_valid[MAX_APP_THREAD][8];
 extern uint64_t cache_miss[MAX_APP_THREAD][8];

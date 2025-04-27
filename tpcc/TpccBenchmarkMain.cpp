@@ -18,6 +18,7 @@ void ExchPerfStatistics(ClusterConfig* config,
 extern uint64_t cache_invalidation[MAX_APP_THREAD];
 extern uint64_t cache_hit_valid[MAX_APP_THREAD][8];
 extern uint64_t cache_miss[MAX_APP_THREAD][8];
+
 //#if defined(MVOCC)
 //extern uint64_t delta_pull_num[MAX_APP_THREAD];
 //#endif
