@@ -355,7 +355,7 @@ int main(int argc, char *argv[]) {
     DSMEngine::RecordSchema* schema_ptr = new DSMEngine::RecordSchema(0);
     std::vector<DSMEngine::ColumnInfo*> columns;
     columns.push_back(new DSMEngine::ColumnInfo("c_id", DSMEngine::ValueType::UINT64));
-    columns.push_back(new DSMEngine::ColumnInfo("c_first", DSMEngine::ValueType::VARCHAR, static_cast<size_t>(8)));
+    columns.push_back(new DSMEngine::ColumnInfo("c_first", DSMEngine::ValueType::FIXCHAR, static_cast<size_t>(8)));
     schema_ptr->InsertColumns(columns);
     size_t column_ids[1] = {0};
     schema_ptr->SetPrimaryColumns(column_ids,1);

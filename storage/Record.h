@@ -74,7 +74,7 @@ public:
 
     // set column. type must be varchar.
     void SetColumn(const size_t &column_id, void* data, size_t size){
-        assert(schema_ptr_->GetColumnType(column_id) == ValueType::VARCHAR && schema_ptr_->GetColumnSize(column_id) >= size);
+        assert(schema_ptr_->GetColumnType(column_id) == ValueType::FIXCHAR && schema_ptr_->GetColumnSize(column_id) >= size);
         memcpy(data_ptr_ + schema_ptr_->GetColumnOffset(column_id), data, size);
         if (dirty_col_ids.count(column_id) == 0){
             dirty_col_ids.insert(column_id);
@@ -83,7 +83,7 @@ public:
 
     // set column. type must be varchar.
     void SetColumn(const size_t &column_id, const std::string &data){
-        assert(schema_ptr_->GetColumnType(column_id) == ValueType::VARCHAR && schema_ptr_->GetColumnSize(column_id) >= data.size());
+        assert(schema_ptr_->GetColumnType(column_id) == ValueType::FIXCHAR && schema_ptr_->GetColumnSize(column_id) >= data.size());
         memcpy(data_ptr_ + schema_ptr_->GetColumnOffset(column_id), data.c_str(), data.size());
         if (dirty_col_ids.count(column_id) == 0){
             dirty_col_ids.insert(column_id);
@@ -113,7 +113,7 @@ public:
     // copy data, memory allocated inside
     // make sure the copy is not out-of-buffer.
 //    void GetColumn(const size_t &column_id, char* &data) const {
-//        assert(schema_ptr_->GetColumnType(column_id) == ValueType::VARCHAR);
+//        assert(schema_ptr_->GetColumnType(column_id) == ValueType::FIXCHAR);
 //        size_t size = schema_ptr_->GetColumnSize(column_id);
 //        memcpy(data, data_ptr_ + schema_ptr_->GetColumnOffset(column_id), size);
 //
@@ -121,7 +121,7 @@ public:
 
     // copy data, memory allocated inside
     void GetColumn(const size_t &column_id, std::string &data) const {
-        assert(schema_ptr_->GetColumnType(column_id) == ValueType::VARCHAR);
+        assert(schema_ptr_->GetColumnType(column_id) == ValueType::FIXCHAR);
         data.assign(data_ptr_ + schema_ptr_->GetColumnOffset(column_id), 0, schema_ptr_->GetColumnSize(column_id));
     }
 

@@ -18,7 +18,7 @@ enum ValueType
   UINT64,
   DOUBLE,
   FLOAT,
-  VARCHAR,
+  FIXCHAR,
   META
 };
 
@@ -78,7 +78,7 @@ struct ColumnInfo {
     memcpy(column_name_, column_name, len);
     column_name_[len] = '\0';
     column_type_ = column_type;
-    if (column_type != ValueType::VARCHAR) {
+    if (column_type != ValueType::FIXCHAR) {
       switch (column_type) {
         case INT:
           column_size_ = kIntSize;
