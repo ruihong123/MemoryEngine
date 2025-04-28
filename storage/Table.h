@@ -48,7 +48,9 @@ public:
   }
     // Only the master node (node-0) can create the new table and new index.
   void Init(size_t table_id, RecordSchema* schema_ptr, DDSM* ddsm) {
+    assert(table_id == schema_ptr->GetTableId());
     table_id_ = table_id;
+    table_name = schema_ptr->GetTableName();
     schema_ptr_ = schema_ptr;
     secondary_count_ = 0;
 //    secondary_indexes_ = nullptr;
@@ -112,6 +114,9 @@ public:
 
   size_t GetTableId() const {
     return table_id_;
+  }
+  std::string GetTableName() const {
+    return table_name;
   }
   size_t GetSecondaryCount() const {
     return secondary_count_;

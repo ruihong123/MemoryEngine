@@ -17,7 +17,8 @@ namespace DSMEngine {
 
     class RecordSchema{
     public:
-        RecordSchema(const size_t &table_id) : table_id_(table_id), column_count_(0), column_offset_(0){
+        RecordSchema(const size_t &table_id, std::string table_name = "")
+         : table_id_(table_id), table_name_(table_name), column_count_(0), column_offset_(0){
             primary_key_length_ = 0;
             primary_col_num_ = 0;
             primary_col_length_ = 0;
@@ -49,6 +50,9 @@ namespace DSMEngine {
 
         size_t GetTableId() const {
             return table_id_;
+        }
+        std::string GetTableName() const {
+          return table_name_;
         }
 
         void BulkloadColumns(const std::vector<ColumnInfo*> &columns){
@@ -226,6 +230,7 @@ namespace DSMEngine {
             return hashcode;
         }
         virtual void Serialize(const char*& addr) {
+          //todo: serialize the table name
             size_t off = 0;
             memcpy((void *) addr, this, sizeof(RecordSchema));
             off += sizeof(RecordSchema);
@@ -237,6 +242,7 @@ namespace DSMEngine {
         }
 
         virtual void Deserialize(const char*& addr) {
+          //todo: deserialize the table name
             size_t off = 0;
             memcpy((void*)this, addr, sizeof(RecordSchema));
             off += sizeof(RecordSchema);
@@ -268,6 +274,7 @@ namespace DSMEngine {
 
     private:
         size_t table_id_;
+        std::string table_name_;
         //TODO: Change columns into std::map. Is the cocurrent access to the map thread safe?
         // Yes, the map is read only after the initialization.
         ColumnInfo **columns_;

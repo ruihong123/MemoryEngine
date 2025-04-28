@@ -10,39 +10,41 @@ namespace DSMEngine {
 class TableDirectory {
 public:
  TableDirectory() {
-    tables_ = nullptr;
+//    tables_ = nullptr;
     table_count_ = 0;
   }
   ~TableDirectory() {
-    if (tables_) {
-      assert(table_count_ > 0);
+//    if (tables_) {
+//      assert(table_count_ > 0);
       for (size_t i = 0; i < table_count_; ++i) {
         delete tables_[i];
         tables_[i] = nullptr;
       } 
-      delete[] tables_;
-      tables_ = nullptr;
-    }
+//      delete[] tables_;
+//      tables_ = nullptr;
+//    }
   }
 
   void BulkRegisterTables(const std::vector<RecordSchema*>& schemas,
       DDSM* gallocator) {
     table_count_ = schemas.size();
     assert(table_count_ < kMaxTableNum);
-    tables_ = new Table*[table_count_];
+//    tables_ = new Table*[table_count_];
     for (size_t i = 0; i < table_count_; ++i) {
       Table* table = new Table();
       table->Init(i, schemas[i], gallocator);
       tables_[i] = table;
     }
   }
-  void RegisterTable(Table* table) {
+  size_t RegisterTable(Table* table) {
     // do we need to consider concurrency issues?
+    std::unique_lock<std::mutex> lock(meta_mtx);
     assert(table_count_ < kMaxTableNum);
     ++table_count_;
     tables_[table_count_] = table;
+    table_name_to_id_map_.insert({table->GetTableName(), table->GetTableId()});
 //    table_name_to_id_map_[table->GetTableName()] = table_count_;
-
+    return table_count_;
   }
   size_t GetTableId(const std::string& table_name) {
     auto it = table_name_to_id_map_.find(table_name);
@@ -68,7 +70,7 @@ public:
   virtual void Deserialize( char* const& addr) {
       memcpy(&table_count_, addr, sizeof(size_t));
     const char* cur_addr = addr+ sizeof(size_t);
-    tables_ = new Table*[table_count_];
+//    tables_ = new Table*[table_count_];
     for (size_t i = 0; i < table_count_; ++i) {
       Table* table = new Table();
       table->Deserialize(cur_addr);
@@ -82,8 +84,9 @@ public:
   }
 
 public:
-  Table **tables_;
-  std::map<std::string, int> table_name_to_id_map_;
+  std::unordered_map<size_t, Table*> tables_;
+  std::unordered_map<std::string, size_t> table_name_to_id_map_;
+  std::mutex meta_mtx;
 private:
   size_t table_count_;
 };
