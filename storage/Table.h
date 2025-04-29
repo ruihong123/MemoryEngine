@@ -30,6 +30,7 @@ namespace DSMEngine {
 //        printf("Deallocate the GLOBAL ADDRESS SUccessfully\n");
         delete (GlobalAddress*) ptr;
     }
+//template <typename T = IndexKey>
 class Table{
 public:
   Table() {
