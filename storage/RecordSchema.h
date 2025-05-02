@@ -113,10 +113,10 @@ namespace DSMEngine {
         const size_t& GetSchemaSize()const{ return column_offset_; }
         const size_t& GetColumnCount()const{ return column_count_; }
 //        const int GetLeafCardi() const { return leaf_cardinality_;}
-        //const std::string& GetColumnName(const size_t &index)const{
-        //	assert(index < column_count_);
-        //	return columns_[index]->column_name_;
-        //}
+        const char* GetColumnName(const size_t &index)const{
+        	assert(index < column_count_);
+        	return columns_[index]->column_name_;
+        }
 
         const ValueType& GetColumnType(const size_t &index)const{
             assert(index < column_count_);

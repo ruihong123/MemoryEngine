@@ -121,7 +121,7 @@ namespace DSMEngine{
 //			record->is_visible_ = false;
             PROFILE_TIME_START(thread_id_, INDEX_INSERT);
 //            bool ret = storage_manager_->tables_[table_id]->InsertPriIndex(keys, key_num, tuple_gaddr);
-            record->primary_key = keys[0];
+//            record->primary_key = keys[0];
             PROFILE_TIME_END(thread_id_, INDEX_INSERT);
             PROFILE_TIME_END(thread_id_, CC_INSERT);
 //            gallocators[thread_id_]->SELCC_Exclusive_UnLock(TOPAGE(handle->gptr), handle);
@@ -485,7 +485,9 @@ namespace DSMEngine{
                 access->access_global_record_->CopyFrom(access->txn_local_tuple_);
 //                IndexKey keys[1];
 //                access->txn_local_tuple_->GetPrimaryKey(&keys[0]);
-                storage_manager_->tables_[access->txn_local_tuple_->schema_ptr_->GetTableId()]->InsertPriIndex(&access->txn_local_tuple_->primary_key, 1, access->access_addr_);
+                char* primaryk_buff = new char[access->txn_local_tuple_->schema_ptr_->GetPrimaryKeyLength()];
+                DynamicCompoundKey* primary_key = reinterpret_cast<DynamicCompoundKey*>(primaryk_buff);
+                storage_manager_->tables_[access->txn_local_tuple_->schema_ptr_->GetTableId()]->InsertPriIndex(primary_key, 1, access->access_addr_);
 
             }
             delete access->access_global_record_;

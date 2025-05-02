@@ -17,13 +17,13 @@ public:
     data_size_ = schema_ptr_->GetSchemaSize();
     data_ptr_ = data;
     need_delete_ = false;
-    primary_key = 0;
+//    primary_key = 0;
   }
   Record(RecordSchema *schema_ptr) : schema_ptr_(schema_ptr) {
         data_size_ = schema_ptr_->GetSchemaSize();
         data_ptr_ = new char[data_size_];
         need_delete_ = true;
-        primary_key = 0;
+//        primary_key = 0;
     }
   ~Record() {
       if (need_delete_){
@@ -323,7 +323,7 @@ public:
   size_t data_size_;
     bool is_visible_;
     void * handle_ = nullptr;
-    IndexKey primary_key;
+//    IndexKey primary_key;
     std::set<uint64_t> dirty_col_ids;
 };
 

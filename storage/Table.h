@@ -12,20 +12,20 @@
 //#include "Profiler.h"
 
 namespace DSMEngine {
-    static RecordSchema* GetPrimaryIndexSchema() {
-        static RecordSchema* index_schema_ptr = nullptr;
-        if (index_schema_ptr == nullptr){
-            index_schema_ptr = new RecordSchema(65535);
-            std::vector<DSMEngine::ColumnInfo*> columns;
-            columns.push_back(new DSMEngine::ColumnInfo("primary_id", DSMEngine::ValueType::UINT64));
-            columns.push_back(new DSMEngine::ColumnInfo("gptr", DSMEngine::ValueType::UINT64));
-            index_schema_ptr->BulkloadColumns(columns);
-            size_t column_ids[1] = {0};
-            index_schema_ptr->SetPrimaryColumns(column_ids,1);
-        }
-
-        return index_schema_ptr;
-    }
+//    static RecordSchema* GetPrimaryIndexSchema() {
+//        static RecordSchema* index_schema_ptr = nullptr;
+//        if (index_schema_ptr == nullptr){
+//            index_schema_ptr = new RecordSchema(65535);
+//            std::vector<DSMEngine::ColumnInfo*> columns;
+//            columns.push_back(new DSMEngine::ColumnInfo("primary_id", DSMEngine::ValueType::UINT64));
+//            columns.push_back(new DSMEngine::ColumnInfo("gptr", DSMEngine::ValueType::UINT64));
+//            index_schema_ptr->BulkloadColumns(columns);
+//            size_t column_ids[1] = {0};
+//            index_schema_ptr->SetPrimaryColumns(column_ids,1);
+//        }
+//
+//        return index_schema_ptr;
+//    }
     static void delete_GAddr(void* ptr){
 //        printf("Deallocate the GLOBAL ADDRESS SUccessfully\n");
         delete (GlobalAddress*) ptr;
@@ -42,11 +42,36 @@ public:
   }
   ~Table() {
     if (primary_index_) {
-//        delete primary_index_->scheme_ptr;
+//        delete primary_index_->index_scheme_ptr;
         delete primary_index_;
       primary_index_ = nullptr;
     }
   }
+    RecordSchema* CreatePrimaryIndexSchema() {
+      // has to be call after the table schema is ready.
+        RecordSchema* index_schema_ptr = nullptr;
+        if (index_schema_ptr == nullptr){
+            index_schema_ptr = new RecordSchema(65535);
+            size_t key_num = schema_ptr_->GetPrimaryColumnCount();
+
+            std::vector<DSMEngine::ColumnInfo*> columns;
+            // create new index schema for compound key
+            for (size_t i = 0; i < key_num; ++i){
+                size_t col_id = schema_ptr_->GetPrimaryColumnId(i);
+                columns.push_back(new DSMEngine::ColumnInfo(schema_ptr_->GetColumnName(col_id), schema_ptr_->GetColumnType(col_id)));
+            }
+            columns.push_back(new DSMEngine::ColumnInfo("gptr", DSMEngine::ValueType::UINT64));
+            index_schema_ptr->BulkloadColumns(columns);
+            size_t* column_ids = new size_t[key_num];
+            for (size_t i = 0; i < key_num; ++i){
+                column_ids[i] = i;
+            }
+            delete[] column_ids;
+            index_schema_ptr->SetPrimaryColumns(column_ids,key_num);
+        }
+
+        return index_schema_ptr;
+    }
     // Only the master node (node-0) can create the new table and new index.
   void Init(size_t table_id, RecordSchema* schema_ptr, DDSM* ddsm) {
     assert(table_id == schema_ptr->GetTableId());
@@ -57,22 +82,24 @@ public:
 //    secondary_indexes_ = nullptr;
     // the index init shall be deprecated, since we can init the index in the constructor. If the index does not need init
     // we can tell that by the number of constructor arguments.
-      DSMEngine::RecordSchema* index_schema_ptr = GetPrimaryIndexSchema();
-    primary_index_ = new Btr<IndexKey>(ddsm, ddsm->rdma_mg->page_cache_, index_schema_ptr, DDSM::GetNextIndexID());
+      DSMEngine::RecordSchema* index_schema_ptr = CreatePrimaryIndexSchema();
+    primary_index_ = new Btr<DynamicCompoundKey>(ddsm, ddsm->rdma_mg->page_cache_, index_schema_ptr, DDSM::GetNextIndexID());
 //    primary_index_->Init(kHashIndexBucketHeaderNum, gallocator);
   }
 
   // TODO: return false if the key exists in primary index already
-  bool InsertPriIndex(const IndexKey* keys, size_t key_num, GlobalAddress tuple_gaddr) {
+  bool InsertPriIndex(const DynamicCompoundKey* keys, size_t key_num, GlobalAddress tuple_gaddr) {
       assert(TOPAGE(tuple_gaddr).offset != tuple_gaddr.offset);
     assert(key_num ==  1);
-    char key_value_pair[16] = {0};
+    size_t primary_key_length = schema_ptr_->GetPrimaryKeyLength();
+    char* key_value_pair = new char[primary_key_length + 8];
     Slice inserted_slice(key_value_pair, 16);
-    memcpy(key_value_pair, &keys[0], sizeof(IndexKey));
+    memcpy(key_value_pair, keys, primary_key_length);
       memcpy(key_value_pair + sizeof(IndexKey), &tuple_gaddr, sizeof(GlobalAddress));
 //      printf("Table INsert INdex has been executed\n");
 //      fflush(stdout);
-      primary_index_->insert(keys[0], inserted_slice);
+      primary_index_->insert(*keys, inserted_slice);
+      delete[] key_value_pair;
       return true;
   }
 
@@ -89,7 +116,7 @@ public:
 //        return true;
 //    }
 
-  GlobalAddress SearchPriIndex(const IndexKey& key) {
+  GlobalAddress SearchPriIndex(const DynamicCompoundKey& key) {
       GlobalAddress tuple_gaddr = GlobalAddress::Null();
       char key_value_pair[16] = {0};
       Slice retrieved_slice(key_value_pair, 16);
@@ -135,9 +162,6 @@ public:
     void SetOpenedBlock(const GlobalAddress* opened_block) {
         opened_block_->Reset((void*)opened_block);
     }
-  Btr<IndexKey>* GetPrimaryIndex() {
-    return primary_index_;
-  }
 
   void Serialize(const char*& addr){
     size_t off = 0;
@@ -161,8 +185,8 @@ public:
     schema_ptr_ = new RecordSchema(table_id_);
     schema_ptr_->Deserialize(cur_addr);
     cur_addr = cur_addr + RecordSchema::GetSerializeSize();
-    RecordSchema* index_schema_ptr = GetPrimaryIndexSchema();
-    primary_index_ = new Btr<IndexKey>(default_gallocator, default_gallocator->rdma_mg->page_cache_, index_schema_ptr);
+    RecordSchema* index_schema_ptr = CreatePrimaryIndexSchema();
+    primary_index_ = new Btr<DynamicCompoundKey>(default_gallocator, default_gallocator->rdma_mg->page_cache_, index_schema_ptr);
     primary_index_->Deserialize(cur_addr);
   }
     
@@ -269,7 +293,7 @@ public:
 
   RecordSchema *schema_ptr_;
 //  HashIndex *primary_index_;
-  Btr<IndexKey>* primary_index_;
+  Btr<DynamicCompoundKey>* primary_index_;
 //  HashIndex **secondary_indexes_; // Currently disabled
     // todo: make the opened block thread local in RocksDB.
 //  static thread_local GlobalAddress opened_block_;

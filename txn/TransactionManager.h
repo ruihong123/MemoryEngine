@@ -149,7 +149,7 @@ class TransactionManager {
     void DisableLog(){
         log_enabled_ = false;
     }
-    bool SearchRecord(size_t table_id, const IndexKey &primary_key,
+    bool SearchRecord(size_t table_id, const DynamicCompoundKey &primary_key,
                       Record *&record, AccessType access_type) {
       PROFILE_TIME_START(thread_id_, INDEX_READ);
       uint16_t target_node_id;

@@ -6,7 +6,7 @@
 #include "TpccConstants.h"
 #include "TpccRecords.h"
 #include "TpccParams.h"
-
+#include "Btr.h"
 #include <string>
 #include <unordered_map>
 #include <cassert>
@@ -15,12 +15,17 @@ namespace DSMEngine {
 namespace TpccBenchmark {
 extern TpccScaleParams tpcc_scale_params;
 /******************** get primary key **********************/
-static IndexKey GetItemPrimaryKey(int i_id, int w_id) {
+static DynamicCompoundKey* GetItemPrimaryKey(int i_id, int w_id) {
   assert(i_id >= 1 && i_id <= tpcc_scale_params.num_items_);
-  IndexKey k = (((IndexKey) w_id) << kWarehouseBits);
+  char* prim_buffer = new char[sizeof(int) + sizeof(int)];
+  //copy the value into the buffer
+    memcpy(prim_buffer, &i_id, sizeof(int));
+    memcpy(prim_buffer + sizeof(int), &w_id, sizeof(int));
+//  IndexKey k = (((IndexKey) w_id) << kWarehouseBits);
 //      | (((IndexKey) ITEM_TABLE_ID) << kTableIdLowBits);
-  k = k | i_id;
-  return k;
+//  k = k | i_id;
+DynamicCompoundKey* ret = reinterpret_cast<DynamicCompoundKey*>(prim_buffer);
+  return ret;
 }
 static IndexKey GetWarehousePrimaryKey(int w_id) {
   assert(w_id >= 1 && w_id <= tpcc_scale_params.num_warehouses_);

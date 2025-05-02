@@ -21,6 +21,7 @@
 #include "utils/hash.h"
 #include "port/port_posix.h"
 #include "utils/Local_opt_locks.h"
+//#include "storage/Table.h"
 class IndexCache;
 
 template<class Key, class Value>
@@ -35,6 +36,8 @@ public:
     RequstGen() = default;
     virtual Request<Key,Value> next() { return Request<Key, Value>{}; }
 };
+
+
 //using CoroFunc = std::function<RequstGen<class Key, class Value> *(int, DSMEngine::RDMA_Manager *, int)>;
 extern uint64_t cache_miss[MAX_APP_THREAD][8];
 extern uint64_t cache_hit_valid[MAX_APP_THREAD][8];
@@ -49,9 +52,89 @@ extern bool Show_Me_The_Print;
 extern int TimePrintCounter[MAX_APP_THREAD];
 
 namespace DSMEngine {
-    //TODO: implement the iterator for the btree.
-    // TODO: create an class for SELCC latch.
+    struct DynamicCompoundKey {
+        char start[1];
 
+        static thread_local DSMEngine::RecordSchema* schema_ptr;
+
+        DynamicCompoundKey(){};
+
+        // Equality ==
+        bool operator==(const DynamicCompoundKey& other) const {
+            return compare(other) == 0;
+        }
+
+        // Inequality !=
+        bool operator!=(const DynamicCompoundKey& other) const {
+            return compare(other) != 0;
+        }
+
+        // Less than <
+        bool operator<(const DynamicCompoundKey& other) const {
+            return compare(other) < 0;
+        }
+
+        // Greater than >
+        bool operator>(const DynamicCompoundKey& other) const {
+            return compare(other) > 0;
+        }
+
+        // Less than or equal <=
+        bool operator<=(const DynamicCompoundKey& other) const {
+            return compare(other) <= 0;
+        }
+
+        // Greater than or equal >=
+        bool operator>=(const DynamicCompoundKey& other) const {
+            return compare(other) >= 0;
+        }
+
+    private:
+        int compare(const DynamicCompoundKey& other) const {
+            using namespace DSMEngine;
+            assert(schema_ptr != nullptr);
+
+            const RecordSchema* schema = schema_ptr;
+            size_t num_fields = schema->GetPrimaryColumnCount();
+            size_t offset = 0;
+
+            for (size_t i = 0; i < num_fields; ++i) {
+                size_t col_id = schema->GetPrimaryColumnId(i);
+                size_t size = schema->GetPrimaryColumnSize(i);
+                const auto& type = schema->GetColumnType(col_id);
+
+                const char* a = start + offset;
+                const char* b = other.start + offset;
+
+                switch (type) {
+                    case ValueType::INT: {
+                        int32_t va = *reinterpret_cast<const int32_t*>(a);
+                        int32_t vb = *reinterpret_cast<const int32_t*>(b);
+                        if (va != vb) return va < vb ? -1 : 1;
+                        break;
+                    }
+                    case ValueType::INT64: {
+                        int64_t va = *reinterpret_cast<const int64_t*>(a);
+                        int64_t vb = *reinterpret_cast<const int64_t*>(b);
+                        if (va != vb) return va < vb ? -1 : 1;
+                        break;
+                    }
+                    case ValueType::FIXCHAR: {
+                        int cmp = std::memcmp(a, b, size);
+                        if (cmp != 0) return cmp < 0 ? -1 : 1;
+                        break;
+                    }
+                    default:
+                        fprintf(stderr, "[DynamicCompoundKey] Unsupported type in compare!\n");
+                        std::abort();
+                }
+
+                offset += size;
+            }
+
+            return 0; // all parts equal
+        }
+    };
 
     template<class Key>
     class InternalPage;
@@ -61,8 +144,8 @@ namespace DSMEngine {
 
 
 //TODO: There are two ways to define types in the btree, one is to define the types in the class, the other is to define the types in the template.
-// the other is to attach a scheme_ptr. Currently we mixed these two ways, which is not good. We need to guarantee that
-// the scheme_ptr is coherent with the template in the btree.
+// the other is to attach a index_scheme_ptr. Currently we mixed these two ways, which is not good. We need to guarantee that
+// the index_scheme_ptr is coherent with the template in the btree.
     template<typename Key>
     class Btr {
 //friend class DSMEngine::InternalPage;
@@ -195,7 +278,7 @@ namespace DSMEngine {
         // TODO: potential bug, if mulitple btrees shared the same retry counter, will it be a problem?
         //  used for the retry counter for nested function call such as sibling pointer access.
         static thread_local int nested_retry_counter;
-        RecordSchema *scheme_ptr;
+        RecordSchema *index_scheme_ptr;
         uint64_t num_of_record = 0;
         uint16_t leaf_cardinality_ = 0;
         bool secondary_ = false;

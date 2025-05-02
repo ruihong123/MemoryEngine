@@ -442,9 +442,10 @@ class PaymentProcedure : public StoredProcedure {
     PaymentParam *payment_param = static_cast<PaymentParam*>(param);
     // "getWarehouse": "SELECT W_NAME, W_STREET_1, W_STREET_2, W_CITY, W_STATE, W_ZIP FROM WAREHOUSE WHERE W_ID = ?"
     // "updateWarehouseBalance": "UPDATE WAREHOUSE SET W_YTD = W_YTD + ? WHERE W_ID = ?"
-    IndexKey warehouse_key = GetWarehousePrimaryKey(payment_param->w_id_);
+
+    DynamicCompoundKey* warehouse_key = GetWarehousePrimaryKey(payment_param->w_id_);
     Record *warehouse_record = nullptr;
-    DB_QUERY(SearchRecord(WAREHOUSE_TABLE_ID, warehouse_key, warehouse_record,
+    DB_QUERY(SearchRecord(WAREHOUSE_TABLE_ID, *warehouse_key, warehouse_record,
                           READ_WRITE));
     double w_ytd = 0;
     warehouse_record->GetColumn(8, &w_ytd);

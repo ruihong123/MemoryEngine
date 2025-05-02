@@ -14,6 +14,7 @@ namespace DSMEngine {
 
 
 
+
 //    bool enter_debug = false;
 
 //struct tranverse_stack_element
@@ -53,7 +54,7 @@ namespace DSMEngine {
 // when unlocking the remote lock.
     template <typename Key>
     Btr<Key>::Btr(DDSM *dsm, Cache *cache_ptr, RecordSchema *record_scheme_ptr)
-            : scheme_ptr(record_scheme_ptr), page_cache(cache_ptr), ddms_(dsm){
+            : index_scheme_ptr(record_scheme_ptr), page_cache(cache_ptr), ddms_(dsm){
         assert(sizeof(LeafPage<Key>) < kLeafPageSize);
         assert(sizeof(InternalPage<Key>) < kInternalPageSize);
         assert(STRUCT_OFFSET(LeafPage<char>,hdr) == STRUCT_OFFSET(LeafPage<uint64_t>,hdr));
@@ -61,15 +62,15 @@ namespace DSMEngine {
             rdma_mg = ddms_->rdma_mg;
         }
         assert(sizeof(InternalPage<Key>) <= kInternalPageSize);
-//        leaf_cardinality_ = (kLeafPageSize - STRUCT_OFFSET(LeafPage<Key COMMA Value>, data_[0])) / scheme_ptr->GetSchemaSize();
-        leaf_cardinality_ = LeafPage<Key>::calculate_cardinality(kLeafPageSize, scheme_ptr->GetSchemaSize());
+//        leaf_cardinality_ = (kLeafPageSize - STRUCT_OFFSET(LeafPage<Key COMMA Value>, data_[0])) / index_scheme_ptr->GetSchemaSize();
+        leaf_cardinality_ = LeafPage<Key>::calculate_cardinality(kLeafPageSize, index_scheme_ptr->GetSchemaSize());
         print_verbose();
         assert(g_root_ptr.is_lock_free());
         cached_root_page_handle.store(nullptr);
     }
     template <typename Key>
     Btr<Key>::Btr(DDSM *dsm, Cache *cache_ptr, RecordSchema *record_scheme_ptr, uint16_t Btr_id, bool secondary)
-            : scheme_ptr(record_scheme_ptr), tree_id(Btr_id+1), page_cache(cache_ptr), ddms_(dsm), secondary_(secondary){
+            : index_scheme_ptr(record_scheme_ptr), tree_id(Btr_id + 1), page_cache(cache_ptr), ddms_(dsm), secondary_(secondary){
         assert(sizeof(LeafPage<Key>) < kLeafPageSize);
         assert(sizeof(InternalPage<Key>) < kInternalPageSize);
         // the secondary index type here is deprecated. If secondary key is needed we need to define the Key in
@@ -81,8 +82,8 @@ namespace DSMEngine {
         }
         assert(sizeof(InternalPage<Key>) <= kInternalPageSize);
         // The end of page is the page forward check pointer.
-//        leaf_cardinality_ = (kLeafPageSize - STRUCT_OFFSET(LeafPage<Key COMMA Value>, data_[0]) - sizeof(uint8_t)) / scheme_ptr->GetSchemaSize();
-        leaf_cardinality_ = LeafPage<Key>::calculate_cardinality(kLeafPageSize, scheme_ptr->GetSchemaSize());
+//        leaf_cardinality_ = (kLeafPageSize - STRUCT_OFFSET(LeafPage<Key COMMA Value>, data_[0]) - sizeof(uint8_t)) / index_scheme_ptr->GetSchemaSize();
+        leaf_cardinality_ = LeafPage<Key>::calculate_cardinality(kLeafPageSize, index_scheme_ptr->GetSchemaSize());
         print_verbose();
         assert(g_root_ptr.is_lock_free());
         //TODO: simplify the code below by SELCC APIs.
@@ -111,7 +112,7 @@ namespace DSMEngine {
             assert(cached_root_page_handle.load()->remote_lock_status == 0);
             root_page_buf = mr->addr;
             assert(root_page_buf);
-            auto root_page = new(root_page_buf) LeafPage<Key>(g_root_ptr, leaf_cardinality_, scheme_ptr->GetSchemaSize());
+            auto root_page = new(root_page_buf) LeafPage<Key>(g_root_ptr, leaf_cardinality_, index_scheme_ptr->GetSchemaSize());
 
 //            root_page->front_version++;
 //            root_page->rear_version = root_page->front_version;
@@ -159,6 +160,7 @@ namespace DSMEngine {
         for (size_t i = 0; i < define::kMaxLevelOfTree; ++i) {
             path_stack[i] = GlobalAddress::Null();
         }
+        DynamicCompoundKey::schema_ptr = index_scheme_ptr;
     }
     template <typename Key>
     GlobalAddress Btr<Key>::get_root_ptr_ptr() {
@@ -462,7 +464,7 @@ namespace DSMEngine {
 #ifndef NDEBUG
         //check whether the primary key equal to the k.
         assert(k == *(Key*)v.data());
-        Record record = Record(scheme_ptr, const_cast<char *>(v.data()));
+        Record record = Record(index_scheme_ptr, const_cast<char *>(v.data()));
         Key pri_k;
         record.GetPrimaryKey(&pri_k);
         assert(pri_k == k);
@@ -632,7 +634,6 @@ namespace DSMEngine {
     bool Btr<Key>::remove(const Key &k, const Slice &v) {
         // help me to implement the remove function following the search function
         before_operation();
-
         Cache::Handle* page_hint = nullptr;
         auto root = get_root_ptr_protected(page_hint);
         assert(root != GlobalAddress::Null());
@@ -695,6 +696,7 @@ namespace DSMEngine {
     template <typename Key>
     bool Btr<Key>::search(const Key &k, const Slice &value_buff) {
 //  assert(rdma_mg->is_register());
+        before_operation();
         Cache::Handle* page_hint = nullptr;
         auto root = get_root_ptr_protected(page_hint);
         SearchResult<Key> result;
@@ -827,7 +829,7 @@ namespace DSMEngine {
     }
     template <typename Key>
     bool Btr<Key>::remove(const Key &k) {
-//  assert(rdma_mg->is_register());
+        before_operation();
         Cache::Handle* page_hint = nullptr;
         auto root = get_root_ptr_protected(page_hint);
         SearchResult<Key> result;
@@ -958,7 +960,7 @@ namespace DSMEngine {
         Cache_Handle* handle;
         ddms_->SELCC_Shared_Lock(page_buffer, left_most_leaf, handle);
         auto * node = (LeafPage<Key> *)page_buffer;
-        return iterator(node, handle, 0, scheme_ptr, ddms_);
+        return iterator(node, handle, 0, index_scheme_ptr, ddms_);
     }
     template<typename Key>
     typename Btr<Key>::iterator Btr<Key>::lower_bound(const Key &key) {
@@ -1424,7 +1426,7 @@ namespace DSMEngine {
             goto returnfalse;
         }
 
-        page->leaf_page_search(k, result, page_addr, scheme_ptr);
+        page->leaf_page_search(k, result, page_addr, index_scheme_ptr);
         assert(result.val.data()!= nullptr);
     returntrue:
         assert(handle);
@@ -1522,7 +1524,7 @@ namespace DSMEngine {
             goto returnfalse;
         }
 
-        need_merge = page->leaf_page_delete(k, cnt, result, scheme_ptr);
+        need_merge = page->leaf_page_delete(k, cnt, result, index_scheme_ptr);
     returntrue:
         assert(handle);
         ddms_->SELCC_Shared_UnLock(page_addr, handle);
@@ -1604,9 +1606,9 @@ namespace DSMEngine {
             goto returnfalse;
         }
         // the position_idx is the index of the tuple in the GCL. real_offset = positon*Tuple_size.
-        position = page->leaf_page_pos_lb(k, page_addr, scheme_ptr);
+        position = page->leaf_page_pos_lb(k, page_addr, index_scheme_ptr);
         if (position >= 0){
-            iter.initialize(page, handle, position, scheme_ptr,ddms_);
+            iter.initialize(page, handle, position, index_scheme_ptr, ddms_);
         }else{
             // the iter shall point to the next leaf node.
             GlobalAddress sib_ptr = page->hdr.sibling_ptr;
@@ -1617,7 +1619,7 @@ namespace DSMEngine {
             ddms_->SELCC_Shared_UnLock(page_addr, handle);
             ddms_->SELCC_Shared_Lock(page_buffer, sib_ptr, handle);
             page = (LeafPage<Key> *)page_buffer;
-            iter.initialize(page, handle, 0, scheme_ptr,ddms_);
+            iter.initialize(page, handle, 0, index_scheme_ptr, ddms_);
         }
         assert(result.val.data() != nullptr);
     returntrue:
@@ -2000,9 +2002,9 @@ namespace DSMEngine {
         int cnt = 0;
 //        int empty_index = -1;
 //        char *update_addr = nullptr;
-        int tuple_length = scheme_ptr->GetSchemaSize();
+        int tuple_length = index_scheme_ptr->GetSchemaSize();
 
-        bool need_split = page->leaf_page_store(k, v, cnt,  scheme_ptr);
+        bool need_split = page->leaf_page_store(k, v, cnt, index_scheme_ptr);
         num_of_record++;
 //        assert(page->hdr.last_index== 0 || page->data_[0]!=0);
         if (!need_split) {
@@ -2025,8 +2027,8 @@ namespace DSMEngine {
 //      printf("Allocate slot for page 3 %p\n", sibling_addr);
             rdma_mg->Allocate_Local_RDMA_Slot(*sibling_mr, Regular_Page);
 //      memset(sibling_mr->addr, 0, kLeafPageSize);
-            auto sibling = new(sibling_mr->addr) LeafPage<Key>(sibling_addr, leaf_cardinality_, scheme_ptr->GetSchemaSize(),
-                                                                      secondary_, page->hdr.level);
+            auto sibling = new(sibling_mr->addr) LeafPage<Key>(sibling_addr, leaf_cardinality_, index_scheme_ptr->GetSchemaSize(),
+                                                               secondary_, page->hdr.level);
             sibling->global_lock = 0;
             assert(sibling->global_lock == 0);
             //TODO: add the sibling to the local cache.
@@ -2043,14 +2045,14 @@ namespace DSMEngine {
                 m = cnt / 2;
                 tuple_start = page->data_ + m*tuple_length;
 
-                Record split_record = Record(scheme_ptr,tuple_start);
+                Record split_record = Record(index_scheme_ptr, tuple_start);
                 split_record.GetPrimaryKey(&split_key);
             }else{
                 // If this is seconday index, then we need to split at the first duplicated key unless the whole node only contain one single key.
                 int m_t = cnt / 2;
                 tuple_start = page->data_ + m_t*tuple_length;
 
-                Record split_record = Record(scheme_ptr,tuple_start);
+                Record split_record = Record(index_scheme_ptr, tuple_start);
                 split_record.GetPrimaryKey(&split_key);
 
                 if(page->hdr.lowest != split_key && page->hdr.lowest != page->hdr.highest ){
@@ -2058,14 +2060,14 @@ namespace DSMEngine {
                     int previous = m_t-1;
                     char* previous_add = page->data_ + previous*tuple_length;
                     Key prev_key;
-                    Record previous_r = Record(scheme_ptr,previous_add);
+                    Record previous_r = Record(index_scheme_ptr, previous_add);
                     previous_r.GetPrimaryKey(&prev_key);
                     while(prev_key == split_key){
                         m_t--;
                         assert(m_t > 0);
                         previous = m_t-1;
                         previous_add = page->data_ + previous*tuple_length;
-                        Record prev_r = Record(scheme_ptr,previous_add);
+                        Record prev_r = Record(index_scheme_ptr, previous_add);
                         prev_r.GetPrimaryKey(&prev_key);
                     }
                 }

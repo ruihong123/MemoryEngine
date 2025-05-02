@@ -112,7 +112,7 @@ void thread_run(int id) {
     {
         Secondary_Key<uint64_t, uint64_t> tuple = {};
         char *tuple_buff = reinterpret_cast<char *>(&tuple);
-        DSMEngine::Slice tuple_slice = DSMEngine::Slice(tuple_buff, tree->scheme_ptr->GetSchemaSize());
+        DSMEngine::Slice tuple_slice = DSMEngine::Slice(tuple_buff, tree->index_scheme_ptr->GetSchemaSize());
 
 //    uint64_t& key = *(uint64_t*)tuple_buff;
         uint64_t &value = *((uint64_t *) tuple_buff + 1);
@@ -263,7 +263,7 @@ void thread_run(int id) {
 //        delete iter;
     }else{
         char *tuple_buff = reinterpret_cast<char *>(&to_search);
-        DSMEngine::Slice tuple_slice = DSMEngine::Slice(tuple_buff, tree->scheme_ptr->GetSchemaSize());
+        DSMEngine::Slice tuple_slice = DSMEngine::Slice(tuple_buff, tree->index_scheme_ptr->GetSchemaSize());
 
         if (rand_r(&seed) % 100 < kReadRatio) { // GET
             DSMEngine::Btr<Secondary_Key<uint64_t, uint64_t>>::iterator iter = tree->lower_bound(to_search);
