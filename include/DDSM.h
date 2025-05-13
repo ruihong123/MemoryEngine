@@ -98,7 +98,7 @@ namespace DSMEngine {
                 // not necessary to use RDMA cas, use RDMA write instead.
                 rdma_mg->RDMA_CAS(&remote_mr, cas_buffer, 0, catalog_ptr, IBV_SEND_SIGNALED, 1, 1);
             }
-        };
+        }
         ~DDSM(){
             disconnectMemcached();
         }
@@ -163,7 +163,7 @@ namespace DSMEngine {
         uint64_t ClusterSum(const std::string &sum_key, uint64_t value);
         uint64_t memFetchAndAdd(const char *key, uint32_t klen);
         GlobalAddress Allocate_Remote(Chunk_type pool_name); // allocate
-        void Deallocate_Remote(Chunk_type pool_name, GlobalAddress gaddr){}; // free
+        void Deallocate_Remote(Chunk_type pool_name, GlobalAddress gaddr){} // free
         uint16_t GetID(){
             return rdma_mg->node_id;
         }
