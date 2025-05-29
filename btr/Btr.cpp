@@ -12,8 +12,7 @@ namespace DSMEngine {
     template<class Key>
     class LeafPage;
 
-
-
+    thread_local RecordSchema* DynamicCompoundKey::schema_ptr = nullptr;
 
 //    bool enter_debug = false;
 
