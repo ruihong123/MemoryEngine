@@ -88,17 +88,17 @@ public:
   }
 
   // TODO: return false if the key exists in primary index already
-  bool InsertPriIndex(const DynamicCompoundKey* keys, size_t key_num, GlobalAddress tuple_gaddr) {
+  bool InsertPriIndex(const DynamicCompoundKeyPtr keys, size_t key_num, GlobalAddress tuple_gaddr) {
       assert(TOPAGE(tuple_gaddr).offset != tuple_gaddr.offset);
     assert(key_num ==  1);
     size_t primary_key_length = schema_ptr_->GetPrimaryKeyLength();
     char* key_value_pair = new char[primary_key_length + 8];
     Slice inserted_slice(key_value_pair, 16);
-    memcpy(key_value_pair, keys, primary_key_length);
+    memcpy(key_value_pair, keys.get(), primary_key_length);
       memcpy(key_value_pair + sizeof(IndexKey), &tuple_gaddr, sizeof(GlobalAddress));
 //      printf("Table INsert INdex has been executed\n");
 //      fflush(stdout);
-      primary_index_->insert(*keys, inserted_slice);
+      primary_index_->insert(*keys.get(), inserted_slice);
       delete[] key_value_pair;
       return true;
   }
@@ -116,11 +116,11 @@ public:
 //        return true;
 //    }
 
-  GlobalAddress SearchPriIndex(const DynamicCompoundKey& key) {
+  GlobalAddress SearchPriIndex(const DynamicCompoundKeyPtr key) {
       GlobalAddress tuple_gaddr = GlobalAddress::Null();
       char key_value_pair[16] = {0};
       Slice retrieved_slice(key_value_pair, 16);
-    bool find = primary_index_->search(key, retrieved_slice);
+    bool find = primary_index_->search(*key.get(), retrieved_slice);
       if (find){
             memcpy(&tuple_gaddr, key_value_pair + sizeof(IndexKey), sizeof(GlobalAddress));
             return tuple_gaddr;

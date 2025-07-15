@@ -399,10 +399,10 @@ class TpccPopulator : public BenchmarkPopulator {
 #if defined(TO) || defined(OCC) || defined(MVOCC)
       record_in_cache.PutMeta(meta);
 #endif
-    IndexKey key = GetItemPrimaryKey(record_ptr->i_id_, record_ptr->w_id_);
+    auto key = GetItemPrimaryKey(record_ptr->i_id_, record_ptr->w_id_);
 
       storage_manager_->tables_[ITEM_TABLE_ID]->InsertPriIndex(
-              &key, 1, tuple_gaddr);
+              key, 1, tuple_gaddr);
 #ifndef NDEBUG
       auto ret = storage_manager_->tables_[ITEM_TABLE_ID]->SearchPriIndex(
               key);
@@ -446,9 +446,9 @@ class TpccPopulator : public BenchmarkPopulator {
 #if defined(TO) || defined(OCC) || defined(MVOCC)
       record_in_cache.PutMeta(meta);
 #endif
-      IndexKey k = GetWarehousePrimaryKey(record_ptr->w_id_);
+      auto k = GetWarehousePrimaryKey(record_ptr->w_id_);
       storage_manager_->tables_[WAREHOUSE_TABLE_ID]->InsertPriIndex(
-              &k, 1, tuple_gaddr);
+              k, 1, tuple_gaddr);
 #ifndef NDEBUG
       auto ret = storage_manager_->tables_[WAREHOUSE_TABLE_ID]->SearchPriIndex(
               k);
@@ -495,9 +495,9 @@ class TpccPopulator : public BenchmarkPopulator {
       record_in_cache.PutMeta(meta);
 #endif
       assert(record_ptr->d_next_o_id_ > 0);
-    IndexKey k = GetDistrictPrimaryKey(record_ptr->d_id_, record_ptr->d_w_id_);
+    auto k = GetDistrictPrimaryKey(record_ptr->d_id_, record_ptr->d_w_id_);
       storage_manager_->tables_[DISTRICT_TABLE_ID]->InsertPriIndex(
-              &k, 1, tuple_gaddr);
+              k, 1, tuple_gaddr);
 #ifndef NDEBUG
       auto ret = storage_manager_->tables_[DISTRICT_TABLE_ID]->SearchPriIndex(
               k);
@@ -554,10 +554,10 @@ class TpccPopulator : public BenchmarkPopulator {
 #if defined(TO) || defined(OCC) || defined(MVOCC)
       record_in_cache.PutMeta(meta);
 #endif
-    IndexKey key = GetCustomerPrimaryKey(record_ptr->c_id_, record_ptr->c_d_id_,
+    auto key = GetCustomerPrimaryKey(record_ptr->c_id_, record_ptr->c_d_id_,
                                          record_ptr->c_w_id_);
       storage_manager_->tables_[CUSTOMER_TABLE_ID]->InsertPriIndex(
-              &key, 1, tuple_gaddr);
+              key, 1, tuple_gaddr);
 #ifndef NDEBUG
       auto ret2 = storage_manager_->tables_[CUSTOMER_TABLE_ID]->SearchPriIndex(
               key);
@@ -602,9 +602,9 @@ class TpccPopulator : public BenchmarkPopulator {
 #if defined(TO) || defined(OCC) || defined(MVOCC)
       record_in_cache.PutMeta(meta);
 #endif
-    IndexKey key = GetStockPrimaryKey(record_ptr->s_i_id_, record_ptr->s_w_id_);
+    auto key = GetStockPrimaryKey(record_ptr->s_i_id_, record_ptr->s_w_id_);
       storage_manager_->tables_[STOCK_TABLE_ID]->InsertPriIndex(
-              &key, 1, tuple_gaddr);
+              key, 1, tuple_gaddr);
 #ifndef NDEBUG
       auto ret = storage_manager_->tables_[STOCK_TABLE_ID]->SearchPriIndex(
               key);
@@ -647,10 +647,10 @@ class TpccPopulator : public BenchmarkPopulator {
 #if defined(TO) || defined(OCC) || defined(MVOCC)
       record_in_cache.PutMeta(meta);
 #endif
-    IndexKey key = GetOrderPrimaryKey(record_ptr->o_id_, record_ptr->o_d_id_,
+    auto key = GetOrderPrimaryKey(record_ptr->o_id_, record_ptr->o_d_id_,
                                       record_ptr->o_w_id_);
       storage_manager_->tables_[ORDER_TABLE_ID]->InsertPriIndex(
-              &key, 1, tuple_gaddr);
+              key, 1, tuple_gaddr);
       gallocator->SELCC_Exclusive_UnLock(handle->gptr, handle);
   }
 
@@ -683,10 +683,10 @@ class TpccPopulator : public BenchmarkPopulator {
 #if defined(TO) || defined(OCC) || defined(MVOCC)
       record_in_cache.PutMeta(meta);
 #endif
-    IndexKey key = GetNewOrderPrimaryKey(record_ptr->o_id_, record_ptr->d_id_,
+    auto key = GetNewOrderPrimaryKey(record_ptr->o_id_, record_ptr->d_id_,
                                          record_ptr->w_id_);
       storage_manager_->tables_[NEW_ORDER_TABLE_ID]->InsertPriIndex(
-              &key, 1, tuple_gaddr);
+              key, 1, tuple_gaddr);
       gallocator->SELCC_Exclusive_UnLock(handle->gptr, handle);
   }
 
@@ -725,13 +725,13 @@ class TpccPopulator : public BenchmarkPopulator {
 #if defined(TO) || defined(OCC) || defined(MVOCC)
       record_in_cache.PutMeta(meta);
 #endif
-    IndexKey key = GetOrderLinePrimaryKey(record_ptr->ol_o_id_,
+    auto key = GetOrderLinePrimaryKey(record_ptr->ol_o_id_,
                                           record_ptr->ol_d_id_,
                                           record_ptr->ol_w_id_,
                                           record_ptr->ol_number_);
     //keys[1] = GetOrderLineSecondaryKey(record_ptr->ol_o_id_, record_ptr->ol_d_id_, record_ptr->ol_w_id_);
       storage_manager_->tables_[ORDER_LINE_TABLE_ID]->InsertPriIndex(
-              &key, 1, tuple_gaddr);
+              key, 1, tuple_gaddr);
       gallocator->SELCC_Exclusive_UnLock(handle->gptr, handle);
   }
 
@@ -768,11 +768,11 @@ class TpccPopulator : public BenchmarkPopulator {
 #if defined(TO) || defined(OCC) || defined(MVOCC)
       record_in_cache.PutMeta(meta);
 #endif
-    IndexKey key = GetHistoryPrimaryKey(record_ptr->h_c_id_,
+    auto key = GetHistoryPrimaryKey(record_ptr->h_c_id_,
                                         record_ptr->h_d_id_,
                                         record_ptr->h_w_id_);
       storage_manager_->tables_[HISTORY_TABLE_ID]->InsertPriIndex(
-              &key, 1, tuple_gaddr);
+              key, 1, tuple_gaddr);
       gallocator->SELCC_Exclusive_UnLock(handle->gptr, handle);
   }
 
@@ -805,10 +805,10 @@ class TpccPopulator : public BenchmarkPopulator {
 #if defined(TO) || defined(OCC) || defined(MVOCC)
       record_in_cache.PutMeta(meta);
 #endif
-    IndexKey key = GetDistrictNewOrderPrimaryKey(record_ptr->d_id_,
+    auto key = GetDistrictNewOrderPrimaryKey(record_ptr->d_id_,
                                                  record_ptr->w_id_);
       storage_manager_->tables_[DISTRICT_NEW_ORDER_TABLE_ID]->InsertPriIndex(
-              &key, 1, tuple_gaddr);
+              key, 1, tuple_gaddr);
       gallocator->SELCC_Exclusive_UnLock(handle->gptr, handle);
   }
 };

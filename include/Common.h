@@ -136,13 +136,37 @@ struct Value_buff {
 //using Key = Key_buff;
 //using Value = Value_buff;
 
+
 template<typename Key>
-constexpr Key kKeyMin = std::numeric_limits<Key>::min();
+constexpr Key getKeyMin() {
+    if constexpr (std::is_arithmetic<Key>::value) {
+        return std::numeric_limits<Key>::min();
+    } else {
+        // static_assert or throw, or provide a specialization
+        return Key::MinValue();
+
+    }
+}
+
 template<typename Key>
-constexpr Key kKeyMax = std::numeric_limits<Key>::max();
+constexpr Key getKeyMax() {
+    if constexpr (std::is_arithmetic<Key>::value) {
+        return std::numeric_limits<Key>::min();
+    } else {
+        // static_assert or throw, or provide a specialization
+        return Key::MaxValue();
+
+    }
+}
 
 
+template<typename Key>
+constexpr Key kKeyMin =  getKeyMin<Key>();
+template<typename Key>
+constexpr Key kKeyMax =  getKeyMax<Key>();
 
+
+// the secondary key below is deprecated.
 template<typename Key, typename Value>
 class Secondary_Key{
 public:

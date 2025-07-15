@@ -127,6 +127,7 @@ if(WITH_NUMA)
     include_directories(${NUMA_INCLUDE_DIR})
     target_link_libraries(DSMEngine NUMA::NUMA)
 endif()
+add_definitions("-DBOOST_ALLOW_DEPRECATED_HEADERS")
 #add_executable(TestTrial trial_test.cpp)
 add_executable(memory_server "server.cc"
         "memory_node/memory_node_keeper.h"

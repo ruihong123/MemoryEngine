@@ -113,7 +113,7 @@ namespace DSMEngine{
 //        default_gallocator->SELCC_Exclusive_Lock_noread(page_buffer, gcl_addr, handle);
         }
         bool TransactionManager::InsertRecord(size_t table_id,
-                                              const IndexKey *keys,
+                                              const DynamicCompoundKeyPtr keys,
                                               size_t key_num, Record *record,
                                               Cache::Handle *handle,
                                               const GlobalAddress tuple_gaddr) {
@@ -486,7 +486,7 @@ namespace DSMEngine{
 //                IndexKey keys[1];
 //                access->txn_local_tuple_->GetPrimaryKey(&keys[0]);
                 char* primaryk_buff = new char[access->txn_local_tuple_->schema_ptr_->GetPrimaryKeyLength()];
-                DynamicCompoundKey* primary_key = reinterpret_cast<DynamicCompoundKey*>(primaryk_buff);
+                DynamicCompoundKeyPtr primary_key(reinterpret_cast<DynamicCompoundKey*>(primaryk_buff), [](DynamicCompoundKey* ptr) { delete[] ptr; });
                 storage_manager_->tables_[access->txn_local_tuple_->schema_ptr_->GetTableId()]->InsertPriIndex(primary_key, 1, access->access_addr_);
 
             }

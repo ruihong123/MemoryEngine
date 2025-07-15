@@ -15,6 +15,14 @@ namespace DSMEngine {
     bool InternalPage<Key>::internal_page_search(const Key &k, void *result_ptr) {
         SearchResult<Key>& result = *(SearchResult<Key>*)result_ptr;
         assert(k >= hdr.lowest);
+//        assert(k < hdr.highest);
+//        uint64_t local_meta_new = __atomic_load_n((uint64_t*)&local_lock_meta, (int)std::memory_order_seq_cst);
+//        if (((Local_Meta*) &local_meta_new)->local_lock_byte !=0 || ((Local_Meta*) &local_meta_new)->current_ticket != current_ticket){
+//            return false;
+//        }
+
+//        Key highest_buffer = 0;
+//        highest_buffer = hdr.highest;
         // optimistically latch free.
         //TODO (potential bug) what will happen if the record version is not consistent?
 
@@ -29,6 +37,7 @@ namespace DSMEngine {
         // choice1: Maybe the lock check is necessary (either in the page or outside)
         // choice2: or we check whether the front verison equals the rear version to check wehther there is a
         // concurrent writer (check lock).
+//    re_read:
         GlobalAddress target_global_ptr_buff;
 
         //TOTHINK: how to make sure that concurrent write will not result in segfault,
@@ -36,11 +45,24 @@ namespace DSMEngine {
         auto cnt = hdr.last_index + 1;
         // page->debug();
         if (k < records[0].key) {
+//      printf("next level pointer is  leftmost %p \n", page->hdr.leftmost_ptr);
             target_global_ptr_buff = hdr.leftmost_ptr;
+
+//      result.upper_key = page->records[0].key;
+            // check front verison here because a writer will change the front version at the beggining of a write op
+            // if this has not changed, we can guarntee that there is not writer interfere.
+
+            // TODO: maybe we need memory fence here either.
+            // TOTHINK: There is no need for local reread because the data will be modified in a copy on write manner.
+
+
             result.next_level = target_global_ptr_buff;
 #ifndef NDEBUG
             result.later_key = records[0].key;
 #endif
+
+
+
             assert(k < result.later_key);
             assert(result.next_level != GlobalAddress::Null());
             return true;
@@ -193,7 +215,7 @@ namespace DSMEngine {
         assert(hdr.last_index == last_index_prev + 1);
         assert(records[hdr.last_index].ptr != GlobalAddress::Null());
         assert(records[hdr.last_index].key != 0);
-        return cnt == hdr.kCardinality;
+        return cnt == kInternalCardinality;
     }
     template<class Key>
     int LeafPage<Key>::leaf_page_pos_lb(const Key &k, GlobalAddress g_page_ptr, RecordSchema *record_scheme) {

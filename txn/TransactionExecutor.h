@@ -92,12 +92,17 @@ class TransactionExecutor {
                 txn_manager->DisableLog();
             }
             Record* record;
+            char* primary_key_buffer;
+            primary_key_buffer = new char[sizeof(uint64_t)];
+            DynamicCompoundKeyPtr primary_key(reinterpret_cast<DynamicCompoundKey*>(primary_key_buffer), [](DynamicCompoundKey* ptr) { delete[] ptr; });
             switch (received_rdma_request.command) {
                 case tuple_read_2pc:
+                memcpy(primary_key_buffer, &received_rdma_request.content.tuple_info.primary_key, sizeof(uint64_t));
+
                     // process the request
                     success = txn_manager->SearchRecord(
                         received_rdma_request.content.tuple_info.table_id,
-                        received_rdma_request.content.tuple_info.primary_key,
+                        primary_key,
                         record,
                         (DSMEngine::AccessType)received_rdma_request.content
                             .tuple_info.access_type);

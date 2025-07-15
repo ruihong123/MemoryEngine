@@ -54,8 +54,9 @@ extern int TimePrintCounter[MAX_APP_THREAD];
 namespace DSMEngine {
     struct DynamicCompoundKey {
         // This is a dynamic compound key that can be used in the B-tree.
-        // this class is a helper class which enables the directly comparison between the dynamic compound keys.
-        char* start; // the compind key should always smaller than 1 KB.
+        // this class should rarely be instantiated directly, instead, it should be used with a RecordSchema pointer.
+        // and get reinterpreted casted over a char array.
+        char start[1024]; // the compind key should always smaller than 1 KB.
 
         static thread_local DSMEngine::RecordSchema* schema_ptr;
 
