@@ -9,10 +9,9 @@ namespace DSMEngine {
     template class LeafPage<uint64_t>;
     template class LeafPage<Secondary_Key<uint64_t, uint64_t>>;
 //    template class LeafPage<uint64_t>;
-    template class InternalPage<uint64_t>;
-    template class InternalPage<Secondary_Key<uint64_t, uint64_t>>;
-    template<class Key>
-    bool InternalPage<Key>::internal_page_search(const Key &k, void *result_ptr) {
+    // template class InternalPage<uint64_t>;
+    // template class InternalPage<Secondary_Key<uint64_t, uint64_t>>;
+    bool InternalPage::internal_page_search(const Key &k, void *result_ptr) {
         SearchResult<Key>& result = *(SearchResult<Key>*)result_ptr;
         assert(k >= hdr.lowest);
         // optimistically latch free.

@@ -136,22 +136,19 @@ namespace DSMEngine{
 
     
     class InternalPage {
-        // private:
-        //TODO: we can make the local lock metaddata outside the page.
     public:
+        // static thread_local RecordSchema *index_scheme_ptr;
         alignas(8) uint64_t global_lock;
-
         Header_Index hdr = {};
-        // InternalEntry records[kInternalCardinality] = {};
-        template<class K> friend class Btr;
+        char data_[1];
+        friend class Btr;
         friend class Cache;
 
     public:
-        // this is called when tree grows, The page initialization will not reset the global lock byte.
-        InternalPage(GlobalAddress left, const Key &key, GlobalAddress right, GlobalAddress this_page_g_ptr, int cardinality, bool secondary = false,
-                     uint32_t level = 0) {
+        /* The index_scheme_ptr should be */
+        InternalPage(GlobalAddress left, const Key &key, GlobalAddress right, GlobalAddress this_page_g_ptr, int cardinality, 
+            RecordSchema *scheme, bool secondary = false,  uint32_t level = 0) {
             assert(level> 0);
-//            assert(STRUCT_OFFSET(InternalPage<Key>, local_lock_meta) == 0);
             if (secondary){
                 hdr.p_type = P_Internal_P;
 
@@ -167,6 +164,23 @@ namespace DSMEngine{
             hdr.last_index = 0;
             assert(this_page_g_ptr!= GlobalAddress::Null());
             hdr.this_page_g_ptr = this_page_g_ptr;
+            hdr.kCardinality = cardinality;
+        }
+        void SetHigest(DynamicCompoundKey& highest, RecordSchema *scheme) {
+            DynamicCompoundKey highest_key(data_, scheme);
+            highest_key.copy_from(highest);
+        }
+        void SetLowest(DynamicCompoundKey& lowest, RecordSchema *scheme) {
+            uint64_t key_size = scheme->GetPrimaryKeyLength();
+            DynamicCompoundKey highest_key(data_+key_size, scheme);
+            highest_key.copy_from(highest);
+        }
+        DynamicCompoundKey GetHighest(RecordSchema *scheme) const {
+            return DynamicCompoundKey(data_, scheme);
+        }
+        DynamicCompoundKey GetLowest(RecordSchema *scheme) const {
+            uint64_t key_size = scheme->GetPrimaryKeyLength();
+            return DynamicCompoundKey(data_ + key_size, scheme);
         }
 
         explicit InternalPage(GlobalAddress this_page_g_ptr, bool secondary = false, uint32_t level = 0) {
@@ -184,19 +198,19 @@ namespace DSMEngine{
         bool internal_page_search(const Key &k, void *result_ptr);
         bool internal_page_store(GlobalAddress page_addr, const Key &k, GlobalAddress value, int level);
     };
-    template<typename TKey>
+
     class LeafPage {
     public:
         // if busy we will not cache it in cache, switch back to the Naive
         alignas(8) uint64_t global_lock;
-        Header_Index<TKey> hdr;
+        Header_Index hdr;
 #ifdef DYNAMIC_ANALYSE_PAGE
         char data_[1];// The data segment is beyond this class.
 #else
                 LeafEntry<TKey, Value> records[kLeafCardinality] = {};
 #endif
 
-        template<class K> friend class Btr;
+        friend class Btr;
     public:
         LeafPage(GlobalAddress this_page_g_ptr, uint16_t leaf_cardinality, uint16_t leaf_recordsize, bool secondary = false,
                  uint32_t level = 0) {

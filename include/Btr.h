@@ -55,24 +55,37 @@ namespace DSMEngine {
     struct DynamicCompoundKey {
         // This is a dynamic compound key that can be used in the B-tree.
         // this class is a helper class which enables the directly comparison between the dynamic compound keys.
-        char* start; // the compind key should always smaller than 1 KB.
+        char* start = nullptr; // the compind key should always smaller than 1 KB.
 
-        static thread_local DSMEngine::RecordSchema* schema_ptr;
+        RecordSchema* schema_ptr = nullptr;
 
-        DynamicCompoundKey(){};
+        DynamicCompoundKey(char* buff, RecordSchema* schema)
+        : start(buff), schema_ptr(schema){}
         //copy constructor
-        DynamicCompoundKey(const DynamicCompoundKey& other) {
-            assert(schema_ptr != nullptr);
+        // 
+        void copy_from(const DynamicCompoundKey& other) {
+            assert(schema_ptr == other.schema_ptr);
             size_t key_length = schema_ptr->GetPrimaryKeyLength();
             std::memcpy(start, other.start, key_length);
         }
         // Move constructor 
         DynamicCompoundKey(DynamicCompoundKey&& other) noexcept {
-            assert(schema_ptr != nullptr);
-            size_t key_length = schema_ptr->GetPrimaryKeyLength();
-            std::memcpy(start, other.start, key_length);
+            schema_ptr = other.schema_ptr;
+            start = other.start;
+            other.start = nullptr; 
         }
-
+        // DynamicCompoundKey& operator=(const DynamicCompoundKey& other) {
+        //     if (start)
+        //     {
+        //         assert(schema_ptr == other.schema_ptr);
+        //         size_t key_length = schema_ptr->GetPrimaryKeyLength();
+        //         std::memcpy(start, other.start, key_length);
+        //     }else{
+        //         schema_ptr = other.schema_ptr;
+        //         start = other.start;
+        //     }
+        //     return *this;
+        // }
         // Equality ==
         bool operator==(const DynamicCompoundKey& other) const {
             return compare(other) == 0;
@@ -105,26 +118,26 @@ namespace DSMEngine {
         static DynamicCompoundKey& MinValue() {
             static char value_buff[1024] = {0};
             DynamicCompoundKey& k = *reinterpret_cast<DynamicCompoundKey*>(value_buff);
-            if (DynamicCompoundKey::schema_ptr == nullptr) {
+            if (schema_ptr == nullptr) {
                 // Handle the case where schema_ptr is not set
                 // This could be a static_assert or throw an exception
                 // For now, we just return an empty key
                 return k;
             }
-            size_t key_length = DynamicCompoundKey::schema_ptr->GetPrimaryKeyLength();
+            size_t key_length = schema_ptr->GetPrimaryKeyLength();
             // std::memset(k.start, 0, key_length);     
             return k;
         }
         static DynamicCompoundKey& MaxValue() {
             static char value_buff[1024] = {255};
             DynamicCompoundKey& k = *reinterpret_cast<DynamicCompoundKey*>(value_buff);
-            if (DynamicCompoundKey::schema_ptr == nullptr) {
+            if (schema_ptr == nullptr) {
                 // Handle the case where schema_ptr is not set
                 // This could be a static_assert or throw an exception
                 // For now, we just return an empty key
                 return k;
             }
-            size_t key_length = DynamicCompoundKey::schema_ptr->GetPrimaryKeyLength();
+            size_t key_length = schema_ptr->GetPrimaryKeyLength();
             // std::memset(k.start, 0, key_length);     
             return k;
         }
