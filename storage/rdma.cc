@@ -3813,7 +3813,7 @@ int RDMA_Manager::RDMA_CAS(ibv_mr *remote_mr, ibv_mr *local_mr, uint64_t compare
         uint8_t starvation_level = 0;
         uint64_t page_version = 0;
 #ifndef NDEBUG
-        auto page  = (InternalPage<uint64_t>*)(page_buffer->addr);
+        auto page  = (InternalPage*)(page_buffer->addr);
 #endif
 #ifdef INVALIDATION_STATISTICS
         bool invalidation_counted = false;
@@ -4189,7 +4189,7 @@ int RDMA_Manager::RDMA_CAS(ibv_mr *remote_mr, ibv_mr *local_mr, uint64_t compare
         retry:
         retry_cnt++;
         GlobalAddress page_addr = lock_addr;
-        page_addr.offset -= STRUCT_OFFSET(LeafPage<uint64_t>, global_lock);
+        page_addr.offset -= STRUCT_OFFSET(LeafPage, global_lock);
         // todo: the read lock release and then lock acquire is not atomic. we need to develop and atomic way
         // for the lock upgrading to gurantee the correctness of 2 phase locking.
         if (retry_cnt > 1){
@@ -4460,7 +4460,7 @@ int RDMA_Manager::RDMA_CAS(ibv_mr *remote_mr, ibv_mr *local_mr, uint64_t compare
 //                        printf("Node %u try to acquire exclusive latch from node %u and successfully get forwarded page over data %p\n", RDMA_Manager::node_id, write_invalidation_target, page_addr);
 //                        fflush(stdout);
                         //The invlaidation message is processed and page has been forwarded.
-                        ((LeafPage<uint64_t>*)(page_buffer->addr))->global_lock = swap;
+                        ((LeafPage*)(page_buffer->addr))->global_lock = swap;
                         return true;
                     }
                 }else{
@@ -4511,7 +4511,7 @@ int RDMA_Manager::RDMA_CAS(ibv_mr *remote_mr, ibv_mr *local_mr, uint64_t compare
 //        invalidation_RPC_type = 0;
         //When the program fail at the code below the remote buffer content (this_page_g_ptr) has already  be incosistent
 #ifndef NDEBUG
-        auto page = (LeafPage<uint64_t>*)(page_buffer->addr);
+        auto page = (LeafPage*)(page_buffer->addr);
 //        assert(page_addr == page->hdr.this_page_g_ptr);
 #endif
         // Rethink the logic of this part. Can it result in false lock acquire?
@@ -4591,7 +4591,7 @@ int RDMA_Manager::RDMA_CAS(ibv_mr *remote_mr, ibv_mr *local_mr, uint64_t compare
         }
 #endif
         //TODO: remember the starvation level in the cache handle. THis can be used for priority revenge to improve the access fairness.
-        ((LeafPage<uint64_t>*)(page_buffer->addr))->global_lock = swap;
+        ((LeafPage*)(page_buffer->addr))->global_lock = swap;
         return true;
 //        printf("Acquire Write Lock at %lu\n", page_addr);
 //        assert(page_addr == (((LeafPage<uint64_t,uint64_t>*)(page_buffer->addr))->hdr.this_page_g_ptr));
@@ -4686,7 +4686,7 @@ int RDMA_Manager::RDMA_CAS(ibv_mr *remote_mr, ibv_mr *local_mr, uint64_t compare
                                                                 starvation_level, retry_cnt);
                     if (reply == processed){
                         //The invlaidation message is processed and page has been forwarded.
-                        ((LeafPage<uint64_t>*)(page_buffer->addr))->global_lock = swap;
+                        ((LeafPage*)(page_buffer->addr))->global_lock = swap;
                         return;
                     }
                 }else{
@@ -4730,7 +4730,7 @@ int RDMA_Manager::RDMA_CAS(ibv_mr *remote_mr, ibv_mr *local_mr, uint64_t compare
         invalidation_RPC_type = 0;
         //When the program fail at the code below the remote buffer content (this_page_g_ptr) has already  be incosistent
 #ifndef NDEBUG
-        auto page = (LeafPage<uint64_t>*)(page_buffer->addr);
+        auto page = (LeafPage*)(page_buffer->addr);
 //        assert(page_addr == page->hdr.this_page_g_ptr);
 #endif
         if ((*(uint64_t*) cas_buffer->addr) != compare){
@@ -4783,7 +4783,7 @@ int RDMA_Manager::RDMA_CAS(ibv_mr *remote_mr, ibv_mr *local_mr, uint64_t compare
                 goto retry;
             }
         }
-        ((LeafPage<uint64_t>*)(page_buffer->addr))->global_lock = swap;
+        ((LeafPage*)(page_buffer->addr))->global_lock = swap;
 //        printf("Acquire Write Lock at %lu\n", page_addr);
 //        assert(page_addr == (((LeafPage<uint64_t,uint64_t>*)(page_buffer->addr))->hdr.this_page_g_ptr));
     }
@@ -4908,20 +4908,20 @@ int RDMA_Manager::RDMA_CAS(ibv_mr *remote_mr, ibv_mr *local_mr, uint64_t compare
         struct ibv_sge sge[2];
         GlobalAddress tbFlushed_gaddr{};
         ibv_mr tbFlushed_local_mr = *page_buffer;
-        auto page = (LeafPage<uint64_t>*)(page_buffer->addr);
-        assert(STRUCT_OFFSET(LeafPage<int>, hdr.dirty_upper_bound) == STRUCT_OFFSET(LeafPage<char>, hdr.dirty_upper_bound));
+        auto page = (LeafPage*)(page_buffer->addr);
+        assert(STRUCT_OFFSET(LeafPage, hdr.dirty_upper_bound) == STRUCT_OFFSET(LeafPage, hdr.dirty_upper_bound));
         if (page->hdr.dirty_upper_bound == 0){
             assert(page->hdr.dirty_lower_bound == 0);
             // this means the page does not participate the optimization of dirty-only flush back.
             tbFlushed_gaddr.nodeID = page_addr.nodeID;
             //The header should be the same offset in Leaf or INternal nodes
-            assert(STRUCT_OFFSET(LeafPage<int>, hdr) == STRUCT_OFFSET(LeafPage<char>, hdr));
-            assert(STRUCT_OFFSET(InternalPage<int>, hdr) == STRUCT_OFFSET(LeafPage<int>, hdr));
-            assert(STRUCT_OFFSET(DataPage, hdr) == STRUCT_OFFSET(LeafPage<char>, hdr));
-            tbFlushed_gaddr.offset = page_addr.offset + STRUCT_OFFSET(LeafPage<int>, hdr);
+            assert(STRUCT_OFFSET(LeafPage, hdr) == STRUCT_OFFSET(LeafPage, hdr));
+            assert(STRUCT_OFFSET(InternalPage, hdr) == STRUCT_OFFSET(LeafPage, hdr));
+            assert(STRUCT_OFFSET(DataPage, hdr) == STRUCT_OFFSET(LeafPage, hdr));
+            tbFlushed_gaddr.offset = page_addr.offset + STRUCT_OFFSET(LeafPage, hdr);
             //Increase the page version before every page flush back.
-            tbFlushed_local_mr.addr = reinterpret_cast<void*>((uint64_t)page_buffer->addr + STRUCT_OFFSET(LeafPage<int>, hdr));
-            page_size -=  STRUCT_OFFSET(LeafPage<int>, hdr);
+            tbFlushed_local_mr.addr = reinterpret_cast<void*>((uint64_t)page_buffer->addr + STRUCT_OFFSET(LeafPage, hdr));
+            page_size -=  STRUCT_OFFSET(LeafPage, hdr);
         }else{
             assert(page->hdr.dirty_lower_bound >= sizeof(uint64_t ));
             tbFlushed_gaddr.nodeID = page_addr.nodeID;
@@ -5066,15 +5066,15 @@ int RDMA_Manager::RDMA_CAS(ibv_mr *remote_mr, ibv_mr *local_mr, uint64_t compare
         post_gl_page_addr.nodeID = page_addr.nodeID;
 //        assert(page_addr == (((LeafPage<uint64_t,uint64_t>*)(page_buffer->addr))->hdr.this_page_g_ptr));
         //The header should be the same offset in Leaf or INternal nodes
-        assert(STRUCT_OFFSET(LeafPage<int>, hdr) == STRUCT_OFFSET(LeafPage<char>, hdr));
-        assert(STRUCT_OFFSET(InternalPage<int>, hdr) == STRUCT_OFFSET(LeafPage<int>, hdr));
-        post_gl_page_addr.offset = page_addr.offset + STRUCT_OFFSET(LeafPage<int>, hdr);
+        assert(STRUCT_OFFSET(LeafPage, hdr) == STRUCT_OFFSET(LeafPage, hdr));
+        assert(STRUCT_OFFSET(InternalPage, hdr) == STRUCT_OFFSET(LeafPage, hdr));
+        post_gl_page_addr.offset = page_addr.offset + STRUCT_OFFSET(LeafPage, hdr);
         ibv_mr post_gl_page_local_mr = *page_buffer;
         //Increase the page version before every page flush back.
 //        assert(STRUCT_OFFSET(DataPage, hdr.p_version) == STRUCT_OFFSET(LeafPage<char COMMA char>, hdr.p_version));
 //        ((DataPage*)page_buffer->addr)->hdr.p_version++;
-        post_gl_page_local_mr.addr = reinterpret_cast<void*>((uint64_t)page_buffer->addr + STRUCT_OFFSET(LeafPage<int>, hdr));
-        page_size -=  STRUCT_OFFSET(LeafPage<int>, hdr);
+        post_gl_page_local_mr.addr = reinterpret_cast<void*>((uint64_t)page_buffer->addr + STRUCT_OFFSET(LeafPage, hdr));
+        page_size -=  STRUCT_OFFSET(LeafPage, hdr);
         assert(remote_lock_addr <= post_gl_page_addr - 8);
         bool async_succeed = false;
 
@@ -5212,15 +5212,15 @@ int RDMA_Manager::RDMA_CAS(ibv_mr *remote_mr, ibv_mr *local_mr, uint64_t compare
         post_gl_page_addr.nodeID = page_addr.nodeID;
 //        assert(page_addr == (((LeafPage<uint64_t,uint64_t>*)(page_buffer->addr))->hdr.this_page_g_ptr));
         //The header should be the same offset in Leaf or INternal nodes
-        assert(STRUCT_OFFSET(LeafPage<int>, hdr) == STRUCT_OFFSET(LeafPage<char>, hdr));
-        assert(STRUCT_OFFSET(InternalPage<int>, hdr) == STRUCT_OFFSET(LeafPage<int>, hdr));
-        post_gl_page_addr.offset = page_addr.offset + STRUCT_OFFSET(LeafPage<int>, hdr);
+        assert(STRUCT_OFFSET(LeafPage, hdr) == STRUCT_OFFSET(LeafPage, hdr));
+        assert(STRUCT_OFFSET(InternalPage, hdr) == STRUCT_OFFSET(LeafPage, hdr));
+        post_gl_page_addr.offset = page_addr.offset + STRUCT_OFFSET(LeafPage, hdr);
         ibv_mr post_gl_page_local_mr = *page_buffer;
         //Increase the page version before every page flush back.
 //        assert(STRUCT_OFFSET(DataPage, hdr.p_version) == STRUCT_OFFSET(LeafPage<char COMMA char>, hdr.p_version));
 //        ((DataPage*)page_buffer->addr)->hdr.p_version++;
-        post_gl_page_local_mr.addr = reinterpret_cast<void*>((uint64_t)page_buffer->addr + STRUCT_OFFSET(LeafPage<int>, hdr));
-        page_size -=  STRUCT_OFFSET(LeafPage<int>, hdr);
+        post_gl_page_local_mr.addr = reinterpret_cast<void*>((uint64_t)page_buffer->addr + STRUCT_OFFSET(LeafPage, hdr));
+        page_size -=  STRUCT_OFFSET(LeafPage, hdr);
         assert(remote_lock_addr <= post_gl_page_addr - 8);
         bool async_succeed = false;
 
@@ -5396,19 +5396,19 @@ int RDMA_Manager::RDMA_CAS(ibv_mr *remote_mr, ibv_mr *local_mr, uint64_t compare
         struct ibv_sge sge[2];
         GlobalAddress tbFlushed_gaddr{};
         ibv_mr tbFlushed_local_mr = *page_buffer;
-        auto page = (LeafPage<uint64_t>*)(page_buffer->addr);
-        assert(STRUCT_OFFSET(LeafPage<int>, hdr.dirty_upper_bound) == STRUCT_OFFSET(LeafPage<char>, hdr.dirty_upper_bound));
+        auto page = (LeafPage*)(page_buffer->addr);
+        assert(STRUCT_OFFSET(LeafPage, hdr.dirty_upper_bound) == STRUCT_OFFSET(LeafPage, hdr.dirty_upper_bound));
         if (page->hdr.dirty_upper_bound == 0){
             assert(page->hdr.dirty_lower_bound == 0);
             tbFlushed_gaddr.nodeID = page_addr.nodeID;
             //The header should be the same offset in Leaf or INternal nodes
-            assert(STRUCT_OFFSET(LeafPage<int>, hdr) == STRUCT_OFFSET(LeafPage<char>, hdr));
-            assert(STRUCT_OFFSET(InternalPage<int>, hdr) == STRUCT_OFFSET(LeafPage<int>, hdr));
-            assert(STRUCT_OFFSET(DataPage, hdr) == STRUCT_OFFSET(LeafPage<char>, hdr));
-            tbFlushed_gaddr.offset = page_addr.offset + STRUCT_OFFSET(LeafPage<int>, hdr);
+            assert(STRUCT_OFFSET(LeafPage, hdr) == STRUCT_OFFSET(LeafPage<, hdr));
+            assert(STRUCT_OFFSET(InternalPage, hdr) == STRUCT_OFFSET(LeafPage, hdr));
+            assert(STRUCT_OFFSET(DataPage, hdr) == STRUCT_OFFSET(LeafPage, hdr));
+            tbFlushed_gaddr.offset = page_addr.offset + STRUCT_OFFSET(LeafPage, hdr);
             //Increase the page version before every page flush back.
-            tbFlushed_local_mr.addr = reinterpret_cast<void*>((uint64_t)page_buffer->addr + STRUCT_OFFSET(LeafPage<int>, hdr));
-            page_size -=  STRUCT_OFFSET(LeafPage<int>, hdr);
+            tbFlushed_local_mr.addr = reinterpret_cast<void*>((uint64_t)page_buffer->addr + STRUCT_OFFSET(LeafPage, hdr));
+            page_size -=  STRUCT_OFFSET(LeafPage, hdr);
         }else{
             assert(page->hdr.dirty_lower_bound >= sizeof(uint64_t ));
             tbFlushed_gaddr.nodeID = page_addr.nodeID;
@@ -6438,7 +6438,7 @@ inv_resend:
         }
     }
     if (was_pending && *receive_pointer == dropped){
-        auto page = (LeafPage<uint64_t>*)(page_buffer->addr);
+        auto page = (LeafPage*)(page_buffer->addr);
 //        printf("Inv message send from NOde %u to Node %u over data %p was pending and then get dropped\n", node_id, target_node_id, global_ptr);
 //        fflush(stdout);
         assert(page->hdr.this_page_g_ptr == GlobalAddress::Null());
@@ -7694,7 +7694,7 @@ void RDMA_Manager::fs_deserilization(
 //            ibv_mr *page_mr = (ibv_mr *) handle->value;
 //            GlobalAddress lock_gptr = g_ptr;
 //            Header_Index<uint64_t> *header = (Header_Index<uint64_t> *) ((char *) ((ibv_mr *) handle->value)->addr +
-//                                                                         (STRUCT_OFFSET(InternalPage<uint64_t>, hdr)));
+//                                                                         (STRUCT_OFFSET(InternalPage, hdr)));
 //            if (handle->remote_lock_status.load() != 1 ) {
 //                //TODO: Use try lock instead of lock.
 ////                std::unique_lock<std::shared_mutex> lck(handle->rw_mtx);
@@ -7796,9 +7796,9 @@ void RDMA_Manager::fs_deserilization(
         }
 
         page_mr = (ibv_mr*)handle->value;
-        header = (Header_Index<uint64_t>*) ((char *) ((ibv_mr*)handle->value)->addr + (STRUCT_OFFSET(InternalPage<uint64_t>, hdr)));
-        assert(STRUCT_OFFSET(LeafPage<uint64_t>, global_lock) == STRUCT_OFFSET(InternalPage<uint64_t>, global_lock));
-        assert(STRUCT_OFFSET(DataPage, global_lock) == STRUCT_OFFSET(InternalPage<uint64_t>, global_lock));
+        header = (Header_Index<uint64_t>*) ((char *) ((ibv_mr*)handle->value)->addr + (STRUCT_OFFSET(InternalPage, hdr)));
+        assert(STRUCT_OFFSET(LeafPage, global_lock) == STRUCT_OFFSET(InternalPage, global_lock));
+        assert(STRUCT_OFFSET(DataPage, global_lock) == STRUCT_OFFSET(InternalPage, global_lock));
         //TODO: we can first check whether the remote lock status is shared, if not drop the message directly. THis can
         // simplify the code logic and make it more readable.
         if (!handle->rw_mtx.try_lock(48)){
@@ -7929,9 +7929,9 @@ void RDMA_Manager::fs_deserilization(
         }
 #endif
         page_mr = (ibv_mr*)handle->value;
-        header = (Header_Index<uint64_t>*) ((char *) ((ibv_mr*)handle->value)->addr + (STRUCT_OFFSET(InternalPage<uint64_t>, hdr)));
-        assert(STRUCT_OFFSET(LeafPage<uint64_t>, global_lock) == STRUCT_OFFSET(InternalPage<uint64_t>, global_lock));
-        assert(STRUCT_OFFSET(DataPage, global_lock) == STRUCT_OFFSET(InternalPage<uint64_t>, global_lock));
+        header = (Header_Index<uint64_t>*) ((char *) ((ibv_mr*)handle->value)->addr + (STRUCT_OFFSET(InternalPage, hdr)));
+        assert(STRUCT_OFFSET(LeafPage, global_lock) == STRUCT_OFFSET(InternalPage, global_lock));
+        assert(STRUCT_OFFSET(DataPage, global_lock) == STRUCT_OFFSET(InternalPage, global_lock));
         if ( !handle->rw_mtx.try_lock(48)){
             // (Solved) problem 1. There is a potential bug that the message is cached locally, but never get processed. If one front-end thread just
             // finished the code from cache.cc:1063-1071. Then the message is pushed and will never get processed.
@@ -8131,9 +8131,9 @@ void RDMA_Manager::fs_deserilization(
         }
 
         page_mr = (ibv_mr*)handle->value;
-        header = (Header_Index<uint64_t>*) ((char *) ((ibv_mr*)handle->value)->addr + (STRUCT_OFFSET(InternalPage<uint64_t>, hdr)));
-        assert(STRUCT_OFFSET(LeafPage<uint64_t>, global_lock) == STRUCT_OFFSET(InternalPage<uint64_t>, global_lock));
-        assert(STRUCT_OFFSET(DataPage, global_lock) == STRUCT_OFFSET(InternalPage<uint64_t>, global_lock));
+        header = (Header_Index<uint64_t>*) ((char *) ((ibv_mr*)handle->value)->addr + (STRUCT_OFFSET(InternalPage, hdr)));
+        assert(STRUCT_OFFSET(LeafPage, global_lock) == STRUCT_OFFSET(InternalPage, global_lock));
+        assert(STRUCT_OFFSET(DataPage, global_lock) == STRUCT_OFFSET(InternalPage, global_lock));
         if ( !handle->rw_mtx.try_lock(32)){
             // (Solved) problem 1. There is a potential bug that the message is cached locally, but never get processed. If one front-end thread just
             // finished the code from cache.cc:1063-1071. Then the message is pushed and will never get processed.

@@ -117,29 +117,13 @@ namespace DSMEngine {
         }
         static DynamicCompoundKey& MinValue() {
             static char value_buff[1024] = {0};
-            DynamicCompoundKey& k = *reinterpret_cast<DynamicCompoundKey*>(value_buff);
-            if (schema_ptr == nullptr) {
-                // Handle the case where schema_ptr is not set
-                // This could be a static_assert or throw an exception
-                // For now, we just return an empty key
-                return k;
-            }
-            size_t key_length = schema_ptr->GetPrimaryKeyLength();
-            // std::memset(k.start, 0, key_length);     
-            return k;
+            static DynamicCompoundKey min_key(value_buff, nullptr);
+            return min_key;
         }
         static DynamicCompoundKey& MaxValue() {
             static char value_buff[1024] = {255};
-            DynamicCompoundKey& k = *reinterpret_cast<DynamicCompoundKey*>(value_buff);
-            if (schema_ptr == nullptr) {
-                // Handle the case where schema_ptr is not set
-                // This could be a static_assert or throw an exception
-                // For now, we just return an empty key
-                return k;
-            }
-            size_t key_length = schema_ptr->GetPrimaryKeyLength();
-            // std::memset(k.start, 0, key_length);     
-            return k;
+            static DynamicCompoundKey max_key(value_buff, nullptr);
+            return max_key;
         }
     
 
@@ -319,14 +303,12 @@ namespace DSMEngine {
             // This function is just for debugging purpose.
             Cache::Handle* handle = cached_root_page_handle.load();
             void* page_buffer;
-            Header_Index<Key> * header = nullptr;
-//            InternalPage<Key>* page = nullptr;
+            Header_Index * header = nullptr;
             ibv_mr* mr = (ibv_mr*)handle->value;
 //            assert(mr == (ibv_mr*)handle->value);
             page_buffer = mr->addr;
-            header = (Header_Index<Key> *) ((char *) page_buffer + (STRUCT_OFFSET(InternalPage<Key>, hdr)));
+            header = (Header_Index<Key> *) ((char *) page_buffer + (STRUCT_OFFSET(InternalPage, hdr)));
             // if is root, then we should always bypass the cache.
-//            page = (InternalPage<Key> *)page_buffer;
             return header->last_index + 1;
         }
 //    static RDMA_Manager * rdma_mg;
@@ -335,6 +317,7 @@ namespace DSMEngine {
         static thread_local int nested_retry_counter;
         RecordSchema *index_scheme_ptr;
         uint64_t num_of_record = 0;
+        uint16_t internal_cardinality_ = 0;
         uint16_t leaf_cardinality_ = 0;
         bool secondary_ = false;
     private:

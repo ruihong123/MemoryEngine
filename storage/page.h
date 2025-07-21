@@ -52,7 +52,6 @@ namespace DSMEngine{
         Page_Type p_type = P_Plain;
         uint16_t dirty_upper_bound = 0;
         uint16_t dirty_lower_bound = 0;
-//        uint64_t p_version = 0;
         GlobalAddress this_page_g_ptr;
         //=============================
         GlobalAddress leftmost_ptr;
@@ -63,7 +62,7 @@ namespace DSMEngine{
         uint8_t level;
         uint16_t kCardinality;
 
-        template<class K> friend class InternalPage;
+        friend class InternalPage;
         friend class RDMA_Manager;
 
         friend class LeafPage;
@@ -97,27 +96,9 @@ namespace DSMEngine{
                       << "cnt=" << last_index + 1 << ",";
 //              << "range=[" << lowest << " - " << highest << "]";
         }
-        DynamicCompoundKey get_highest() const {
-
-        }
-        DynamicCompoundKey get_lowest() const {
-
-        }
 
     } __attribute__ ((aligned (8)));
 
-    template<class Key>
-    class InternalEntry {
-    public:
-        Key key = {};
-//        char key_padding[KEY_PADDING] = "";
-        GlobalAddress ptr = GlobalAddress::Null();
-        InternalEntry() {
-//            ptr = GlobalAddress::Null();
-//    key = 0;
-//            key = {};
-        }
-    } __attribute__((packed));
     //TODO (potential bug): recalcuclate the kInternalCardinality, if we take alignment into consideration
     // the caculation below may not correct.
     struct Local_Meta {
@@ -146,9 +127,13 @@ namespace DSMEngine{
 
     public:
         /* The index_scheme_ptr should be */
-        InternalPage(GlobalAddress left, const Key &key, GlobalAddress right, GlobalAddress this_page_g_ptr, int cardinality, 
-            RecordSchema *scheme, bool secondary = false,  uint32_t level = 0) {
+        InternalPage(GlobalAddress left, DynamicCompoundKey key, GlobalAddress right, GlobalAddress this_page_g_ptr, int cardinality, 
+            RecordSchema *schema, bool secondary = false,  uint32_t level = 0) {
             assert(level> 0);
+            uint16_t key_size = schema->GetPrimaryKeyLength();
+            uint64_t record_size = key_size + sizeof(GlobalAddress);
+            // the data start after the hidden upperbound and lowerbound field.
+            char* data_ptr = data_ + 2* key_size;
             if (secondary){
                 hdr.p_type = P_Internal_P;
 
@@ -157,15 +142,16 @@ namespace DSMEngine{
             }
             hdr.leftmost_ptr = left;
             hdr.level = level;
-            
-            records[0].key = key;
-            records[0].ptr = right;
-            records[1].ptr = GlobalAddress::Null();
+            char* first_ptr = data_ptr + 0 * record_size;
+            DynamicCompoundKey first_key(first_ptr, schema);
+            first_key.copy_from(key);
+            GlobalAddress* first_value = first_ptr + key_size;
+            *first_value = right;
             hdr.last_index = 0;
-            assert(this_page_g_ptr!= GlobalAddress::Null());
             hdr.this_page_g_ptr = this_page_g_ptr;
             hdr.kCardinality = cardinality;
         }
+
         void SetHigest(DynamicCompoundKey& highest, RecordSchema *scheme) {
             DynamicCompoundKey highest_key(data_, scheme);
             highest_key.copy_from(highest);
@@ -182,7 +168,11 @@ namespace DSMEngine{
             uint64_t key_size = scheme->GetPrimaryKeyLength();
             return DynamicCompoundKey(data_ + key_size, scheme);
         }
-
+        static uint64_t calculate_cardinality(uint64_t page_size, RecordSchema* schema_ptr) {
+            uint64_t key_size = schema_ptr->GetPrimaryKeyLength();
+            uint64_t record_size = key_size + sizeof(GlobalAddress);
+            return (page_size - STRUCT_OFFSET(InternalPage, data_[0]) - 2* key_size - sizeof(uint8_t)) / record_size;
+        }
         explicit InternalPage(GlobalAddress this_page_g_ptr, bool secondary = false, uint32_t level = 0) {
             assert(level > 0);
             if (secondary){
@@ -195,8 +185,8 @@ namespace DSMEngine{
             assert(this_page_g_ptr!= GlobalAddress::Null());
             hdr.this_page_g_ptr = this_page_g_ptr;
         }
-        bool internal_page_search(const Key &k, void *result_ptr);
-        bool internal_page_store(GlobalAddress page_addr, const Key &k, GlobalAddress value, int level);
+        bool internal_page_search(const DynamicCompoundKey &k, void *result_ptr);
+        bool internal_page_store(GlobalAddress page_addr, const DynamicCompoundKey &k, GlobalAddress value, int level);
     };
 
     class LeafPage {

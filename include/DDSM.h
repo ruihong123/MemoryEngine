@@ -22,8 +22,8 @@ namespace DSMEngine {
 //        if (handle->strategy == 1){
             GlobalAddress lock_gptr = handle->gptr;
             //TODO: Figure out Leafpage or internal page?
-            lock_gptr.offset = lock_gptr.offset + STRUCT_OFFSET(LeafPage<uint64_t>, global_lock);
-            assert(STRUCT_OFFSET(LeafPage<uint64_t>, global_lock) == STRUCT_OFFSET(InternalPage<uint64_t>, global_lock));
+            lock_gptr.offset = lock_gptr.offset + STRUCT_OFFSET(LeafPage, global_lock);
+            assert(STRUCT_OFFSET(LeafPage, global_lock) == STRUCT_OFFSET(InternalPage, global_lock));
             if (handle->remote_lock_status == 1){
 
                 // RDMA read unlock
@@ -38,9 +38,9 @@ namespace DSMEngine {
                 assert(mr->addr!= nullptr );
 
 //                TODO: recover the assert below if we are testing the blind write operation.
-                LeafPage<uint64_t>* page = ((LeafPage<uint64_t>*)mr->addr);
+                LeafPage* page = ((LeafPage*)mr->addr);
 #ifndef NDEBUG
-                assert(STRUCT_OFFSET(InternalPage<uint64_t >, global_lock) == STRUCT_OFFSET(LeafPage<uint64_t>, global_lock));
+                assert(STRUCT_OFFSET(InternalPage, global_lock) == STRUCT_OFFSET(LeafPage, global_lock));
                 if (page->hdr.p_type == P_Internal_P){
 //                    printf("Internal page is being destroyed %p\n", handle->gptr);
                 }

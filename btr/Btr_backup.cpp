@@ -84,6 +84,7 @@ namespace DSMEngine {
         // The end of page is the page forward check pointer.
 //        leaf_cardinality_ = (kLeafPageSize - STRUCT_OFFSET(LeafPage<Key COMMA Value>, data_[0]) - sizeof(uint8_t)) / index_scheme_ptr->GetSchemaSize();
         leaf_cardinality_ = LeafPage<Key>::calculate_cardinality(kLeafPageSize, index_scheme_ptr->GetSchemaSize());
+        internal_cardinality_ = InternalPage<Key>::calculate_cardinality(kInternalPageSize, index_scheme_ptr);
         print_verbose();
         assert(g_root_ptr.is_lock_free());
         //TODO: simplify the code below by SELCC APIs.

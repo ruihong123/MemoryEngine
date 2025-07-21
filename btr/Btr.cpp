@@ -5,15 +5,15 @@ namespace DSMEngine {
 
     template class Btr<uint64_t>;
     template class Btr<Secondary_Key<uint64_t, uint64_t>>;
-    template class Btr<DynamicCompoundKey>;
+    // template class Btr<DynamicCompoundKey>;
 //    template class Btr<uint64_t , char[100]>;
-    template<class Key>
-    class InternalPage;
+    // template<class Key>
+    // class InternalPage;
 
-    template<class Key>
-    class LeafPage;
+    // template<class Key>
+    // class LeafPage;
 
-    thread_local RecordSchema* DynamicCompoundKey::schema_ptr = nullptr;
+    // thread_local RecordSchema* DynamicCompoundKey::schema_ptr = nullptr;
 
 //    bool enter_debug = false;
 
@@ -32,19 +32,8 @@ namespace DSMEngine {
 //thread_local GlobalAddress path_stack[define::kMaxCoro]
 //                                     [define::kMaxLevelOfTree];
     template <typename Key>
-    thread_local SearchResult<Key>* Btr<Key>::search_result_memo = nullptr;
+    // thread_local SearchResult<Key>* Btr<Key>::search_result_memo = nullptr;
     extern thread_local GlobalAddress path_stack[define::kMaxLevelOfTree];
-    template <typename Key>
-//RDMA_Manager * Btr<Key,Value>::rdma_mg = nullptr;
-// for coroutine schedule
-    struct CoroDeadline {
-        uint64_t deadline;
-        uint16_t coro_id;
-
-        bool operator<(const CoroDeadline &o) const {
-            return this->deadline < o.deadline;
-        }
-    };
 
     static inline uint32_t HashSlice(const Slice& s) {
         return Hash(s.data(), s.size(), 0);
@@ -55,15 +44,16 @@ namespace DSMEngine {
     template <typename Key>
     Btr<Key>::Btr(DDSM *dsm, Cache *cache_ptr, RecordSchema *record_scheme_ptr)
             : index_scheme_ptr(record_scheme_ptr), page_cache(cache_ptr), ddms_(dsm){
-        assert(sizeof(LeafPage<Key>) < kLeafPageSize);
-        assert(sizeof(InternalPage<Key>) < kInternalPageSize);
-        assert(STRUCT_OFFSET(LeafPage<char>,hdr) == STRUCT_OFFSET(LeafPage<uint64_t>,hdr));
+        assert(sizeof(LeafPage) < kLeafPageSize);
+        assert(sizeof(InternalPage) < kInternalPageSize);
+        assert(STRUCT_OFFSET(LeafPage,hdr) == STRUCT_OFFSET(LeafPage<uint64_t>,hdr));
         if (rdma_mg == nullptr){
             rdma_mg = ddms_->rdma_mg;
         }
-        assert(sizeof(InternalPage<Key>) <= kInternalPageSize);
+        assert(sizeof(InternalPage) <= kInternalPageSize);
 //        leaf_cardinality_ = (kLeafPageSize - STRUCT_OFFSET(LeafPage<Key COMMA Value>, data_[0])) / index_scheme_ptr->GetSchemaSize();
-        leaf_cardinality_ = LeafPage<Key>::calculate_cardinality(kLeafPageSize, index_scheme_ptr->GetSchemaSize());
+        leaf_cardinality_ = LeafPage::calculate_cardinality(kLeafPageSize, index_scheme_ptr->GetSchemaSize());
+        internal_cardinality_ = InternalPage::calculate_cardinality(kInternalPageSize, index_scheme_ptr);
         print_verbose();
         assert(g_root_ptr.is_lock_free());
         cached_root_page_handle.store(nullptr);
@@ -72,7 +62,7 @@ namespace DSMEngine {
     Btr<Key>::Btr(DDSM *dsm, Cache *cache_ptr, RecordSchema *record_scheme_ptr, uint16_t Btr_id, bool secondary)
             : index_scheme_ptr(record_scheme_ptr), tree_id(Btr_id + 1), page_cache(cache_ptr), ddms_(dsm), secondary_(secondary){
         assert(sizeof(LeafPage<Key>) < kLeafPageSize);
-        assert(sizeof(InternalPage<Key>) < kInternalPageSize);
+        assert(sizeof(InternalPage) < kInternalPageSize);
         // the secondary index type here is deprecated. If secondary key is needed we need to define the Key in
         // the template a compound key, containing both attibute value and tupleID/primary key.
         assert(!secondary_);
@@ -80,7 +70,7 @@ namespace DSMEngine {
         if (rdma_mg == nullptr){
             rdma_mg = ddms_->rdma_mg;
         }
-        assert(sizeof(InternalPage<Key>) <= kInternalPageSize);
+        assert(sizeof(InternalPage) <= kInternalPageSize);
         // The end of page is the page forward check pointer.
 //        leaf_cardinality_ = (kLeafPageSize - STRUCT_OFFSET(LeafPage<Key COMMA Value>, data_[0]) - sizeof(uint8_t)) / index_scheme_ptr->GetSchemaSize();
         leaf_cardinality_ = LeafPage<Key>::calculate_cardinality(kLeafPageSize, index_scheme_ptr->GetSchemaSize());
@@ -137,7 +127,7 @@ namespace DSMEngine {
     template <typename Key>
     void Btr<Key>::print_verbose() {
 
-        int kInternalHdrOffset = STRUCT_OFFSET(InternalPage<Key>, hdr);
+        int kInternalHdrOffset = STRUCT_OFFSET(InternalPage, hdr);
         int kLeafHdrOffset = (char *)&((LeafPage<Key> *)(0))->hdr - (char *)((LeafPage<Key> *)(0));
 //            STRUCT_OFFSET(LeafPage<Key,Value>, hdr);
 
@@ -145,9 +135,9 @@ namespace DSMEngine {
 
         if (rdma_mg->node_id == 0) {
             std::cout << "Header size: " << sizeof(Header_Index<Key>) << std::endl;
-            std::cout << "Internal_and_Leaf Page size: " << sizeof(InternalPage<Key>) << " ["
+            std::cout << "Internal_and_Leaf Page size: " << sizeof(InternalPage) << " ["
                       << kInternalPageSize << "]" << std::endl;
-            std::cout << "Internal_and_Leaf per Page: " << InternalPage<Key>::kInternalCardinality << std::endl;
+            std::cout << "Internal_and_Leaf per Page: " << internal_cardinality_ << std::endl;
             std::cout << "Leaf Page size: " << sizeof(LeafPage<Key>) << " [" << kLeafPageSize
                       << "]" << std::endl;
             std::cout << "Leaf per Page: " << leaf_cardinality_ << std::endl;
@@ -280,7 +270,7 @@ namespace DSMEngine {
         //Read the tree height below
         ibv_mr* local_buffer = rdma_mg->Get_local_CAS_mr();
         GlobalAddress level_fetch_addr = root_ptr;
-        level_fetch_addr.offset = root_ptr.offset + STRUCT_OFFSET(InternalPage<uint64_t>, hdr.level);
+        level_fetch_addr.offset = root_ptr.offset + STRUCT_OFFSET(InternalPage, hdr.level);
         rdma_mg->RDMA_Read(level_fetch_addr, local_buffer, sizeof(uint8_t), IBV_SEND_SIGNALED, 1, Regular_Page);
 
 //        assert(((DataPage*)((ibv_mr*)temp_handle->value)->addr)->hdr.this_page_g_ptr == root_ptr);
@@ -328,7 +318,7 @@ namespace DSMEngine {
             round_robin_cur = 0;
         }
         assert(level >0);
-        auto new_root = new(page_mr->addr) InternalPage<Key>(left, k, right, new_root_addr, secondary_, level);
+        auto new_root = new(page_mr->addr) InternalPage(left, k, right, new_root_addr, secondary_, level);
 
 
 
@@ -1103,9 +1093,9 @@ namespace DSMEngine {
         void* page_buffer;
         GlobalAddress lock_addr;
         lock_addr.nodeID = page_addr.nodeID;
-        lock_addr.offset = page_addr.offset + STRUCT_OFFSET(LeafPage<Key>,global_lock);
-        Header_Index<Key> * header = nullptr;
-        InternalPage<Key>* page = nullptr;
+        lock_addr.offset = page_addr.offset + STRUCT_OFFSET(LeafPage,global_lock);
+        Header_Index * header = nullptr;
+        InternalPage* page = nullptr;
         ibv_mr* mr;
 #ifdef PROCESSANALYSIS
         auto start = std::chrono::high_resolution_clock::now();
@@ -1128,10 +1118,10 @@ namespace DSMEngine {
                 // handle it.
                 assert(mr == (ibv_mr*)handle->value);
                 page_buffer = mr->addr;
-                header = (Header_Index<Key> *) ((char *) page_buffer + (STRUCT_OFFSET(InternalPage<Key>, hdr)));
+                header = (Header_Index<Key> *) ((char *) page_buffer + (STRUCT_OFFSET(InternalPage, hdr)));
                 // if is root, then we should always bypass the cache.
                 skip_cache = true;
-                page = (InternalPage<Key> *)page_buffer;
+                page = (InternalPage *)page_buffer;
 
 //                memset(&result, 0, sizeof(result));
                 result.Reset();
@@ -1190,9 +1180,9 @@ namespace DSMEngine {
 #elif ACCESS_MODE == 0
             assert(page_buffer == handle->value);
 #endif
-            header = (Header_Index<Key> *) ((char *) page_buffer + (STRUCT_OFFSET(InternalPage<Key>, hdr)));
+            header = (Header_Index *) ((char *) page_buffer + (STRUCT_OFFSET(InternalPage, hdr)));
 
-            page = (InternalPage<Key> *)page_buffer;
+            page = (InternalPage *)page_buffer;
 #ifndef NDEBUG
             if (level != -1){
                 assert(level ==header->level );
@@ -1374,7 +1364,7 @@ namespace DSMEngine {
         }
 //#endif
 #endif
-        header = (Header_Index<Key> *) ((char*)page_buffer + (STRUCT_OFFSET(InternalPage<Key>, hdr)));
+        header = (Header_Index<Key> *) ((char*)page_buffer + (STRUCT_OFFSET(InternalPage, hdr)));
         page = (LeafPage<Key> *)page_buffer;
         result.Reset();
 
@@ -1470,7 +1460,7 @@ namespace DSMEngine {
         }
 //#endif
 #endif
-        header = (Header_Index<Key> *) ((char*)page_buffer + (STRUCT_OFFSET(InternalPage<Key>, hdr)));
+        header = (Header_Index<Key> *) ((char*)page_buffer + (STRUCT_OFFSET(InternalPage, hdr)));
         page = (LeafPage<Key> *)page_buffer;
         result.Reset();
 
@@ -1553,7 +1543,7 @@ namespace DSMEngine {
         int position;
 //        ibv_mr* mr = nullptr;
         ddms_->SELCC_Shared_Lock(page_buffer, page_addr, handle);
-        header = (Header_Index<Key> *) ((char*)page_buffer + (STRUCT_OFFSET(InternalPage<Key>, hdr)));
+        header = (Header_Index<Key> *) ((char*)page_buffer + (STRUCT_OFFSET(InternalPage, hdr)));
         page = (LeafPage<Key> *)page_buffer;
         result.Reset();
         assert(page->hdr.this_page_g_ptr = page_addr);
@@ -1648,11 +1638,11 @@ namespace DSMEngine {
         bool insert_success;
         GlobalAddress lock_addr;
         lock_addr.nodeID = page_addr.nodeID;
-        lock_addr.offset = page_addr.offset + STRUCT_OFFSET(InternalPage<Key>,global_lock);
+        lock_addr.offset = page_addr.offset + STRUCT_OFFSET(InternalPage,global_lock);
 //        Slice page_id((char*)&page_addr, sizeof(GlobalAddress));
         ibv_mr* page_mr;
         void * page_buffer;
-        InternalPage<Key>* page;
+        InternalPage* page;
         bool skip_cache = false;
         Cache::Handle* handle = nullptr;
         ddms_->SELCC_Exclusive_Lock(page_buffer, page_addr, handle);
@@ -1662,7 +1652,7 @@ namespace DSMEngine {
 #elif ACCESS_MODE == 0
             assert((ibv_mr *) handle->value== page_buffer);
 #endif
-        page = (InternalPage<Key> *) page_buffer;
+        page = (InternalPage*) page_buffer;
         page_mr = (ibv_mr *) page_cache->Value(handle);
 
         assert(((char*)&page->global_lock - (char*)page) == RDMA_OFFSET);
@@ -1714,9 +1704,9 @@ namespace DSMEngine {
 //  assert(k >= page->hdr.lowest);
         need_split = page->internal_page_store(page_addr, k, v, level);
         auto cnt = page->hdr.last_index + 1;
-        InternalPage<Key>* sibling = nullptr;
+        InternalPage* sibling = nullptr;
         if (need_split) { // need split
-            assert(cnt == InternalPage<Key>::kInternalCardinality);
+            assert(cnt == internal_cardinality_);
             sibling_addr = rdma_mg->Allocate_Remote_RDMA_Slot(Regular_Page, 2 * round_robin_cur + 1);
             if(++round_robin_cur == rdma_mg->memory_nodes.size()){
                 round_robin_cur = 0;
@@ -1727,7 +1717,8 @@ namespace DSMEngine {
 
             rdma_mg->Allocate_Local_RDMA_Slot(*sibling_mr, Regular_Page);
             assert(page->hdr.level >0);
-            sibling = new(sibling_mr->addr) InternalPage<Key>(sibling_addr, secondary_, page->hdr.level);
+        RecordSchema *index_scheme_ptr;
+            sibling = new(sibling_mr->addr) InternalPage(sibling_addr, secondary_, page->hdr.level, index_scheme_ptr);
             //clear the global lock state. The page initialization will not reset the global lock byte.
             sibling->global_lock = 0;
             int m = cnt / 2;
@@ -1920,7 +1911,7 @@ namespace DSMEngine {
         GlobalAddress lock_addr;
         lock_addr.nodeID = page_addr.nodeID;
 
-        lock_addr.offset = page_addr.offset + STRUCT_OFFSET(InternalPage<Key>,global_lock);
+        lock_addr.offset = page_addr.offset + STRUCT_OFFSET(InternalPage,global_lock);
         // TODO: We need to implement the lock coupling. how to avoid unnecessary RDMA for lock coupling?
         //
         void* page_buffer;
