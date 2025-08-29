@@ -5402,7 +5402,7 @@ int RDMA_Manager::RDMA_CAS(ibv_mr *remote_mr, ibv_mr *local_mr, uint64_t compare
             assert(page->hdr.dirty_lower_bound == 0);
             tbFlushed_gaddr.nodeID = page_addr.nodeID;
             //The header should be the same offset in Leaf or INternal nodes
-            assert(STRUCT_OFFSET(LeafPage, hdr) == STRUCT_OFFSET(LeafPage<, hdr));
+            assert(STRUCT_OFFSET(LeafPage, hdr) == STRUCT_OFFSET(LeafPage, hdr));
             assert(STRUCT_OFFSET(InternalPage, hdr) == STRUCT_OFFSET(LeafPage, hdr));
             assert(STRUCT_OFFSET(DataPage, hdr) == STRUCT_OFFSET(LeafPage, hdr));
             tbFlushed_gaddr.offset = page_addr.offset + STRUCT_OFFSET(LeafPage, hdr);
@@ -7687,13 +7687,13 @@ void RDMA_Manager::fs_deserilization(
 //        fflush(stdout);
 //        Cache::Handle* handle = page_cache_->Lookup(upper_node_page_id);
 //        //The template will not impact the offset of level in the header so we can random give the tempalate a Type to access the leve in ther header.
-//        assert(STRUCT_OFFSET(Header_Index<uint64_t>, level) == STRUCT_OFFSET(Header_Index<char>, level));
+//        assert(STRUCT_OFFSET(Header_Index, level) == STRUCT_OFFSET(Header_Index<char>, level));
 //        Page_Forward_Reply_Type reply_type = waiting;
 //        if (handle) {
 ////            printf("writer invalid Shared lock Handle found %u, %lu\n", handle->gptr.nodeID, handle->gptr.offset);
 //            ibv_mr *page_mr = (ibv_mr *) handle->value;
 //            GlobalAddress lock_gptr = g_ptr;
-//            Header_Index<uint64_t> *header = (Header_Index<uint64_t> *) ((char *) ((ibv_mr *) handle->value)->addr +
+//            Header_Index *header = (Header_Index *) ((char *) ((ibv_mr *) handle->value)->addr +
 //                                                                         (STRUCT_OFFSET(InternalPage, hdr)));
 //            if (handle->remote_lock_status.load() != 1 ) {
 //                //TODO: Use try lock instead of lock.
@@ -7789,14 +7789,14 @@ void RDMA_Manager::fs_deserilization(
         Page_Forward_Reply_Type reply_type = waiting;
         ibv_mr* page_mr = nullptr;
         GlobalAddress lock_gptr = g_ptr;
-        Header_Index<uint64_t>* header = nullptr;
+        Header_Index* header = nullptr;
         if (!handle) {
             reply_type = dropped;  // Handle not found
             goto message_reply;
         }
 
         page_mr = (ibv_mr*)handle->value;
-        header = (Header_Index<uint64_t>*) ((char *) ((ibv_mr*)handle->value)->addr + (STRUCT_OFFSET(InternalPage, hdr)));
+        header = (Header_Index*) ((char *) ((ibv_mr*)handle->value)->addr + (STRUCT_OFFSET(InternalPage, hdr)));
         assert(STRUCT_OFFSET(LeafPage, global_lock) == STRUCT_OFFSET(InternalPage, global_lock));
         assert(STRUCT_OFFSET(DataPage, global_lock) == STRUCT_OFFSET(InternalPage, global_lock));
         //TODO: we can first check whether the remote lock status is shared, if not drop the message directly. THis can
@@ -7910,7 +7910,7 @@ void RDMA_Manager::fs_deserilization(
         Page_Forward_Reply_Type reply_type = waiting;
         ibv_mr* page_mr = nullptr;
         GlobalAddress lock_gptr = g_ptr;
-        Header_Index<uint64_t>* header = nullptr;
+        Header_Index* header = nullptr;
 #ifdef STARV_REVENGE
         uint8_t priority_to_meet = 0;
 #endif
@@ -7929,7 +7929,7 @@ void RDMA_Manager::fs_deserilization(
         }
 #endif
         page_mr = (ibv_mr*)handle->value;
-        header = (Header_Index<uint64_t>*) ((char *) ((ibv_mr*)handle->value)->addr + (STRUCT_OFFSET(InternalPage, hdr)));
+        header = (Header_Index*) ((char *) ((ibv_mr*)handle->value)->addr + (STRUCT_OFFSET(InternalPage, hdr)));
         assert(STRUCT_OFFSET(LeafPage, global_lock) == STRUCT_OFFSET(InternalPage, global_lock));
         assert(STRUCT_OFFSET(DataPage, global_lock) == STRUCT_OFFSET(InternalPage, global_lock));
         if ( !handle->rw_mtx.try_lock(48)){
@@ -8124,14 +8124,14 @@ void RDMA_Manager::fs_deserilization(
         Page_Forward_Reply_Type reply_type = waiting;
         ibv_mr* page_mr = nullptr;
         GlobalAddress lock_gptr = g_ptr;
-        Header_Index<uint64_t>* header = nullptr;
+        Header_Index* header = nullptr;
         if (!handle) {
             reply_type = dropped;  // Handle not found
             goto message_reply;
         }
 
         page_mr = (ibv_mr*)handle->value;
-        header = (Header_Index<uint64_t>*) ((char *) ((ibv_mr*)handle->value)->addr + (STRUCT_OFFSET(InternalPage, hdr)));
+        header = (Header_Index*) ((char *) ((ibv_mr*)handle->value)->addr + (STRUCT_OFFSET(InternalPage, hdr)));
         assert(STRUCT_OFFSET(LeafPage, global_lock) == STRUCT_OFFSET(InternalPage, global_lock));
         assert(STRUCT_OFFSET(DataPage, global_lock) == STRUCT_OFFSET(InternalPage, global_lock));
         if ( !handle->rw_mtx.try_lock(32)){

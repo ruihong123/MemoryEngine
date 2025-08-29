@@ -487,13 +487,13 @@ namespace DSMEngine {
             memmove(tuple_start + tuple_length, tuple_start, (hdr.last_index - insert_index+1)*tuple_length);
             auto r = Record(record_scheme,tuple_start);
             assert(v.size() == r.GetRecordSize());
-            r.ReSetRecord(v.data_reference(), v.size());
+            r.FillRecord(v.data_reference(), v.size());
         }else{
 //            printf("New record inserted at the end of the page\n");
             assert(insert_index < hdr.kLeafCardinality );
             auto r = Record(record_scheme,tuple_start);
             assert(v.size() == r.GetRecordSize());
-            r.ReSetRecord(v.data_reference(), v.size());
+            r.FillRecord(v.data_reference(), v.size());
         }
         cnt++;
         hdr.last_index++;

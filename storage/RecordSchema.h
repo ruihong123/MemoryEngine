@@ -75,8 +75,6 @@ namespace DSMEngine {
             primary_col_num_ = column_num;
             primary_col_length_ = column_num * sizeof(size_t);
             primary_symbol_ = std::string((char*)(primary_col_ids_), sizeof(size_t)*primary_col_num_);
-//
-
         }
 
         void SetPartitionColumns(const size_t *column_ids, const size_t &column_num){

@@ -5,6 +5,7 @@
 
 #ifndef MEMORYENGINE_PAGE_H
 #define MEMORYENGINE_PAGE_H
+
 #include "Common.h"
 #include "rdma.h"
 #include "Tools/slice.h"
@@ -13,9 +14,139 @@
 #include "Record.h"
 #include <iostream>
 
-namespace DSMEngine{
+namespace DSMEngine {
+    struct DynamicCompoundKey {
+        // This is a dynamic compound key that can be used in the B-tree.
+        // This class is a helper class which enables the directly comparison between the dynamic compound keys.
+        char *start = nullptr; // the compind key should always smaller than 1 KB.
+
+        RecordSchema *schema_ptr = nullptr;
+
+        DynamicCompoundKey(char *buff, RecordSchema *schema)
+                : start(buff), schema_ptr(schema) {}
+
+        DynamicCompoundKey() {};
+
+        //copy constructor
+        DynamicCompoundKey(const DynamicCompoundKey &other) {
+            schema_ptr = other.schema_ptr;
+            start = other.start;  // shallow copy of the pointer
+        }
+
+        void deepcopy_from(const DynamicCompoundKey &other) const {
+            assert(schema_ptr == other.schema_ptr);
+            size_t key_length = schema_ptr->GetPrimaryKeyLength();
+            std::memcpy(start, other.start, key_length);
+        }
+
+        // Move constructor
+        DynamicCompoundKey(DynamicCompoundKey &&other) noexcept {
+            schema_ptr = other.schema_ptr;
+            start = other.start;
+            other.start = nullptr;
+            other.schema_ptr = nullptr;
+        }
+
+        DynamicCompoundKey &operator=(const DynamicCompoundKey &other) {
+            schema_ptr = other.schema_ptr;
+            start = other.start;
+            return *this;
+        }
+
+        // Equality ==
+        bool operator==(const DynamicCompoundKey &other) const {
+            return compare(other) == 0;
+        }
+
+        // Inequality !=
+        bool operator!=(const DynamicCompoundKey &other) const {
+            return compare(other) != 0;
+        }
+
+        // Less than <
+        bool operator<(const DynamicCompoundKey &other) const {
+            return compare(other) < 0;
+        }
+
+        // Greater than >
+        bool operator>(const DynamicCompoundKey &other) const {
+            return compare(other) > 0;
+        }
+
+        // Less than or equal <=
+        bool operator<=(const DynamicCompoundKey &other) const {
+            return compare(other) <= 0;
+        }
+
+        // Greater than or equal >=
+        bool operator>=(const DynamicCompoundKey &other) const {
+            return compare(other) >= 0;
+        }
+
+        static DynamicCompoundKey &MinValue() {
+            static char value_buff[1024] = {0};
+            static DynamicCompoundKey min_key(value_buff, nullptr);
+            return min_key;
+        }
+
+        static DynamicCompoundKey &MaxValue() {
+            static char value_buff[1024] = {static_cast<char>(255)};
+            static DynamicCompoundKey max_key(value_buff, nullptr);
+            return max_key;
+        }
+
+
+    private:
+        [[nodiscard]] int compare(const DynamicCompoundKey &other) const {
+            using namespace DSMEngine;
+            assert(schema_ptr != nullptr);
+
+            const RecordSchema *schema = schema_ptr;
+            size_t num_fields = schema->GetPrimaryColumnCount();
+            size_t offset = 0;
+
+            for (size_t i = 0; i < num_fields; ++i) {
+                size_t col_id = schema->GetPrimaryColumnId(i);
+                size_t size = schema->GetPrimaryColumnSize(i);
+                const auto &type = schema->GetColumnType(col_id);
+
+                const char *a = start + offset;
+                const char *b = other.start + offset;
+
+                switch (type) {
+                    case ValueType::INT: {
+                        int32_t va = *reinterpret_cast<const int32_t *>(a);
+                        int32_t vb = *reinterpret_cast<const int32_t *>(b);
+                        if (va != vb) return va < vb ? -1 : 1;
+                        break;
+                    }
+                    case ValueType::INT64: {
+                        int64_t va = *reinterpret_cast<const int64_t *>(a);
+                        int64_t vb = *reinterpret_cast<const int64_t *>(b);
+                        if (va != vb) return va < vb ? -1 : 1;
+                        break;
+                    }
+                    case ValueType::FIXCHAR: {
+                        int cmp = std::memcmp(a, b, size);
+                        if (cmp != 0) return cmp < 0 ? -1 : 1;
+                        break;
+                    }
+                    default:
+                        fprintf(stderr, "[DynamicCompoundKey] Unsupported type in compare!\n");
+                        std::abort();
+                }
+
+                offset += size;
+            }
+
+            return 0; // all parts equal
+        }
+    };
+
     //TODO: merge Page type and index type.
-    enum Page_Type { P_Plain = 0, P_Internal_P = 1, P_Internal_S = 2, P_Leaf_P = 3, P_Leaf_S = 4, P_Data = 5};
+    enum Page_Type {
+        P_Plain = 0, P_Internal_P = 1, P_Internal_S = 2, P_Leaf_P = 3, P_Leaf_S = 4, P_Data = 5
+    };
 
     struct SearchResult {
         bool is_leaf;
@@ -23,16 +154,17 @@ namespace DSMEngine{
         GlobalAddress slibing;
         GlobalAddress next_level;
         // for future pointer swizzling design
-        ibv_mr* page_hint = nullptr;
+        ibv_mr *page_hint = nullptr;
         bool find_value = false;
 #ifndef NDEBUG
         // only check the first 8 bytes of the dynamic key.
-        uint64_t this_key;
-        uint64_t later_key;
+        DynamicCompoundKey this_key;
+        DynamicCompoundKey later_key;
         char key_padding[KEY_PADDING];
 #endif
         Slice val{};
-        void Reset(){
+
+        void Reset() {
             is_leaf = false;
             level = 0;
             slibing = GlobalAddress::Null();
@@ -40,8 +172,8 @@ namespace DSMEngine{
             page_hint = nullptr;
             find_value = false;
 #ifndef NDEBUG
-            this_key = 0;
-            later_key = 0;
+            this_key = DynamicCompoundKey::MinValue();
+            later_key = DynamicCompoundKey::MinValue();
 #endif
         }
     };
@@ -59,15 +191,19 @@ namespace DSMEngine{
         // the last index is initialized as -1 in leaf node and internal nodes,
         // only 0 in the root node.
         int16_t last_index;
+        uint32_t key_size;
+        uint32_t record_size;
         uint8_t level;
         uint16_t kCardinality;
 
         friend class InternalPage;
+
         friend class RDMA_Manager;
 
         friend class LeafPage;
 
         friend class Btr;
+
         Header_Index() {
             leftmost_ptr = GlobalAddress::Null();
             sibling_ptr = GlobalAddress::Null();
@@ -75,6 +211,7 @@ namespace DSMEngine{
             dirty_lower_bound = 0;
             last_index = -1;
         }
+
         void merge_dirty_bounds(uint16_t dirty_lower, uint16_t dirty_upper) {
             assert(dirty_lower_bound <= dirty_upper_bound);
             if (dirty_upper_bound == 0) {
@@ -85,108 +222,129 @@ namespace DSMEngine{
             dirty_upper_bound = std::max(dirty_upper_bound, dirty_upper);
             dirty_lower_bound = std::min(dirty_lower_bound, dirty_lower);
         }
+
         void reset_dirty_bounds() {
             dirty_upper_bound = 0;
             dirty_lower_bound = 0;
         }
+
         void debug() const {
             std::cout << "leftmost=" << leftmost_ptr << ", "
                       << "sibling=" << sibling_ptr << ", "
-                      << "level=" << (int)level << ","
+                      << "level=" << (int) level << ","
                       << "cnt=" << last_index + 1 << ",";
 //              << "range=[" << lowest << " - " << highest << "]";
         }
 
     } __attribute__ ((aligned (8)));
 
-    //TODO (potential bug): recalcuclate the kInternalCardinality, if we take alignment into consideration
-    // the caculation below may not correct.
-    struct Local_Meta {
-        uint8_t issued_ticket;
-        uint8_t current_ticket;
-        uint8_t local_lock_byte;
-        uint8_t hand_time;
-        uint32_t hand_over;//can be only 1 byte.
-    };
-    constexpr int RDMA_OFFSET  = 0; // sizeof(Local_Meta)
+    constexpr int RDMA_OFFSET = 0; // sizeof(Local_Meta)
     class CatalogPage {
         alignas(8) uint64_t global_lock;
     public:
-        GlobalAddress root_gptrs[(kInternalPageSize -8) / sizeof(GlobalAddress)] = {};
+        GlobalAddress root_gptrs[(kInternalPageSize - 8) / sizeof(GlobalAddress)] = {};
     };
 
-    
+
     class InternalPage {
     public:
         // static thread_local RecordSchema *index_scheme_ptr;
         alignas(8) uint64_t global_lock;
         Header_Index hdr = {};
         char data_[1];
+
         friend class Btr;
+
         friend class Cache;
 
     public:
         /* The index_scheme_ptr should be */
-        InternalPage(GlobalAddress left, DynamicCompoundKey key, GlobalAddress right, GlobalAddress this_page_g_ptr, int cardinality, 
-            RecordSchema *schema, bool secondary = false,  uint32_t level = 0) {
-            assert(level> 0);
-            uint16_t key_size = schema->GetPrimaryKeyLength();
-            uint64_t record_size = key_size + sizeof(GlobalAddress);
+        InternalPage(GlobalAddress left, DynamicCompoundKey key, GlobalAddress right, GlobalAddress this_page_g_ptr,
+                     uint16_t cardinality, RecordSchema *schema, uint32_t level = 0) {
+            assert(level > 0);
+            hdr.key_size = schema->GetPrimaryKeyLength();
+            hdr.record_size = hdr.key_size + sizeof(GlobalAddress);
             // the data start after the hidden upperbound and lowerbound field.
-            char* data_ptr = data_ + 2* key_size;
-            if (secondary){
-                hdr.p_type = P_Internal_P;
-
-            }else{
-                hdr.p_type = P_Internal_S;
-            }
+            hdr.p_type = P_Internal_P;
             hdr.leftmost_ptr = left;
             hdr.level = level;
-            char* first_ptr = data_ptr + 0 * record_size;
-            DynamicCompoundKey first_key(first_ptr, schema);
-            first_key.copy_from(key);
-            GlobalAddress* first_value = first_ptr + key_size;
-            *first_value = right;
+            SetRecordByIndex(0, key, right, schema);
             hdr.last_index = 0;
             hdr.this_page_g_ptr = this_page_g_ptr;
             hdr.kCardinality = cardinality;
         }
 
-        void SetHigest(DynamicCompoundKey& highest, RecordSchema *scheme) {
-            DynamicCompoundKey highest_key(data_, scheme);
-            highest_key.copy_from(highest);
-        }
-        void SetLowest(DynamicCompoundKey& lowest, RecordSchema *scheme) {
-            uint64_t key_size = scheme->GetPrimaryKeyLength();
-            DynamicCompoundKey highest_key(data_+key_size, scheme);
-            highest_key.copy_from(highest);
-        }
-        DynamicCompoundKey GetHighest(RecordSchema *scheme) const {
-            return DynamicCompoundKey(data_, scheme);
-        }
-        DynamicCompoundKey GetLowest(RecordSchema *scheme) const {
-            uint64_t key_size = scheme->GetPrimaryKeyLength();
-            return DynamicCompoundKey(data_ + key_size, scheme);
-        }
-        static uint64_t calculate_cardinality(uint64_t page_size, RecordSchema* schema_ptr) {
-            uint64_t key_size = schema_ptr->GetPrimaryKeyLength();
-            uint64_t record_size = key_size + sizeof(GlobalAddress);
-            return (page_size - STRUCT_OFFSET(InternalPage, data_[0]) - 2* key_size - sizeof(uint8_t)) / record_size;
-        }
-        explicit InternalPage(GlobalAddress this_page_g_ptr, bool secondary = false, uint32_t level = 0) {
+        explicit InternalPage(GlobalAddress this_page_g_ptr, RecordSchema *schema,
+                              uint32_t level = 0) {
             assert(level > 0);
-            if (secondary){
-                hdr.p_type = P_Internal_S;
-            }else{
-                hdr.p_type = P_Internal_P;
-            }
+            hdr.key_size = schema->GetPrimaryKeyLength();
+            hdr.record_size = hdr.key_size + sizeof(GlobalAddress);
+            hdr.p_type = P_Internal_S;
             hdr.level = level;
-            records[0].ptr = GlobalAddress::Null();
-            assert(this_page_g_ptr!= GlobalAddress::Null());
+            SetRecordByIndex(0, DynamicCompoundKey::MinValue(), GlobalAddress::Null(), schema);
+            assert(this_page_g_ptr != GlobalAddress::Null());
             hdr.this_page_g_ptr = this_page_g_ptr;
         }
-        bool internal_page_search(const DynamicCompoundKey &k, void *result_ptr);
-        bool internal_page_store(GlobalAddress page_addr, const DynamicCompoundKey &k, GlobalAddress value, int level);
+
+        void SetRecordByIndex(int index, const DynamicCompoundKey &key, GlobalAddress gaddr, RecordSchema *schema) {
+            uint32_t key_size = hdr.key_size;
+            uint32_t record_size = hdr.record_size;
+            char *data_ptr = data_ + 2 * key_size;
+            char *target_ptr = data_ptr + index * record_size;
+            DynamicCompoundKey first_key(target_ptr, schema);
+            first_key.deepcopy_from(key);
+            auto *first_value = reinterpret_cast<GlobalAddress *>(target_ptr + key_size);
+            *first_value = gaddr;
+        }
+
+        DynamicCompoundKey GetRecordKeyByIndex(int index, RecordSchema *schema) {
+            uint16_t key_size = hdr.key_size;
+            uint64_t record_size = hdr.record_size;
+            char *data_ptr = data_ + 2 * key_size;
+            char *target_ptr = data_ptr + index * record_size;
+            return {target_ptr, schema};
+        }
+
+        GlobalAddress GetRecordValueByIndex(int index) {
+            uint16_t key_size = hdr.key_size;
+            uint64_t record_size = hdr.record_size;
+            char *data_ptr = data_ + 2 * key_size;
+            char *target_ptr = data_ptr + index * record_size;
+            return *(GlobalAddress *) (target_ptr + key_size);
+        }
+
+        void SetHighest(DynamicCompoundKey highest, RecordSchema *scheme) {
+            DynamicCompoundKey highest_key(data_, scheme);
+            highest_key.deepcopy_from(highest);
+        }
+
+        void SetLowest(DynamicCompoundKey lowest, RecordSchema *scheme) {
+            uint64_t key_size = scheme->GetPrimaryKeyLength();
+            DynamicCompoundKey highest_key(data_ + key_size, scheme);
+            highest_key.deepcopy_from(lowest);
+        }
+
+        DynamicCompoundKey GetHighest(RecordSchema *scheme) const {
+            return {const_cast<char *>(data_), scheme};
+        }
+
+        DynamicCompoundKey GetLowest(RecordSchema *scheme) const {
+            uint64_t key_size = scheme->GetPrimaryKeyLength();
+            assert(key_size == hdr.key_size);
+            return {const_cast<char *>(data_ + key_size), scheme};
+        }
+
+        static uint64_t calculate_cardinality(uint64_t page_size, RecordSchema *schema_ptr) {
+            uint64_t key_size = schema_ptr->GetPrimaryKeyLength();
+            uint64_t record_size = key_size + sizeof(GlobalAddress);
+            // the last uint8_t is for the page forward checking.
+            return (page_size - STRUCT_OFFSET(InternalPage, data_[0]) - 2 * key_size - sizeof(uint8_t)) / record_size;
+        }
+
+        bool internal_page_search(const DynamicCompoundKey &k, void *result_ptr, RecordSchema *schema_ptr);
+
+        bool internal_page_store(GlobalAddress page_addr, const DynamicCompoundKey &k, GlobalAddress value, int level,
+                                 RecordSchema *schema_ptr);
     };
 
     class LeafPage {
@@ -194,43 +352,90 @@ namespace DSMEngine{
         // if busy we will not cache it in cache, switch back to the Naive
         alignas(8) uint64_t global_lock;
         Header_Index hdr;
-#ifdef DYNAMIC_ANALYSE_PAGE
         char data_[1];// The data segment is beyond this class.
-#else
-                LeafEntry<TKey, Value> records[kLeafCardinality] = {};
-#endif
-
         friend class Btr;
+
     public:
-        LeafPage(GlobalAddress this_page_g_ptr, uint16_t leaf_cardinality, uint16_t leaf_recordsize, bool secondary = false,
+        LeafPage(GlobalAddress this_page_g_ptr, uint16_t leaf_cardinality, RecordSchema *schema,
                  uint32_t level = 0) {
             assert(level == 0);
-            if(!secondary){
-                hdr.p_type = P_Leaf_P;
-
-            }else{
-                hdr.p_type = P_Leaf_S;
-            }
+            hdr.p_type = P_Leaf_P;
             hdr.level = level;
+            hdr.key_size = schema->GetPrimaryKeyLength();
+            hdr.record_size = schema->GetSchemaSize();
             hdr.this_page_g_ptr = this_page_g_ptr;
             hdr.kCardinality = leaf_cardinality;
         }
-        static uint64_t calculate_cardinality(uint64_t page_size, uint64_t record_size) {
-            return (page_size - STRUCT_OFFSET(LeafPage<TKey>, data_[0]) - sizeof(uint8_t)) / record_size;
+
+        void SetRecordByIndex(int index, Slice s, RecordSchema *schema) {
+            uint16_t key_size = hdr.key_size;
+            uint64_t record_size = hdr.record_size;
+            char *data_ptr = data_ + 2 * key_size;
+            char *target_ptr = data_ptr + index * record_size;
+            DynamicCompoundKey first_key(target_ptr, schema);
+            // todo
         }
-        void leaf_page_search(const TKey &k, SearchResult<TKey> &result, GlobalAddress g_page_ptr,
+
+        DynamicCompoundKey GetRecordKeyByIndex(int index, RecordSchema *schema) {
+            assert(hdr.key_size > 0 && hdr.record_size > 0);
+            uint16_t key_size = hdr.key_size;
+            uint64_t record_size = hdr.record_size;
+            char *data_ptr = data_ + 2 * key_size;
+            char *target_ptr = data_ptr + index * record_size;
+            return {target_ptr, schema};
+        }
+
+        void *GetRecordPtrByIndex(int index) {
+            uint16_t key_size = hdr.key_size;
+            uint64_t record_size = hdr.record_size;
+            char *data_ptr = data_ + 2 * key_size;
+            char *target_ptr = data_ptr + index * record_size;
+            return target_ptr;
+        }
+
+        void SetHighest(DynamicCompoundKey highest, RecordSchema *scheme) {
+            DynamicCompoundKey highest_key(data_, scheme);
+            highest_key.deepcopy_from(highest);
+        }
+
+        void SetLowest(DynamicCompoundKey lowest, RecordSchema *scheme) {
+            uint64_t key_size = scheme->GetPrimaryKeyLength();
+            DynamicCompoundKey highest_key(data_ + key_size, scheme);
+            highest_key.deepcopy_from(lowest);
+        }
+
+        DynamicCompoundKey GetHighest(RecordSchema *scheme) const {
+            return {const_cast<char *>(data_), scheme};
+        }
+
+        DynamicCompoundKey GetLowest(RecordSchema *scheme) const {
+            uint64_t key_size = scheme->GetPrimaryKeyLength();
+            return {const_cast<char *>(data_ + key_size), scheme};
+        }
+
+        static uint64_t calculate_cardinality(uint64_t page_size, uint64_t record_size) {
+            return (page_size - STRUCT_OFFSET(LeafPage, data_[0]) - sizeof(uint8_t)) / record_size;
+        }
+
+        void leaf_page_search(const DynamicCompoundKey &k, SearchResult &result, GlobalAddress g_page_ptr,
                               RecordSchema *record_scheme);
-        //search by lowerbound (include the target key).
-        int leaf_page_pos_lb(const TKey &k, GlobalAddress g_page_ptr, RecordSchema *record_scheme);
-        int leaf_page_find_pos_ub(const TKey &k, SearchResult<TKey> &result, RecordSchema *record_scheme);
-        void GetByPosition(int pos, RecordSchema *schema_ptr, TKey &key, void* buff);
+
+        // search by lowerbound ( the range should include the target key). iter.Getkey <= k (target key is included)
+        int leaf_page_pos_lb(const DynamicCompoundKey &k, RecordSchema *record_scheme);
+
+        int leaf_page_find_pos_ub(const DynamicCompoundKey &k, SearchResult &result, RecordSchema *record_scheme);
+
+        void GetDeepByPosition(int pos, RecordSchema *schema_ptr, DynamicCompoundKey &key, void *buff);
+        void GetShallowByPosition(int pos, RecordSchema *schema_ptr, DynamicCompoundKey &key, void *& buff);
+
         // if node is full return true, if not full return false.
-        bool leaf_page_store(const TKey &k, const Slice &v, int &cnt, RecordSchema *record_scheme);
+        bool leaf_page_store(const DynamicCompoundKey &k, const Slice &v, int &cnt, RecordSchema *record_scheme);
+
         // if need merge return true, if not needed return false.
-        bool leaf_page_delete(const TKey &k, int &cnt, SearchResult<TKey> &result, RecordSchema *record_scheme);
+        bool leaf_page_delete(const DynamicCompoundKey &k, int &cnt, SearchResult &result, RecordSchema *record_scheme);
     };
 
-            
+
     class Header {
     public:
         Page_Type p_type = P_Data;
@@ -240,16 +445,21 @@ namespace DSMEngine{
         GlobalAddress this_page_g_ptr;
         // =============================
         int32_t number_of_records;
+
         friend class RDMA_Manager;
+
         friend class DataPage;
+
         uint32_t kDataCardinality;
         uint32_t table_id;
+
         Header() {
             dirty_upper_bound = 0;
             dirty_lower_bound = 0;
             number_of_records = 0;
             table_id = 0;
         }
+
         void merge_dirty_bounds(uint16_t dirty_lower, uint16_t dirty_upper) {
             assert(dirty_lower_bound <= dirty_upper_bound);
             if (dirty_upper_bound == 0) {
@@ -260,6 +470,7 @@ namespace DSMEngine{
             dirty_upper_bound = std::max(dirty_upper_bound, dirty_upper);
             dirty_lower_bound = std::min(dirty_lower_bound, dirty_lower);
         }
+
         void reset_dirty_bounds() {
             dirty_upper_bound = 0;
             dirty_lower_bound = 0;
@@ -279,7 +490,7 @@ namespace DSMEngine{
 //  uint8_t padding[LeafPagePadding];
 //        uint8_t rear_version;
 
-        template<class K> friend class Btr;
+        friend class Btr;
 
     public:
         DataPage(GlobalAddress this_page_g_ptr, uint32_t data_cardinality, uint32_t id) {
@@ -288,16 +499,24 @@ namespace DSMEngine{
             hdr.kDataCardinality = data_cardinality;
             hdr.table_id = id;
         }
+
         static uint64_t calculate_cardinality(uint64_t page_size, uint64_t record_size) {
 //            8ull*(kLeafPageSize - STRUCT_OFFSET(DataPage, data_[0]) - 8) / (8ull*schema_ptr_->GetSchemaSize() +1);
-            return 8ull*(page_size - STRUCT_OFFSET(DataPage, data_[0]) - sizeof(uint64_t) - sizeof(uint8_t)) / (8ull*record_size +1);
+            return 8ull * (page_size - STRUCT_OFFSET(DataPage, data_[0]) - sizeof(uint64_t) - sizeof(uint8_t)) /
+                   (8ull * record_size + 1);
         }
-        bool InsertRecord(const Slice &tuple, int &cnt, RecordSchema *record_scheme, GlobalAddress& g_addr);
-        bool AllocateRecord(int &cnt, RecordSchema *record_scheme, GlobalAddress& g_addr, char*& data_buffer);
+
+        bool InsertRecord(const Slice &tuple, int &cnt, RecordSchema *record_scheme, GlobalAddress &g_addr);
+
+        bool AllocateRecord(int &cnt, RecordSchema *record_scheme, GlobalAddress &g_addr, char *&data_buffer);
+
         bool DeleteRecord(GlobalAddress g_addr, RecordSchema *record_scheme);
-        int find_empty_spot_from_bitmap(uint64_t* bitmap, uint32_t number_of_bits);
-        void set_bitmap(uint64_t* bitmap, size_t index);
-        void reset_bitmap(uint64_t* bitmap, size_t index);
+
+        int find_empty_spot_from_bitmap(uint64_t *bitmap, uint32_t number_of_bits);
+
+        void set_bitmap(uint64_t *bitmap, size_t index);
+
+        void reset_bitmap(uint64_t *bitmap, size_t index);
     };
 }
 #endif //SELCC_PAGE_H

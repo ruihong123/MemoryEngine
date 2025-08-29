@@ -11,18 +11,18 @@ SRC_HOME=$bin/..
 # hosts_file specify a list of host names and port numbers, with the host names in the first column
 #Compute_file="../tpcc/compute.txt"
 #Memory_file="../tpcc/memory.txt"
-#conf_file_all=$bin/../connection_cloudlab.conf
+conf_file_all=$bin/../connection_cloudlab.conf
 conf_file="../connection.conf"
 
-#awk -v pos="$node" -F' ' '{
-#        for (i=1; i<=NF; i++) {
-#            if (i <= pos) {
-#                printf("%s", $i)
-#                if (i < pos) printf(" ")
-#            }
-#        }
-#        print ""
-#    }' "$conf_file_all" > "$conf_file"
+awk -v pos="$node" -F' ' '{
+        for (i=1; i<=NF; i++) {
+            if (i <= pos) {
+                printf("%s", $i)
+                if (i < pos) printf(" ")
+            }
+        }
+        print ""
+    }' "$conf_file_all" > "$conf_file"
 
 # specify your directory for log files
 output_dir="/home/wang4996/MemoryEngine/scripts/data"
@@ -92,7 +92,7 @@ launch () {
   echo "done for ${dist_ratio}"
 }
 
-run_tpcc () {
+run_btree () {
   dist_ratios=(0)
   for dist_ratio in "${dist_ratios[@]}"; do
     launch ${dist_ratio}
@@ -120,7 +120,7 @@ vary_thread_number () {
     for range_v in ${range_query[@]}; do
       for read_r in ${read_ratio[@]}; do
         compute_ARGS="$read_r $thread_n $range_v"
-        run_tpcc
+        run_btree
       done
     done
   done

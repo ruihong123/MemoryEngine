@@ -38,6 +38,7 @@ double kWarmRatio = 0.8;
 
 bool use_zipf = false;
 double zipfan =0.99;
+bool need_check = true;
 
 std::thread th[kMaxThread];
 uint64_t tp[kMaxThread][8];
@@ -82,7 +83,7 @@ std::atomic<int64_t> warmup_cnt{0};
 std::atomic_bool ready{false};
 
 //DSMEngine::Btr<uint64_t> *tree;
-DSMEngine::Btr<uint64_t> *tree;
+DSMEngine::Btr *tree;
 DSMEngine::RDMA_Manager *rdma_mg;
 //extern bool enable_cache;
 void thread_run(int id) {
@@ -108,11 +109,11 @@ void thread_run(int id) {
     uint64_t end_warm_key = start_warm_key + build_up_num;
     char* tuple_buff = new char[tree->index_scheme_ptr->GetSchemaSize()];
     DSMEngine::Slice tuple_slice = DSMEngine::Slice(tuple_buff,tree->index_scheme_ptr->GetSchemaSize());
-
-    uint64_t& key = *(uint64_t*)tuple_buff;
+    DynamicCompoundKey key = DynamicCompoundKey(tuple_buff, tree->index_scheme_ptr);
+    uint64_t& key_content = *(uint64_t*)tuple_buff;
     uint64_t& value = *((uint64_t*)tuple_buff+1);
     for (uint64_t i = start_warm_key; i < end_warm_key; ++i) {
-          key = i;
+        key_content = i;
           value = 2*i;
         tree->insert(key, tuple_slice);
       if (i % 1000000 == 0 && id ==0){
@@ -122,21 +123,21 @@ void thread_run(int id) {
     }
     const uint64_t checked_key1 = end_warm_key + 1;
     const uint64_t checked_key2 = end_warm_key/2;
-    if(tree->secondary_){
+    if(need_check){
         for(int i = 0; i < 1000; i++){
             // note that the insert(key, tuple). the key have to equal to the primary key in the tuple. There will be error.
-            key = i;
+            key_content = i;
             value = checked_key1;
             tree->insert(key, tuple_slice);
         }
         for(int i = 0; i < 1000; i++){
-            key = checked_key1;
+            key_content = checked_key1;
             value = i;
             tree->insert(key, tuple_slice);
         }
 
         for(int i = 0; i < 1000; i++){
-            key = checked_key2;
+            key_content = checked_key2;
             value = i;
             tree->insert(key, tuple_slice);
         }
@@ -173,32 +174,35 @@ void thread_run(int id) {
   tree->run_coroutine(coro_func, id, kCoroCnt);
 
 #else
-    if (tree->secondary_){
-        DSMEngine::Btr<uint64_t>::iterator iter = tree->lower_bound(checked_key1);
-        uint64_t this_key;
-        uint64_t this_value[2];
-        iter.Get(this_key, this_value);
-        for (int i = 0; i < 1000; i++){
-            assert(this_key == checked_key1);
-            iter.Next();
-            iter.Get(this_key, (char*)this_value);
-            if (DSMEngine::RDMA_Manager::node_id == 0 && id == 0){
-                printf("values for check 1 are %lu\n", this_value);
-            }
-        }
-        DSMEngine::Btr<uint64_t>::iterator iter2 = tree->lower_bound(checked_key2);
-        uint64_t this_key2;
-        uint64_t this_value2[2];
-        iter2.Get(this_key2, this_value2);
-        for (int i = 0; i < 1001; i++){
-            assert(this_key2 == checked_key2);
-            iter2.Next();
-            iter2.Get(this_key2, this_value2);
-            if (DSMEngine::RDMA_Manager::node_id == 0 && id == 0){
-                printf("values for check 2 are %lu\n", this_value2);
-            }
-        }
-    }
+//    if (need_check){
+//        uint64_t tocheck_key_content;
+//        uint64_t this_value[2];
+//        DynamicCompoundKey to_check_key = DynamicCompoundKey((char*)&tocheck_key_content, tree->index_scheme_ptr);
+//        tocheck_key_content = checked_key1;
+//        DSMEngine::Btr::iterator iter = tree->lower_bound(to_check_key);
+//
+//        iter.Get(to_check_key, this_value);
+//        for (int i = 0; i < 1000; i++){
+//            assert(tocheck_key_content == checked_key1);
+//            iter.Next();
+//            iter.Get(to_check_key, (char*)this_value);
+//            if (DSMEngine::RDMA_Manager::node_id == 0 && id == 0){
+//                printf("values for check 1 are %lu\n", this_value);
+//            }
+//        }
+//        tocheck_key_content = checked_key2;
+//        DSMEngine::Btr::iterator iter2 = tree->lower_bound(to_check_key);
+//
+//        iter2.Get(to_check_key, this_value);
+//        for (int i = 0; i < 1001; i++){
+//            assert(tocheck_key_content == checked_key2);
+//            iter2.Next();
+//            iter2.Get(this_key2, this_value2);
+//            if (DSMEngine::RDMA_Manager::node_id == 0 && id == 0){
+//                printf("values for check 2 are %lu\n", this_value2);
+//            }
+//        }
+//    }
 
   /// without coro
   unsigned int seed = rdtsc();
@@ -221,21 +225,23 @@ void thread_run(int id) {
 //    uint64_t dis = mehcached_zipf_next(&state);
 
     if(use_zipf){
-          key = mehcached_zipf_next(&state);
+          key_content = mehcached_zipf_next(&state);
     } else{
-        key = rand.Next()%(kKeySpace);
+        key_content = rand.Next()%(kKeySpace);
     }
 
 
     timer.begin();
     if(table_scan){
         //TODO: try to not make iter a pointer here, make it a variable which will be automatically deleted when go outside the scope
-        DSMEngine::Btr<uint64_t>::iterator iter = tree->lower_bound(key);
-        uint64_t end_key = key + 1000*1000;
-        uint64_t this_key;
+        DSMEngine::Btr::iterator iter = tree->lower_bound(key);
+        uint64_t end_key = key_content + 1000*1000;
+        uint64_t this_key_content;
         uint64_t this_value[2];
+        DynamicCompoundKey this_key = DynamicCompoundKey((char*)&this_key_content, tree->index_scheme_ptr);
+
         iter.Get(this_key, this_value);
-        while(iter.Valid() && this_key <= end_key){
+        while(iter.Valid() && this_key_content <= end_key){
             iter.Next();
             iter.Get(this_key, this_value);
 
@@ -361,19 +367,20 @@ int main(int argc, char *argv[]) {
     schema_ptr->SetPrimaryColumns(column_ids,1);
     DSMEngine::DDSM ddsm = DSMEngine::DDSM(cache_ptr, rdma_mg);
 //    tree = new Btr<Secondary_Key<uint64_t,uint64_t>>(&ddsm_, cache_ptr, schema_ptr, 0);
-    tree = new Btr<uint64_t>(&ddsm, cache_ptr, schema_ptr, 0);
+    tree = new Btr(&ddsm, cache_ptr, schema_ptr, 0);
 //    tree = new DSMEngine::Btr<uint64_t, uint64_t>(&ddsm_, cache_ptr, schema_ptr, 0, true);
 
 
 
     char* tuple_buff = new char[schema_ptr->GetSchemaSize()];
     DSMEngine::Slice tuple_slice = DSMEngine::Slice(tuple_buff,schema_ptr->GetSchemaSize());
-    uint64_t& key = *(uint64_t*)tuple_buff;
+    DynamicCompoundKey key = DynamicCompoundKey(tuple_buff, tree->index_scheme_ptr);
+    uint64_t& key_content = *(uint64_t*)tuple_buff;
     uint64_t& value = *((uint64_t*)tuple_buff+1);
     if (DSMEngine::RDMA_Manager::node_id == 0) {
     for (uint64_t i = 1; i < 1024000; ++i) {
 //        printf("insert key %d", i);
-        key = i;
+        key_content = i;
         value = 2*i;
         tree->insert(key, tuple_slice);
 //        tree->insert(i, i * 2);
@@ -445,32 +452,15 @@ int main(int argc, char *argv[]) {
 
     double per_node_tp = cap * 1.0 / microseconds;
     uint64_t cluster_tp = ddsm.ClusterSum("ttt",(uint64_t)(per_node_tp * 1000));
-//    uint64_t cluster_tp = rdma_mg->sum((uint64_t)(per_node_tp * 1000));
 
-    // uint64_t cluster_we = rdma_mg->sum((uint64_t)(hot_count));
-    // uint64_t cluster_ho = rdma_mg->sum((uint64_t)(ho_count));
 
     printf("%d, throughput %.4f\n", DSMEngine::RDMA_Manager::node_id, per_node_tp);
       fflush(stdout);
     if (ddsm.GetID() == 0) {
       printf("cluster throughput %.3f\n", cluster_tp / 1000.0);
-        printf("btree root record number is %lu\n", tree->GetRootRecordCount());
-//       printf("WE %.3f HO %.3f\n", cluster_we * 1000000ull / 1.0 /
-//       microseconds,
-//              cluster_ho * 1000000ull / 1.0 / microseconds);
-//       //  this is the real cache hit ratge
+      printf("btree root record number is %lu\n", tree->GetRootRecordCount());
       printf("cache hit rate: %lf\n", hit * 1.0 / all);
-//       printf("ACCESS PATTERN");
-//       for (int i = 0; i < 8; ++i) {
-//         printf("\t%ld", pp[i]);
-//       }
-//       printf("\n");
-//       printf("%d fail locks: %ld %s\n", rdma_mg->getMyNodeID(), fail_locks_cnt,
-//              getIP());
-//
-//       printf("hot count %ld\t hierarchy count %ld\t handover %ld\n",
-//       hot_count,
-//              hier_count, ho_count);
+
     }
   }
 

@@ -83,7 +83,7 @@ public:
     // the index init shall be deprecated, since we can init the index in the constructor. If the index does not need init
     // we can tell that by the number of constructor arguments.
       DSMEngine::RecordSchema* index_schema_ptr = CreatePrimaryIndexSchema();
-    primary_index_ = new Btr<DynamicCompoundKey>(ddsm, ddsm->rdma_mg->page_cache_, index_schema_ptr, DDSM::GetNextIndexID());
+    primary_index_ = new Btr(ddsm, ddsm->rdma_mg->page_cache_, index_schema_ptr, DDSM::GetNextIndexID());
 //    primary_index_->Init(kHashIndexBucketHeaderNum, gallocator);
   }
 
@@ -186,14 +186,14 @@ public:
     schema_ptr_->Deserialize(cur_addr);
     cur_addr = cur_addr + RecordSchema::GetSerializeSize();
     RecordSchema* index_schema_ptr = CreatePrimaryIndexSchema();
-    primary_index_ = new Btr<DynamicCompoundKey>(default_gallocator, default_gallocator->rdma_mg->page_cache_, index_schema_ptr);
+    primary_index_ = new Btr(default_gallocator, default_gallocator->rdma_mg->page_cache_, index_schema_ptr);
     primary_index_->Deserialize(cur_addr);
   }
     
   static size_t GetSerializeSize() {
     size_t ret = sizeof(size_t) * 2;
     ret += RecordSchema::GetSerializeSize();
-    ret += Btr<IndexKey>::GetSerializeSize();
+    ret += Btr::GetSerializeSize();
     return ret;
   }
   //Allocate the tuple from new page, if there is a cached handles list, we need to consider whether the latch has already been
@@ -293,7 +293,7 @@ public:
 
   RecordSchema *schema_ptr_;
 //  HashIndex *primary_index_;
-  Btr<DynamicCompoundKey>* primary_index_;
+  Btr* primary_index_;
 //  HashIndex **secondary_indexes_; // Currently disabled
     // todo: make the opened block thread local in RocksDB.
 //  static thread_local GlobalAddress opened_block_;

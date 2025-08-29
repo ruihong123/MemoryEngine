@@ -89,7 +89,7 @@ public:
             dirty_col_ids.insert(column_id);
         }
     }
-    void ReSetRecord(const char* &data, size_t size){
+    void FillRecord(const char* &data, size_t size){
         assert(schema_ptr_->GetSchemaSize() >= size);
         memcpy(data_ptr_, data, size);
     }

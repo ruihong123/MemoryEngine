@@ -24,7 +24,7 @@ namespace DSMEngine {
         GlobalAddress lock_addr;
         lock_addr.nodeID = page_addr.nodeID;
 
-        lock_addr.offset = page_addr.offset + STRUCT_OFFSET(LeafPage<uint64_t>, global_lock);
+        lock_addr.offset = page_addr.offset + STRUCT_OFFSET(LeafPage, global_lock);
         ibv_mr *mr = nullptr;
         Slice page_id((char *) &page_addr, sizeof(GlobalAddress));
 #ifdef TIMEPRINT
@@ -40,10 +40,10 @@ namespace DSMEngine {
         assert(handle != nullptr);
         handle->reader_pre_access(page_addr, kLeafPageSize, lock_addr, mr);
         page_buffer = mr->addr;
-        assert(STRUCT_OFFSET(LeafPage<uint64_t>, hdr.this_page_g_ptr) == STRUCT_OFFSET(DataPage, hdr.this_page_g_ptr));
-        assert(((LeafPage<uint64_t>*)page_buffer)->global_lock);
+        assert(STRUCT_OFFSET(LeafPage, hdr.this_page_g_ptr) == STRUCT_OFFSET(DataPage, hdr.this_page_g_ptr));
+        assert(((LeafPage*)page_buffer)->global_lock);
         assert(handle->gptr == page_addr);
-        assert(((LeafPage<uint64_t>*)page_buffer)->hdr.this_page_g_ptr == GlobalAddress::Null()||((LeafPage<uint64_t>*)page_buffer)->hdr.this_page_g_ptr == page_addr);
+        assert(((LeafPage*)page_buffer)->hdr.this_page_g_ptr == GlobalAddress::Null()||((LeafPage*)page_buffer)->hdr.this_page_g_ptr == page_addr);
 
     }
     //TODO: local TRY multiple times for local latch
@@ -51,7 +51,7 @@ namespace DSMEngine {
         assert((page_addr.offset % 1ULL*1024ULL*1024ULL*1024ULL)% kLeafPageSize == 0);
         GlobalAddress lock_addr;
         lock_addr.nodeID = page_addr.nodeID;
-        lock_addr.offset = page_addr.offset + STRUCT_OFFSET(LeafPage<uint64_t>, global_lock);
+        lock_addr.offset = page_addr.offset + STRUCT_OFFSET(LeafPage, global_lock);
         ibv_mr *mr = nullptr;
         Slice page_id((char *) &page_addr, sizeof(GlobalAddress));
         handle = page_cache->LookupInsert(page_id, nullptr, kLeafPageSize, Deallocate_MR_WITH_CCP);
@@ -61,10 +61,10 @@ namespace DSMEngine {
             return false;
         }
         page_buffer = mr->addr;
-        assert(STRUCT_OFFSET(LeafPage<uint64_t>, hdr.this_page_g_ptr) == STRUCT_OFFSET(DataPage, hdr.this_page_g_ptr));
-        assert(((LeafPage<uint64_t>*)page_buffer)->global_lock);
+        assert(STRUCT_OFFSET(LeafPage, hdr.this_page_g_ptr) == STRUCT_OFFSET(DataPage, hdr.this_page_g_ptr));
+        assert(((LeafPage*)page_buffer)->global_lock);
         assert(handle->gptr == page_addr);
-        assert(((LeafPage<uint64_t>*)page_buffer)->hdr.this_page_g_ptr == GlobalAddress::Null()||((LeafPage<uint64_t>*)page_buffer)->hdr.this_page_g_ptr == page_addr);
+        assert(((LeafPage*)page_buffer)->hdr.this_page_g_ptr == GlobalAddress::Null()||((LeafPage*)page_buffer)->hdr.this_page_g_ptr == page_addr);
         return true;
     }
 
@@ -72,7 +72,7 @@ namespace DSMEngine {
         assert((page_addr.offset % 1ULL*1024ULL*1024ULL*1024ULL)% kLeafPageSize == 0);
         GlobalAddress lock_addr;
         lock_addr.nodeID = page_addr.nodeID;
-        lock_addr.offset = page_addr.offset + STRUCT_OFFSET(LeafPage<uint64_t>, global_lock);
+        lock_addr.offset = page_addr.offset + STRUCT_OFFSET(LeafPage, global_lock);
         ibv_mr *local_mr = (ibv_mr *) handle->value;
         handle->reader_post_access(page_addr, kLeafPageSize, lock_addr, local_mr);
         page_cache->Release(handle);
@@ -86,7 +86,7 @@ namespace DSMEngine {
         GlobalAddress lock_addr;
         lock_addr.nodeID = page_addr.nodeID;
 
-        lock_addr.offset = page_addr.offset + STRUCT_OFFSET(LeafPage<uint64_t>, global_lock);
+        lock_addr.offset = page_addr.offset + STRUCT_OFFSET(LeafPage, global_lock);
         ibv_mr *mr = nullptr;
         Slice page_id((char *) &page_addr, sizeof(GlobalAddress));
 
@@ -129,7 +129,7 @@ namespace DSMEngine {
     void DDSM::SELCC_Exclusive_UnLock_noread(GlobalAddress page_addr, Cache::Handle *&handle) {
         GlobalAddress lock_addr;
         lock_addr.nodeID = page_addr.nodeID;
-        lock_addr.offset = page_addr.offset + STRUCT_OFFSET(LeafPage<uint64_t>, global_lock);
+        lock_addr.offset = page_addr.offset + STRUCT_OFFSET(LeafPage, global_lock);
         ibv_mr *local_mr = (ibv_mr *) handle->value;
         handle->writer_post_access(page_addr, kLeafPageSize, lock_addr, local_mr);
         page_cache->Release(handle);
@@ -142,7 +142,7 @@ namespace DSMEngine {
         GlobalAddress lock_addr;
         lock_addr.nodeID = page_addr.nodeID;
 
-        lock_addr.offset = page_addr.offset + STRUCT_OFFSET(LeafPage<uint64_t>, global_lock);
+        lock_addr.offset = page_addr.offset + STRUCT_OFFSET(LeafPage, global_lock);
         ibv_mr *mr = nullptr;
         Slice page_id((char *) &page_addr, sizeof(GlobalAddress));
 #ifdef TIMEPRINT
@@ -171,7 +171,7 @@ namespace DSMEngine {
         GlobalAddress lock_addr;
         lock_addr.nodeID = page_addr.nodeID;
 
-        lock_addr.offset = page_addr.offset + STRUCT_OFFSET(LeafPage<uint64_t>, global_lock);
+        lock_addr.offset = page_addr.offset + STRUCT_OFFSET(LeafPage, global_lock);
         ibv_mr *mr = nullptr;
         Slice page_id((char *) &page_addr, sizeof(GlobalAddress));
 
@@ -198,7 +198,7 @@ namespace DSMEngine {
         GlobalAddress lock_addr;
         lock_addr.nodeID = page_addr.nodeID;
 
-        lock_addr.offset = page_addr.offset + STRUCT_OFFSET(LeafPage<uint64_t>, global_lock);
+        lock_addr.offset = page_addr.offset + STRUCT_OFFSET(LeafPage, global_lock);
         ibv_mr *mr = nullptr;
         Slice page_id((char *) &page_addr, sizeof(GlobalAddress));
 
@@ -212,10 +212,10 @@ namespace DSMEngine {
             return false;
         }
         page_buffer = mr->addr;
-        assert(STRUCT_OFFSET(LeafPage<uint64_t>, hdr.this_page_g_ptr) == STRUCT_OFFSET(DataPage, hdr.this_page_g_ptr));
-        assert(((LeafPage<uint64_t>*)page_buffer)->global_lock);
+        assert(STRUCT_OFFSET(LeafPage, hdr.this_page_g_ptr) == STRUCT_OFFSET(DataPage, hdr.this_page_g_ptr));
+        assert(((LeafPage*)page_buffer)->global_lock);
         assert(handle->gptr == page_addr);
-        assert(((LeafPage<uint64_t>*)page_buffer)->hdr.this_page_g_ptr == page_addr);
+        assert(((LeafPage*)page_buffer)->hdr.this_page_g_ptr == page_addr);
         return true;
     }
 
@@ -223,11 +223,11 @@ namespace DSMEngine {
 //        printf("POST Update or Write page node %d, offset %lu, THIS NODE IS %u\n", page_addr.nodeID, page_addr.offset,RDMA_Manager::node_id);
         GlobalAddress lock_addr;
         lock_addr.nodeID = page_addr.nodeID;
-        lock_addr.offset = page_addr.offset + STRUCT_OFFSET(LeafPage<uint64_t>, global_lock);
+        lock_addr.offset = page_addr.offset + STRUCT_OFFSET(LeafPage, global_lock);
         //The assetion below is not always true.
         assert(handle->refs >1);
         ibv_mr *local_mr = (ibv_mr *) handle->value;
-        assert(STRUCT_OFFSET(LeafPage<uint64_t>, hdr.this_page_g_ptr) == STRUCT_OFFSET(DataPage, hdr.this_page_g_ptr));
+        assert(STRUCT_OFFSET(LeafPage, hdr.this_page_g_ptr) == STRUCT_OFFSET(DataPage, hdr.this_page_g_ptr));
         auto page_buffer = local_mr->addr;
         assert(((DataPage*)page_buffer)->global_lock);
         handle->updater_writer_post_access(page_addr, kLeafPageSize, lock_addr, local_mr);

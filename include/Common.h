@@ -278,6 +278,7 @@ public:
         return zero;
     };
 } __attribute__((packed));
+
 template <>
 struct std::hash<GlobalAddress>
 {
