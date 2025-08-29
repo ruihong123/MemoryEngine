@@ -133,7 +133,7 @@ function run_bench() {
     ssh -o StrictHostKeyChecking=no $node "rm $core_dump_dir/core*"
 #    ssh ${ssh_opts} $node "sudo mkdir /mnt/core_dump && sudo mkfs.ext4 /dev/sda4 && sudo mount /dev/sda4 /mnt/core_dump"
 
-    ssh ${ssh_opts} $node "echo '$core_dump_dir/core$compute' | sudo tee /proc/sys/kernel/core_pattern" &
+    ssh ${ssh_opts} $node "echo '$core_dump_dir/core$compute' | sudo -S tee /proc/sys/kernel/core_pattern" &
 
 #    ssh -o StrictHostKeyChecking=no $node  "sudo mount /dev/sda4 /mnt/core_dump" &
 
@@ -145,7 +145,7 @@ function run_bench() {
   done
   read -r -a memcached_node <<< $(head -n 1 $SRC_HOME/memcached_db_servers.conf)
   echo "restart memcached on ${memcached_node[0]}"
-  ssh -o StrictHostKeyChecking=no ${memcached_node[0]} "sudo service memcached restart"
+  ssh -o StrictHostKeyChecking=no ${memcached_node[0]} "sudo -S service memcached restart"
 
 
 #  systemctl status opensmd.service
