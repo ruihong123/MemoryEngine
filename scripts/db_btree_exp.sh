@@ -14,7 +14,7 @@ SRC_HOME=$bin/..
 conf_file_all=$bin/../connection_cloudlab.conf
 conf_file="../connection.conf"
 
-awk -v pos="$node" -F' ' '{
+awk -v pos=8 -F' ' '{
         for (i=1; i<=NF; i++) {
             if (i <= pos) {
                 printf("%s", $i)
