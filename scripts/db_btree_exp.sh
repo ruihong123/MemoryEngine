@@ -11,10 +11,10 @@ SRC_HOME=$bin/..
 # hosts_file specify a list of host names and port numbers, with the host names in the first column
 #Compute_file="../tpcc/compute.txt"
 #Memory_file="../tpcc/memory.txt"
-conf_file_all=$bin/../connection_cloudlab.conf
+conf_file_all=$bin/../connection_dbservers.conf
 conf_file="../connection.conf"
 
-awk -v pos=8 -F' ' '{
+awk -v pos=2 -F' ' '{
         for (i=1; i<=NF; i++) {
             if (i <= pos) {
                 printf("%s", $i)
@@ -72,7 +72,7 @@ launch () {
         sleep 1
   done
   i=0
-  script_compute="cd ${bin_dir} && ./second_btree_bench  ${compute_ARGS}"
+  script_compute="cd ${bin_dir} && ./btree_bench  ${compute_ARGS}"
 #  script_compute="cd ${bin_dir} && ./btree_bench  ${compute_ARGS}"
   echo "start master: ssh ${ssh_opts} ${master_host} '$script_compute $((2*$i))  $port > ${output_file} 2>&1 "
   ssh ${ssh_opts} ${master_host} "echo '$core_dump_dir/core$master_host' | sudo tee /proc/sys/kernel/core_pattern"

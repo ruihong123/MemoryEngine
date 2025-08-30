@@ -12,136 +12,10 @@
 #include "storage/ColumnInfo.h"
 #include "RecordSchema.h"
 #include "Record.h"
+#include "DynamicCompoundKey.h"
 #include <iostream>
 
 namespace DSMEngine {
-    struct DynamicCompoundKey {
-        // This is a dynamic compound key that can be used in the B-tree.
-        // This class is a helper class which enables the directly comparison between the dynamic compound keys.
-        char *start = nullptr; // the compind key should always smaller than 1 KB.
-
-        RecordSchema *schema_ptr = nullptr;
-
-        DynamicCompoundKey(char *buff, RecordSchema *schema)
-                : start(buff), schema_ptr(schema) {}
-
-        DynamicCompoundKey() {};
-
-        //copy constructor
-        DynamicCompoundKey(const DynamicCompoundKey &other) {
-            schema_ptr = other.schema_ptr;
-            start = other.start;  // shallow copy of the pointer
-        }
-
-        void deepcopy_from(const DynamicCompoundKey &other) const {
-            assert(schema_ptr == other.schema_ptr);
-            size_t key_length = schema_ptr->GetPrimaryKeyLength();
-            std::memcpy(start, other.start, key_length);
-        }
-
-        // Move constructor
-        DynamicCompoundKey(DynamicCompoundKey &&other) noexcept {
-            schema_ptr = other.schema_ptr;
-            start = other.start;
-            other.start = nullptr;
-            other.schema_ptr = nullptr;
-        }
-
-        DynamicCompoundKey &operator=(const DynamicCompoundKey &other) {
-            schema_ptr = other.schema_ptr;
-            start = other.start;
-            return *this;
-        }
-
-        // Equality ==
-        bool operator==(const DynamicCompoundKey &other) const {
-            return compare(other) == 0;
-        }
-
-        // Inequality !=
-        bool operator!=(const DynamicCompoundKey &other) const {
-            return compare(other) != 0;
-        }
-
-        // Less than <
-        bool operator<(const DynamicCompoundKey &other) const {
-            return compare(other) < 0;
-        }
-
-        // Greater than >
-        bool operator>(const DynamicCompoundKey &other) const {
-            return compare(other) > 0;
-        }
-
-        // Less than or equal <=
-        bool operator<=(const DynamicCompoundKey &other) const {
-            return compare(other) <= 0;
-        }
-
-        // Greater than or equal >=
-        bool operator>=(const DynamicCompoundKey &other) const {
-            return compare(other) >= 0;
-        }
-
-        static DynamicCompoundKey &MinValue() {
-            static char value_buff[1024] = {0};
-            static DynamicCompoundKey min_key(value_buff, nullptr);
-            return min_key;
-        }
-
-        static DynamicCompoundKey &MaxValue() {
-            static char value_buff[1024] = {static_cast<char>(255)};
-            static DynamicCompoundKey max_key(value_buff, nullptr);
-            return max_key;
-        }
-
-
-    private:
-        [[nodiscard]] int compare(const DynamicCompoundKey &other) const {
-            using namespace DSMEngine;
-            assert(schema_ptr != nullptr);
-
-            const RecordSchema *schema = schema_ptr;
-            size_t num_fields = schema->GetPrimaryColumnCount();
-            size_t offset = 0;
-
-            for (size_t i = 0; i < num_fields; ++i) {
-                size_t col_id = schema->GetPrimaryColumnId(i);
-                size_t size = schema->GetPrimaryColumnSize(i);
-                const auto &type = schema->GetColumnType(col_id);
-
-                const char *a = start + offset;
-                const char *b = other.start + offset;
-
-                switch (type) {
-                    case ValueType::INT: {
-                        int32_t va = *reinterpret_cast<const int32_t *>(a);
-                        int32_t vb = *reinterpret_cast<const int32_t *>(b);
-                        if (va != vb) return va < vb ? -1 : 1;
-                        break;
-                    }
-                    case ValueType::INT64: {
-                        int64_t va = *reinterpret_cast<const int64_t *>(a);
-                        int64_t vb = *reinterpret_cast<const int64_t *>(b);
-                        if (va != vb) return va < vb ? -1 : 1;
-                        break;
-                    }
-                    case ValueType::FIXCHAR: {
-                        int cmp = std::memcmp(a, b, size);
-                        if (cmp != 0) return cmp < 0 ? -1 : 1;
-                        break;
-                    }
-                    default:
-                        fprintf(stderr, "[DynamicCompoundKey] Unsupported type in compare!\n");
-                        std::abort();
-                }
-
-                offset += size;
-            }
-
-            return 0; // all parts equal
-        }
-    };
 
     //TODO: merge Page type and index type.
     enum Page_Type {
@@ -272,6 +146,8 @@ namespace DSMEngine {
             hdr.last_index = 0;
             hdr.this_page_g_ptr = this_page_g_ptr;
             hdr.kCardinality = cardinality;
+            SetHighest(DynamicCompoundKey::MaxValue(schema), schema);
+            SetLowest(DynamicCompoundKey::MinValue(schema), schema);
         }
 
         explicit InternalPage(GlobalAddress this_page_g_ptr, RecordSchema *schema,
@@ -281,9 +157,11 @@ namespace DSMEngine {
             hdr.record_size = hdr.key_size + sizeof(GlobalAddress);
             hdr.p_type = P_Internal_S;
             hdr.level = level;
-            SetRecordByIndex(0, DynamicCompoundKey::MinValue(), GlobalAddress::Null(), schema);
+            SetRecordByIndex(0, DynamicCompoundKey::MinValue(schema), GlobalAddress::Null(), schema);
             assert(this_page_g_ptr != GlobalAddress::Null());
             hdr.this_page_g_ptr = this_page_g_ptr;
+            SetHighest(DynamicCompoundKey::MaxValue(schema), schema);
+            SetLowest(DynamicCompoundKey::MinValue(schema), schema);
         }
 
         void SetRecordByIndex(int index, const DynamicCompoundKey &key, GlobalAddress gaddr, RecordSchema *schema) {
@@ -337,7 +215,7 @@ namespace DSMEngine {
         static uint64_t calculate_cardinality(uint64_t page_size, RecordSchema *schema_ptr) {
             uint64_t key_size = schema_ptr->GetPrimaryKeyLength();
             uint64_t record_size = key_size + sizeof(GlobalAddress);
-            // the last uint8_t is for the page forward checking.
+            // the last uint8_t is for the page forward checking. 2*key_size is for the hidden upperbound and lowerbound.
             return (page_size - STRUCT_OFFSET(InternalPage, data_[0]) - 2 * key_size - sizeof(uint8_t)) / record_size;
         }
 
@@ -365,6 +243,8 @@ namespace DSMEngine {
             hdr.record_size = schema->GetSchemaSize();
             hdr.this_page_g_ptr = this_page_g_ptr;
             hdr.kCardinality = leaf_cardinality;
+            SetHighest(DynamicCompoundKey::MaxValue(schema), schema);
+            SetLowest(DynamicCompoundKey::MinValue(schema), schema);
         }
 
         void SetRecordByIndex(int index, Slice s, RecordSchema *schema) {
@@ -400,8 +280,8 @@ namespace DSMEngine {
 
         void SetLowest(DynamicCompoundKey lowest, RecordSchema *scheme) {
             uint64_t key_size = scheme->GetPrimaryKeyLength();
-            DynamicCompoundKey highest_key(data_ + key_size, scheme);
-            highest_key.deepcopy_from(lowest);
+            DynamicCompoundKey lowest_key(data_ + key_size, scheme);
+            lowest_key.deepcopy_from(lowest);
         }
 
         DynamicCompoundKey GetHighest(RecordSchema *scheme) const {
@@ -413,8 +293,11 @@ namespace DSMEngine {
             return {const_cast<char *>(data_ + key_size), scheme};
         }
 
-        static uint64_t calculate_cardinality(uint64_t page_size, uint64_t record_size) {
-            return (page_size - STRUCT_OFFSET(LeafPage, data_[0]) - sizeof(uint8_t)) / record_size;
+        static uint64_t calculate_cardinality(uint64_t page_size, RecordSchema *scheme) {
+            uint64_t record_size = scheme->GetSchemaSize();
+            uint64_t key_size = scheme->GetPrimaryKeyLength();
+            // the last uint8_t is for the page forward checking. 2*key_size is for the hidden upperbound and lowerbound.
+            return (page_size - STRUCT_OFFSET(LeafPage, data_[0]) - 2 * key_size - sizeof(uint8_t)) / record_size;
         }
 
         void leaf_page_search(const DynamicCompoundKey &k, SearchResult &result, GlobalAddress g_page_ptr,
@@ -426,7 +309,8 @@ namespace DSMEngine {
         int leaf_page_find_pos_ub(const DynamicCompoundKey &k, SearchResult &result, RecordSchema *record_scheme);
 
         void GetDeepByPosition(int pos, RecordSchema *schema_ptr, DynamicCompoundKey &key, void *buff);
-        void GetShallowByPosition(int pos, RecordSchema *schema_ptr, DynamicCompoundKey &key, void *& buff);
+
+        void GetShallowByPosition(int pos, RecordSchema *schema_ptr, DynamicCompoundKey &key, void *&buff);
 
         // if node is full return true, if not full return false.
         bool leaf_page_store(const DynamicCompoundKey &k, const Slice &v, int &cnt, RecordSchema *record_scheme);

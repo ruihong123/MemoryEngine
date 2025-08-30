@@ -15,6 +15,7 @@ enum ValueType
   INT16,
   INT32,
   INT64,
+  UINT32,
   UINT64,
   DOUBLE,
   FLOAT,

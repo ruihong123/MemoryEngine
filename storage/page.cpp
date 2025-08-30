@@ -6,9 +6,6 @@
 #include "page.h"
 #include "Btr.h"
 namespace DSMEngine {
-//    template class LeafPage<uint64_t>;
-    // template class InternalPage<uint64_t>;
-    // template class InternalPage<Secondary_Key<uint64_t, uint64_t>>;
     bool InternalPage::internal_page_search(const DynamicCompoundKey &k, void *result_ptr, RecordSchema* schema_ptr) {
         SearchResult& result = *(SearchResult*)result_ptr;
         assert(k >= GetLowest(schema_ptr));
@@ -204,7 +201,7 @@ namespace DSMEngine {
     void LeafPage::leaf_page_search(const DynamicCompoundKey &k, SearchResult &result, GlobalAddress g_page_ptr,
                                                RecordSchema *record_scheme) {
         size_t tuple_length = record_scheme->GetSchemaSize();
-        char* tuple_start = data_;
+        char* tuple_start;
         uint16_t left = 0;
         // TODO: the code below will be false if we execute the leaf page delete multiple times.
         assert(hdr.last_index >= 0);
@@ -237,7 +234,7 @@ namespace DSMEngine {
         }
         // Not find or find on the first entry.
         assert(right == left);
-        tuple_start = data_ + right * tuple_length;
+        tuple_start = static_cast<char *>(GetRecordPtrByIndex(right)); //data_ + right * tuple_length;
         auto r = Record(record_scheme,tuple_start);
         DynamicCompoundKey temp_key = GetRecordKeyByIndex(right, record_scheme);
         r.GetPrimaryKey(&temp_key);
@@ -260,7 +257,7 @@ namespace DSMEngine {
         assert(hdr.kCardinality > 0);
         DynamicCompoundKey temp_key1 = GetRecordKeyByIndex(0, record_scheme);
         assert(temp_key1 <= GetHighest(record_scheme));
-        assert(temp_key1 == GetLowest(record_scheme));
+        assert(temp_key1 == GetLowest(record_scheme) || GetLowest(record_scheme) == DynamicCompoundKey::MinValue());
         char* tuple_start;
         assert(k >= temp_key1);
         if (hdr.last_index == -1) {
@@ -403,7 +400,7 @@ namespace DSMEngine {
         assert(cnt != hdr.kCardinality);
 //        if (!is_update) { // insert new item
 
-        tuple_start = data_ + insert_index * tuple_length;
+        tuple_start = static_cast<char *>(GetRecordPtrByIndex(insert_index)); //data_ + insert_index * tuple_length;
         if (insert_index <= hdr.last_index){
             // Move all the tuples at and after the insert_index,use memmove to avoid undefined behavior for overlapped address.
             memmove(tuple_start, tuple_start + tuple_length, (hdr.last_index - insert_index)*tuple_length);

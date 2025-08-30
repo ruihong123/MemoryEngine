@@ -12,8 +12,7 @@ namespace DSMEngine {
     // thread_local CoroCall Btr<Key,Value>::master;
 //thread_local GlobalAddress path_stack[define::kMaxCoro]
 //                                     [define::kMaxLevelOfTree];
-    thread_local SearchResult* Btr::search_result_memo = nullptr;
-
+    thread_local SearchResult *Btr::search_result_memo = nullptr;
 
 
 //TODO: make the function set cache handle as an argument, and we need to modify the remote lock status
@@ -28,7 +27,7 @@ namespace DSMEngine {
         }
         assert(sizeof(InternalPage) <= kInternalPageSize);
 //        leaf_cardinality_ = (kLeafPageSize - STRUCT_OFFSET(LeafPage<Key COMMA Value>, data_[0])) / index_scheme_ptr->GetSchemaSize();
-        leaf_cardinality_ = LeafPage::calculate_cardinality(kLeafPageSize, index_scheme_ptr->GetSchemaSize());
+        leaf_cardinality_ = LeafPage::calculate_cardinality(kLeafPageSize, index_scheme_ptr);
         internal_cardinality_ = InternalPage::calculate_cardinality(kInternalPageSize, index_scheme_ptr);
         print_verbose();
         assert(g_root_ptr.is_lock_free());
@@ -48,7 +47,8 @@ namespace DSMEngine {
         assert(sizeof(InternalPage) <= kInternalPageSize);
         // The end of page is the page forward check pointer.
 //        leaf_cardinality_ = (kLeafPageSize - STRUCT_OFFSET(LeafPage<Key COMMA Value>, data_[0]) - sizeof(uint8_t)) / index_scheme_ptr->GetSchemaSize();
-        leaf_cardinality_ = LeafPage::calculate_cardinality(kLeafPageSize, index_scheme_ptr->GetSchemaSize());
+        leaf_cardinality_ = LeafPage::calculate_cardinality(kLeafPageSize, index_scheme_ptr);
+        internal_cardinality_ = InternalPage::calculate_cardinality(kInternalPageSize, index_scheme_ptr);
         print_verbose();
         assert(g_root_ptr.is_lock_free());
         //TODO: simplify the code below by SELCC APIs.
@@ -1885,7 +1885,7 @@ namespace DSMEngine {
         // Clear the retry counter, in case that there is a sibling call.
         assert(k >= page->GetLowest(index_scheme_ptr));
 
-        assert(page->GetHighest(index_scheme_ptr) != DynamicCompoundKey::MinValue());
+        assert(page->GetHighest(index_scheme_ptr) != DynamicCompoundKey::MinValue(index_scheme_ptr));
 // TODO: Check whether the key is larger than the largest key of this node.
 //  if yes, update the header.
         int cnt = 0;
@@ -1919,15 +1919,16 @@ namespace DSMEngine {
             // If this is primary index, then we simply make the middle key as the splited key.
             m = cnt / 2;
             split_key.deepcopy_from(page->GetRecordKeyByIndex(m, index_scheme_ptr));
-            tuple_start = static_cast<char*>(page->GetRecordPtrByIndex(m));
+            tuple_start = static_cast<char *>(page->GetRecordPtrByIndex(m));
 
 //            Record split_record = Record(index_scheme_ptr, tuple_start);
 //            split_record.GetPrimaryKey(&split_key);
             //TODO： check why the split_record point to an empty record. when I print the page content, it is weird.
             // It turns out the page is an empty page
             for (int i = m; i < cnt; ++i) { // move
-                char *to_be_moved_start = static_cast<char*>(page->GetRecordPtrByIndex(m));
-                memcpy(sibling->data_, to_be_moved_start, (page->hdr.last_index - m + 1) * tuple_length);
+                char *to_be_moved_start = static_cast<char *>(page->GetRecordPtrByIndex(m));
+                memcpy(sibling->data_ + 2 * page->hdr.key_size, to_be_moved_start,
+                       (page->hdr.last_index - m + 1) * tuple_length);
             }
             //We don't care about the last index in the leaf nodes actually,
             // because we iterate all the slots to find an entry.

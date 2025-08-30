@@ -30,7 +30,9 @@ include_directories(
         "${PROJECT_SOURCE_DIR}/utils"
         )
 
-add_library(DSMEngine utils/Local_opt_locks.cpp utils/Local_opt_locks.h btr/btr_itr.cpp)
+add_library(DSMEngine utils/Local_opt_locks.cpp utils/Local_opt_locks.h btr/btr_itr.cpp
+        storage/DynamicCompoundKey.cpp
+        storage/DynamicCompoundKey.h)
 add_library(stx_btree btr/stx_btree.h)
 target_sources(DSMEngine
         PRIVATE
