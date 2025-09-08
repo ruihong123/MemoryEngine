@@ -1637,7 +1637,6 @@ namespace DSMEngine {
 
             rdma_mg->Allocate_Local_RDMA_Slot(*sibling_mr, Regular_Page);
             assert(page->hdr.level > 0);
-            RecordSchema *index_scheme_ptr;
             sibling = new(sibling_mr->addr) InternalPage(sibling_addr, index_scheme_ptr, page->hdr.level);
             //clear the global lock state. The page initialization will not reset the global lock byte.
             sibling->global_lock = 0;
