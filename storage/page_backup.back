@@ -219,7 +219,7 @@ namespace DSMEngine {
     }
     template<class Key>
     int LeafPage<Key>::leaf_page_pos_lb(const Key &k, GlobalAddress g_page_ptr, RecordSchema *record_scheme) {
-        size_t tuple_length = record_scheme->GetSchemaSize();
+        size_t tuple_length = record_scheme->GetRecordTotalSize();
         char* tuple_start = data_;
         uint16_t left = 0;
         assert(hdr.last_index >= 0);
@@ -310,7 +310,7 @@ namespace DSMEngine {
     void LeafPage<TKey>::GetByPosition(int pos, RecordSchema *schema_ptr, TKey &key, void* buff) {
         assert(pos >= 0);
         assert(pos <= hdr.last_index);
-        size_t tuple_length = schema_ptr->GetSchemaSize();
+        size_t tuple_length = schema_ptr->GetRecordTotalSize();
         char* tuple_start = data_ + pos*tuple_length;
         auto r = Record(schema_ptr,tuple_start);
         //Return the value of the key-value pair for index.
@@ -326,7 +326,7 @@ namespace DSMEngine {
     void LeafPage<Key>::leaf_page_search(const Key &k, SearchResult<Key> &result, GlobalAddress g_page_ptr,
                                                RecordSchema *record_scheme) {
 //        int kLeafCardinality = record_scheme->GetLeafCardi();
-        size_t tuple_length = record_scheme->GetSchemaSize();
+        size_t tuple_length = record_scheme->GetRecordTotalSize();
         char* tuple_start = data_;
         uint16_t left = 0;
         // TODO: the code below will be false if we execute the leaf page delete multiple times.
@@ -395,7 +395,7 @@ namespace DSMEngine {
         bool is_update = false;
         uint16_t insert_index = 0;
         assert(hdr.kLeafCardinality > 0);
-        int tuple_length = record_scheme->GetSchemaSize();
+        int tuple_length = record_scheme->GetRecordTotalSize();
 
 
         char* tuple_start;
@@ -560,7 +560,7 @@ namespace DSMEngine {
         cnt = hdr.last_index + 1;
         uint16_t insert_index = 0;
         assert(hdr.kLeafCardinality > 0);
-        int tuple_length = record_scheme->GetSchemaSize();
+        int tuple_length = record_scheme->GetRecordTotalSize();
 
 
         char* tuple_start;
@@ -644,7 +644,7 @@ namespace DSMEngine {
     }
 
     bool DataPage::InsertRecord(const Slice &tuple, int &cnt, RecordSchema *record_scheme, GlobalAddress& g_addr) {
-        int tuple_length = record_scheme->GetSchemaSize();
+        int tuple_length = record_scheme->GetRecordTotalSize();
         uint32_t bitmap_size = (hdr.kDataCardinality + 63) / 64;
         auto* bitmap = (uint64_t*)data_;
         char* data_start = data_ + bitmap_size*8;
@@ -663,7 +663,7 @@ namespace DSMEngine {
     }
 
     bool DataPage::AllocateRecord(int &cnt, RecordSchema *record_scheme, GlobalAddress &g_addr, char *&data_buffer) {
-        int tuple_length = record_scheme->GetSchemaSize();
+        int tuple_length = record_scheme->GetRecordTotalSize();
         uint32_t bitmap_size = (hdr.kDataCardinality + 63) / 64;
         bitmap_size*=8;
         auto* bitmap = (uint64_t*)data_;
@@ -719,7 +719,7 @@ namespace DSMEngine {
 
     bool DataPage::DeleteRecord(GlobalAddress g_addr, RecordSchema *record_scheme) {
         assert(g_addr.nodeID == hdr.this_page_g_ptr.nodeID);
-        int tuple_length = record_scheme->GetSchemaSize();
+        int tuple_length = record_scheme->GetRecordTotalSize();
         uint32_t bitmap_size = (hdr.kDataCardinality + 63) / 64;
         bitmap_size*=8;
         size_t page_offset = g_addr.offset - hdr.this_page_g_ptr.offset - bitmap_size - STRUCT_OFFSET(DataPage, data_);

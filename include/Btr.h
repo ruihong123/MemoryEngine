@@ -53,7 +53,7 @@ extern int TimePrintCounter[MAX_APP_THREAD];
 
 namespace DSMEngine {
 
-    typedef std::shared_ptr<DynamicCompoundKey> DynamicCompoundKeyPtr;
+//    typedef std::shared_ptr<DynamicCompoundKey> DynamicCompoundKeyPtr;
 
 
     class InternalPage;
@@ -82,6 +82,12 @@ class Btr {
                 scheme_ptr = iter.scheme_ptr;
                 dsm = iter.dsm;
                 valid = iter.valid;
+                iter.handle = nullptr;
+                iter.node = nullptr;
+                iter.valid = false;
+                iter.position_idx = 0;
+                iter.scheme_ptr = nullptr;
+                iter.dsm = nullptr;
             }
             void initialize(LeafPage *node_t, Cache_Handle* handle_t, uint32_t position_t, RecordSchema *scheme_ptr_t, DDSM *dsm_t){
                 node = node_t;
@@ -110,6 +116,7 @@ class Btr {
                     GlobalAddress next_leaf = node->hdr.sibling_ptr;
                     if (next_leaf == GlobalAddress::Null()){
                         valid = false;
+                        handleInvalid();
                         return;
                     }
                     dsm->SELCC_Shared_UnLock(handle->gptr, handle);
@@ -119,12 +126,23 @@ class Btr {
                     position_idx = 0;
                 }
             }
+            void handleInvalid(){
+                assert(node != nullptr);
+                if (handle){
+                    dsm->SELCC_Shared_UnLock(handle->gptr, handle);
+                    handle = nullptr;
+                }
+
+            }
 //        void Prev();
             bool Valid(){
                 return valid;
             }
             void SetValid(bool flag){
                 valid = flag;
+                if (!flag){
+                    handleInvalid();
+                }
             }
 
         private:
@@ -143,7 +161,7 @@ class Btr {
         Btr(DDSM *dsm, Cache *cache_ptr, RecordSchema *record_scheme_ptr, uint16_t Btr_id);
         //Btree waiting for serialization. get the root node from memcached
         Btr(DDSM *dsm, Cache *cache_ptr, RecordSchema *record_scheme_ptr);
-
+        // the start pointer of k and the data_ of v shall be same.
         void insert(const DynamicCompoundKey &k, const Slice &v);
 
         bool remove(const DynamicCompoundKey &k);

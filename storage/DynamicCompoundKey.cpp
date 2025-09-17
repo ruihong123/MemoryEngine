@@ -8,64 +8,55 @@
 #include "DynamicCompoundKey.h"
 // ------------------------- Public zero-arg API -------------------------
 namespace DSMEngine {
-    DynamicCompoundKey &DynamicCompoundKey::MinValue(RecordSchema* schema) {
-        assert(schema && "Call BindPrimaryKeySchema(schema) before MinValue().");
-
-        // L1: thread-local hit → zero locks
-        if (auto it = tl_min.find(schema); it != tl_min.end())
-            return *it->second;
-
-        // L2: global cache keyed by arbitrary-length footprint
+    DynamicCompoundKey DynamicCompoundKey::MinValue(RecordSchema* schema) {
+        assert(schema);
         const Footprint fp = MakePrimaryFootprint(schema);
+
+        // L1: thread-local
+        if (auto it = tl_min.find(fp); it != tl_min.end()) {
+            return {reinterpret_cast<char*>(it->second->buf.get()), schema};
+        }
+
+        // L2: global (double-checked)
+        Entry* e = nullptr;
         {
             std::shared_lock sh(dck_cache::g_mu);
-            if (auto it = dck_cache::g_min.find(fp); it != dck_cache::g_min.end()) {
-                auto *k = &it->second->key;
-                tl_min.emplace(schema, k);
-                return *k;
-            }
+            if (auto it = dck_cache::g_min.find(fp); it != dck_cache::g_min.end())
+                e = it->second.get();
         }
-        // Miss: build once (double-checked under exclusive lock)
-        {
+        if (!e) {
             std::unique_lock ex(dck_cache::g_mu);
-            if (auto it = dck_cache::g_min.find(fp); it != dck_cache::g_min.end()) {
-                auto *k = &it->second->key;
-                tl_min.emplace(schema, k);
-                return *k;
-            }
-            auto *e = build_min_entry(fp, schema);
-            auto *k = &e->key;
-            tl_min.emplace(schema, k);
-            return *k;
+            if (auto it = dck_cache::g_min.find(fp); it != dck_cache::g_min.end())
+                e = it->second.get();
+            else
+                e = build_min_entry(fp, schema);
         }
+        tl_min.emplace(fp, e);
+        return {reinterpret_cast<char*>(e->buf.get()), schema};
     }
 
-    DynamicCompoundKey &DynamicCompoundKey::MaxValue(RecordSchema* schema) {
-        assert(schema && "Call BindPrimaryKeySchema(schema) before MaxValue().");
-
-        if (auto it = tl_max.find(schema); it != tl_max.end())
-            return *it->second;
-
+    DynamicCompoundKey DynamicCompoundKey::MaxValue(RecordSchema* schema) {
+        assert(schema);
         const Footprint fp = MakePrimaryFootprint(schema);
+
+        if (auto it = tl_max.find(fp); it != tl_max.end()) {
+            return {reinterpret_cast<char*>(it->second->buf.get()), schema};
+        }
+
+        Entry* e = nullptr;
         {
             std::shared_lock sh(dck_cache::g_mu);
-            if (auto it = dck_cache::g_max.find(fp); it != dck_cache::g_max.end()) {
-                auto *k = &it->second->key;
-                tl_max.emplace(schema, k);
-                return *k;
-            }
+            if (auto it = dck_cache::g_max.find(fp); it != dck_cache::g_max.end())
+                e = it->second.get();
         }
-        {
+        if (!e) {
             std::unique_lock ex(dck_cache::g_mu);
-            if (auto it = dck_cache::g_max.find(fp); it != dck_cache::g_max.end()) {
-                auto *k = &it->second->key;
-                tl_max.emplace(schema, k);
-                return *k;
-            }
-            auto *e = build_max_entry(fp, schema);
-            auto *k = &e->key;
-            tl_max.emplace(schema, k);
-            return *k;
+            if (auto it = dck_cache::g_max.find(fp); it != dck_cache::g_max.end())
+                e = it->second.get();
+            else
+                e = build_max_entry(fp, schema);
         }
+        tl_max.emplace(fp, e);
+        return {reinterpret_cast<char*>(e->buf.get()), schema};
     }
 }

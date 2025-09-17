@@ -31,9 +31,9 @@ bool table_scan = false;
 bool use_range_query = true;
 
 //uint64_t kKeySpace = 64 * define::MB;
-uint64_t kKeySpace = 2*1024ull*1024ull*1024ull; // bigdata
+//uint64_t kKeySpace = 2*1024ull*1024ull*1024ull; // bigdata
 //uint64_t kKeySpace = 1*1024ull*1024ull*1024ull;
-//uint64_t kKeySpace = 50*1024*1024; //cloudlab
+uint64_t kKeySpace = 50*1024*1024; //cloudlab
 double kWarmRatio = 0.8;
 
 bool use_zipf = false;
@@ -107,8 +107,8 @@ void thread_run(int id) {
     uint64_t build_up_num = kKeySpace/all_thread;
     uint64_t start_warm_key = build_up_num * (DSMEngine::RDMA_Manager::node_id/2*kThreadCount+id);
     uint64_t end_warm_key = start_warm_key + build_up_num;
-    char* tuple_buff = new char[tree->index_scheme_ptr->GetSchemaSize()];
-    DSMEngine::Slice tuple_slice = DSMEngine::Slice(tuple_buff,tree->index_scheme_ptr->GetSchemaSize());
+    char* tuple_buff = new char[tree->index_scheme_ptr->GetRecordTotalSize()];
+    DSMEngine::Slice tuple_slice = DSMEngine::Slice(tuple_buff, tree->index_scheme_ptr->GetRecordTotalSize());
     DynamicCompoundKey key = DynamicCompoundKey(tuple_buff, tree->index_scheme_ptr);
     uint64_t& key_content = *(uint64_t*)tuple_buff;
     uint64_t& value = *((uint64_t*)tuple_buff+1);
@@ -372,8 +372,8 @@ int main(int argc, char *argv[]) {
 
 
 
-    char* tuple_buff = new char[schema_ptr->GetSchemaSize()];
-    DSMEngine::Slice tuple_slice = DSMEngine::Slice(tuple_buff,schema_ptr->GetSchemaSize());
+    char* tuple_buff = new char[schema_ptr->GetRecordTotalSize()];
+    DSMEngine::Slice tuple_slice = DSMEngine::Slice(tuple_buff, schema_ptr->GetRecordTotalSize());
     DynamicCompoundKey key = DynamicCompoundKey(tuple_buff, tree->index_scheme_ptr);
     uint64_t& key_content = *(uint64_t*)tuple_buff;
     uint64_t& value = *((uint64_t*)tuple_buff+1);

@@ -26,7 +26,7 @@ namespace DSMEngine {
             rdma_mg = ddms_->rdma_mg;
         }
         assert(sizeof(InternalPage) <= kInternalPageSize);
-//        leaf_cardinality_ = (kLeafPageSize - STRUCT_OFFSET(LeafPage<Key COMMA Value>, data_[0])) / index_scheme_ptr->GetSchemaSize();
+//        leaf_cardinality_ = (kLeafPageSize - STRUCT_OFFSET(LeafPage<Key COMMA Value>, data_[0])) / index_scheme_ptr->GetRecordTotalSize();
         leaf_cardinality_ = LeafPage::calculate_cardinality(kLeafPageSize, index_scheme_ptr);
         internal_cardinality_ = InternalPage::calculate_cardinality(kInternalPageSize, index_scheme_ptr);
         print_verbose();
@@ -46,7 +46,7 @@ namespace DSMEngine {
         }
         assert(sizeof(InternalPage) <= kInternalPageSize);
         // The end of page is the page forward check pointer.
-//        leaf_cardinality_ = (kLeafPageSize - STRUCT_OFFSET(LeafPage<Key COMMA Value>, data_[0]) - sizeof(uint8_t)) / index_scheme_ptr->GetSchemaSize();
+//        leaf_cardinality_ = (kLeafPageSize - STRUCT_OFFSET(LeafPage<Key COMMA Value>, data_[0]) - sizeof(uint8_t)) / index_scheme_ptr->GetRecordTotalSize();
         leaf_cardinality_ = LeafPage::calculate_cardinality(kLeafPageSize, index_scheme_ptr);
         internal_cardinality_ = InternalPage::calculate_cardinality(kInternalPageSize, index_scheme_ptr);
         print_verbose();
@@ -410,7 +410,7 @@ namespace DSMEngine {
 //  assert(rdma_mg->is_register());
 #ifndef NDEBUG
         //check whether the primary key equal to the k.
-        assert(*(uint64_t *) k.start == *(uint64_t * )(v.data()));
+        assert(k == DynamicCompoundKey(const_cast<char *>(v.data()), index_scheme_ptr));
 //        Record record = Record(index_scheme_ptr, const_cast<char *>(v.data()));
         DynamicCompoundKey pri_k = DynamicCompoundKey(const_cast<char *>(v.data()), index_scheme_ptr);
 //        record.GetPrimaryKey(&pri_k);
@@ -424,8 +424,8 @@ namespace DSMEngine {
         assert(root != GlobalAddress::Null());
         GlobalAddress p = root;
         SearchResult result{0};
-        char result_buff[16];
-        result.val.Reset(result_buff, 16);
+        char result_buff[1024];
+        result.val.Reset(result_buff, index_scheme_ptr->GetRecordTotalSize());
 //        memset(&result, 0, sizeof(SearchResult<Key, Value>));
         bool isroot = true;
         // this is root is to help the tree to refresh the root node because the
@@ -581,8 +581,9 @@ namespace DSMEngine {
         GlobalAddress p = root;
 
         SearchResult result{0};
-        char result_buff[16];
-        result.val.Reset(result_buff, 16);
+        char result_buff[1024];
+        assert(v.size() == index_scheme_ptr->GetRecordTotalSize());
+        result.val = v;
 
         bool isroot = true;
         int level = -1;
@@ -656,15 +657,11 @@ namespace DSMEngine {
 #ifdef PROCESSANALYSIS
         auto start = std::chrono::high_resolution_clock::now();
 #endif
-//#ifndef NDEBUG
         int next_times = 0;
-//#endif
         next: // Internal_and_Leaf page search
-//#ifndef NDEBUG
         if (next_times++ == 1000) {
             assert(false);
         }
-//#endif
 
         if (!internal_page_search(p, k, result, level, isroot, page_hint)) {
             //The traverser failed to move to the next level
@@ -997,16 +994,15 @@ namespace DSMEngine {
             }
 #ifndef NDEBUG
             assert(iter.Valid());
-
-
             char key_buff[1024];
             char value_buff[1024];
             DynamicCompoundKey key_obj(key_buff, index_scheme_ptr);
+            assert(key_obj.start == &key_buff[0]);
             iter.Get(key_obj, value_buff);
-            assert(key_obj >= key);
+            assert(key_obj <= key);
 #endif
             // we have move constructor for btree iterator, so this should be faster than before.
-            return iter;
+            return std::move(iter);
         }
     }
 
@@ -1455,8 +1451,11 @@ namespace DSMEngine {
         return false;
     }
 
+    // iter.Getkey <= k (target key is included), iter stop at the biggest key, where key <= k
     bool Btr::leaf_page_find(GlobalAddress page_addr, const DynamicCompoundKey &k, SearchResult &result,
                              Btr::iterator &iter, int level) {
+        // must pass an invalid iterator
+        assert(!iter.Valid());
         assert(result.val.data() != nullptr);
         auto rdma_mg = RDMA_Manager::Get_Instance(nullptr);
         int counter = 0;
@@ -1525,11 +1524,13 @@ namespace DSMEngine {
         if (position >= 0) {
             iter.initialize(page, handle, position, index_scheme_ptr, ddms_);
         } else {
+            // there is no way that the leaf_page_pos_lb return -1, because the internal node search has guaranteed the leaf node search always stop at the correct position
+            assert(false);
             // the iter shall point to the next leaf node.
             GlobalAddress sib_ptr = page->hdr.sibling_ptr;
             if (sib_ptr == GlobalAddress::Null()) {
                 iter.SetValid(false);
-                goto returntrue;
+                return true;
             }
             ddms_->SELCC_Shared_UnLock(page_addr, handle);
             ddms_->SELCC_Shared_Lock(page_buffer, sib_ptr, handle);
@@ -1537,13 +1538,17 @@ namespace DSMEngine {
             iter.initialize(page, handle, 0, index_scheme_ptr, ddms_);
         }
         assert(result.val.data() != nullptr);
-        returntrue:
-//        assert(handle);
-//        ddms_->SELCC_Shared_UnLock(page_addr, handle);
+        // no need to realease the shared lock here, because the valid iterator is using the page handle.
         return true;
+
+        returntrue:
+        assert(handle);
+        ddms_->SELCC_Shared_UnLock(page_addr, handle);
+        return true;
+
         returnfalse:
-//        assert(handle);
-//        ddms_->SELCC_Shared_UnLock(page_addr, handle);
+        assert(handle);
+        ddms_->SELCC_Shared_UnLock(page_addr, handle);
         return false;
 
 
@@ -1619,7 +1624,8 @@ namespace DSMEngine {
 
             return insert_success;// result in fall back search on the higher level.
         }
-        DynamicCompoundKey split_key;
+        char split_buff[1024];
+        DynamicCompoundKey split_key(split_buff, index_scheme_ptr);
         GlobalAddress sibling_addr = GlobalAddress::Null();
 //  assert(k >= page->hdr.lowest);
         need_split = page->internal_page_store(page_addr, k, v, level, index_scheme_ptr);
@@ -1646,7 +1652,7 @@ namespace DSMEngine {
 
             assert(m > 0);
 
-            split_key = page->GetRecordKeyByIndex(m, index_scheme_ptr);
+            page->GetRecordKeyByIndex_DeepCopy(m, split_key);
             assert(split_key > page->GetLowest(index_scheme_ptr));;
             assert(split_key < page->GetHighest(index_scheme_ptr));
             page->hdr.last_index -= (cnt - m); // this is correct. because we extract the split key to upper layer
@@ -1888,7 +1894,7 @@ namespace DSMEngine {
 // TODO: Check whether the key is larger than the largest key of this node.
 //  if yes, update the header.
         int cnt = 0;
-        uint64_t tuple_length = index_scheme_ptr->GetSchemaSize();
+        uint64_t tuple_length = index_scheme_ptr->GetRecordTotalSize();
 
         bool need_split = page->leaf_page_store(k, v, cnt, index_scheme_ptr);
         num_of_record++;

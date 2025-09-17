@@ -18,6 +18,7 @@ namespace DSMEngine{
         uint64_t delta_pull_num[MAX_APP_THREAD];
         uint64_t roll_back_num[MAX_APP_THREAD];
 #ifdef SINGLE_DELTA_PER_NODE
+        // todo: we need to make the mulitple writable delta sections per compute node, for our log-as-replica design.
         DeltaSectionWrap* TransactionManager::ds_for_write = nullptr;
 #endif
 
@@ -86,34 +87,13 @@ namespace DSMEngine{
                 table->SetOpenedBlock(nullptr);
             }
 
-//        printf("AllocateNewRecord: thread_id=%zu,table_id=%zu,access_type=%u,data_addr=%lx, start SelectRecordCC\n",
-//               thread_id_, table_id, INSERT_ONLY, tuple_gaddr.val);
-//            fflush(stdout);
             return true;
-
-//        GlobalAddress* gcl_addr = table->GetOpenedBlock();
-//        if ( gcl_addr == nullptr){
-//            gcl_addr = new GlobalAddress();
-//            *gcl_addr = default_gallocator->Allocate_Remote(Regular_Page);
-//            table->SetOpenedBlock(gcl_addr);
-//        }
-//        assert(handle != nullptr);
-//        assert(page_buffer != nullptr);
-//        uint64_t cardinality = 8ull*(kLeafPageSize - STRUCT_OFFSET(DataPage, data_[0]) - 8) / (8ull*table->GetSchema()->GetSchemaSize() +1);
-//        auto* page = new(page_buffer) DataPage(*gcl_addr, cardinality, table_id);
-//        int cnt = 0;
-//        bool ret = page->AllocateRecord(cnt, table->GetSchema() , tuple_gaddr, tuple_buffer);
-//        assert(ret);
-//        // if the cache line is full, set the thread local ptr as null, and allocate a new page next time.
-//        if(cnt == page->hdr.kDataCardinality){
-//            table->SetOpenedBlock(nullptr);
-//        }
 
 
 //        default_gallocator->SELCC_Exclusive_Lock_noread(page_buffer, gcl_addr, handle);
         }
         bool TransactionManager::InsertRecord(size_t table_id,
-                                              const DynamicCompoundKeyPtr keys,
+                                              const DynamicCompoundKey keys,
                                               size_t key_num, Record *record,
                                               Cache::Handle *handle,
                                               const GlobalAddress tuple_gaddr) {
@@ -126,12 +106,6 @@ namespace DSMEngine{
             PROFILE_TIME_END(thread_id_, CC_INSERT);
 //            gallocators[thread_id_]->SELCC_Exclusive_UnLock(TOPAGE(handle->gptr), handle);
             return true;
-			//}
-			//else{
-			//	// if the record has already existed, then we need to lock the original record.
-			//	END_PHASE_MEASURE(thread_id_, INSERT_PHASE);
-			//	return true;
-			//}
 		}
 
     // Assert that there is no latch still hold in the before the transaction abort. makesure that txn release the last tuple's,
@@ -177,7 +151,7 @@ namespace DSMEngine{
         record->CopyFrom(access->access_global_record_);
 
         volatile uint64_t ts = record->GetWTS();
-        assert(buffer_is_not_all_zero(record->data_ptr_, schema_ptr->GetSchemaSize()));
+        assert(buffer_is_not_all_zero(record->data_ptr_, schema_ptr->GetRecordTotalSize()));
         // todo: for serializable isolation level, a larger tuple timestamps means that we need to abort this txn.
 #ifdef EARLYABORT
         if (isolation_level ==SERIALIZABLE){
@@ -320,7 +294,7 @@ namespace DSMEngine{
                 record->roll_back(delta_record);
                 ts = record->GetWTS();
             }
-            assert(buffer_is_not_all_zero(record->data_ptr_, schema_ptr->GetSchemaSize()));
+            assert(buffer_is_not_all_zero(record->data_ptr_, schema_ptr->GetRecordTotalSize()));
         access->txn_local_tuple_ = record;
         access->access_addr_ = tuple_gaddr;
         if (access_type == DELETE_ONLY) {
@@ -451,7 +425,6 @@ namespace DSMEngine{
                 //  Will this help in reduce the overhead of locking? probably not. Need experiment.
                 GlobalAddress delta_gadd = GlobalAddress::Null();
                 size_t delta_size = 0;
-
 #ifdef SINGLE_DELTA_PER_NODE
                 ds_for_write->fill_in_delta_record_single(access->txn_local_tuple_, access->access_global_record_,
                                                                 delta_gadd,
@@ -485,8 +458,9 @@ namespace DSMEngine{
                 access->access_global_record_->CopyFrom(access->txn_local_tuple_);
 //                IndexKey keys[1];
 //                access->txn_local_tuple_->GetPrimaryKey(&keys[0]);
+                RecordSchema *index_schema_ptr = storage_manager_->tables_[access->access_global_record_->GetTableId()]->GetPrimaryIndexSchema();
                 char* primaryk_buff = new char[access->txn_local_tuple_->schema_ptr_->GetPrimaryKeyLength()];
-                DynamicCompoundKeyPtr primary_key(reinterpret_cast<DynamicCompoundKey*>(primaryk_buff), [](DynamicCompoundKey* ptr) { delete[] ptr; });
+                DynamicCompoundKey primary_key(primaryk_buff, index_schema_ptr);
                 storage_manager_->tables_[access->txn_local_tuple_->schema_ptr_->GetTableId()]->InsertPriIndex(primary_key, 1, access->access_addr_);
 
             }

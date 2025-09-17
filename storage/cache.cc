@@ -242,6 +242,7 @@ void LRUCache::Release(Cache::Handle* handle) {
 //  WriteLock l(&table_mutex_);
     // TODO: the spin mutex below can be removed.
     std::shared_lock<RWSpinMutex> l(table_mutex_);
+    assert(handle->refs > 1);
     Unref(reinterpret_cast<LRUHandle *>(handle));
 //    assert(reinterpret_cast<LRUHandle*>(handle)->refs != 0);
 }
@@ -664,6 +665,7 @@ void LRUCache::prepare_free_list() {
         e = start_end_pair.first;
         while (e != nullptr){
             e->refs--;
+            assert(e->refs == 0);
             (*e->deleter)(e);
             e = e->next;
 
@@ -683,6 +685,7 @@ std::pair<LRUHandle*, LRUHandle*> LRUCache::bulk_remove_LRU_list(size_t size) {
     LRUHandle* start_handle = lru_.next; // oldest
     LRUHandle* end_handle = lru_.next;
     for (size_t i = 1; i < size; ++i) {
+        assert(end_handle->refs == 1);
         end_handle = end_handle->next;
     }
     end_handle->next.load()->prev = start_handle->prev.load();

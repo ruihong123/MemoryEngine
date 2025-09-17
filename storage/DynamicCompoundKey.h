@@ -81,20 +81,20 @@ namespace DSMEngine {
             return compare(other) >= 0;
         }
 
-        static DynamicCompoundKey &MinValue() {
-            static char value_buff[1024] = {0};
-            static DynamicCompoundKey min_key(value_buff, nullptr);
-            return min_key;
-        }
-
-        static DynamicCompoundKey &MaxValue() {
-            static char value_buff[1024] = {static_cast<char>(255)};
-            static DynamicCompoundKey max_key(value_buff, nullptr);
-            return max_key;
-        }
+//        static DynamicCompoundKey &MinValue() {
+//            static char value_buff[1024] = {0};
+//            static DynamicCompoundKey min_key(value_buff, nullptr);
+//            return min_key;
+//        }
+//
+//        static DynamicCompoundKey &MaxValue() {
+//            static char value_buff[1024] = {static_cast<char>(255)};
+//            static DynamicCompoundKey max_key(value_buff, nullptr);
+//            return max_key;
+//        }
         // Zero-argument sentinels (use the bound schema)
-        static DynamicCompoundKey& MinValue(RecordSchema* schema);
-        static DynamicCompoundKey& MaxValue(RecordSchema* schema);
+        static DynamicCompoundKey MinValue(RecordSchema* schema);
+        static DynamicCompoundKey MaxValue(RecordSchema* schema);
 
     private:
         [[nodiscard]] int compare(const DynamicCompoundKey &other) const {
@@ -104,7 +104,7 @@ namespace DSMEngine {
             const RecordSchema *schema = schema_ptr ? schema_ptr : other.schema_ptr;
             size_t num_fields = schema->GetPrimaryColumnCount();
             size_t offset = 0;
-
+            // The logic below requires that the primary key columns start from column 0 and are contiguous.
             for (size_t i = 0; i < num_fields; ++i) {
                 size_t col_id = schema->GetPrimaryColumnId(i);
                 size_t size = schema->GetPrimaryColumnSize(i);
@@ -181,14 +181,11 @@ namespace DSMEngine {
         }
     };
 
-    // Cache entry: owns a stable buffer and provides a DynamicCompoundKey view
+    // Cache entry: owns a stable buffer
     struct Entry {
         std::unique_ptr<unsigned char[]> buf;
-        DynamicCompoundKey key;
-
-        Entry(size_t len, RecordSchema *schema)
-                : buf(new unsigned char[len]{}),
-                  key(reinterpret_cast<char *>(buf.get()), schema) {}
+        size_t len;
+        explicit Entry(size_t L) : buf(new unsigned char[L]{}), len(L) {}
     };
     // Global caches keyed by Footprint; shared/exclusive lock
     namespace dck_cache {
@@ -202,8 +199,8 @@ namespace DSMEngine {
             return std::hash<uintptr_t>{}(reinterpret_cast<uintptr_t>(p));
         }
     };
-    static thread_local std::unordered_map<RecordSchema*, DynamicCompoundKey*, PtrHash> tl_min;
-    static thread_local std::unordered_map<RecordSchema*, DynamicCompoundKey*, PtrHash> tl_max;
+    static thread_local std::unordered_map<Footprint, Entry*, FootprintHash> tl_min;
+    static thread_local std::unordered_map<Footprint, Entry*, FootprintHash> tl_max;
 
 // ---------------- Field-wise writers for typed extrema ----------------
 
@@ -214,6 +211,7 @@ namespace DSMEngine {
 
     static inline void write_min_field(ValueType t, void* dst, size_t len) {
         switch (t) {
+            case ValueType::INT:  write_as<int32_t>(dst,  std::numeric_limits<int>::min()); break;
             case ValueType::INT32:  write_as<int32_t>(dst,  std::numeric_limits<int32_t>::min()); break;
             case ValueType::INT64:  write_as<int64_t>(dst,  std::numeric_limits<int64_t>::min()); break;
             case ValueType::UINT32: write_as<uint32_t>(dst, std::numeric_limits<uint32_t>::min()); break;
@@ -227,6 +225,7 @@ namespace DSMEngine {
 
     static inline void write_max_field(ValueType t, void* dst, size_t len) {
         switch (t) {
+            case ValueType::INT:  write_as<int32_t>(dst,  std::numeric_limits<int>::max()); break;
             case ValueType::INT32:  write_as<int32_t>(dst,  std::numeric_limits<int32_t>::max()); break;
             case ValueType::INT64:  write_as<int64_t>(dst,  std::numeric_limits<int64_t>::max()); break;
             case ValueType::UINT32: write_as<uint32_t>(dst, std::numeric_limits<uint32_t>::max()); break;
@@ -279,8 +278,7 @@ namespace DSMEngine {
 
 // ---- Construct and publish entries (once per footprint) ----
     static inline Entry* build_min_entry(const Footprint& fp, RecordSchema* schema) {
-        const size_t key_len = schema->GetPrimaryKeyLength();
-        auto ent = std::make_unique<Entry>(key_len, schema);
+        auto ent = std::make_unique<Entry>(schema->GetPrimaryKeyLength());
         encode_min_primary(schema, ent->buf.get());
         auto raw = ent.get();
         dck_cache::g_min.emplace(fp, std::move(ent));
@@ -288,14 +286,12 @@ namespace DSMEngine {
     }
 
     static inline Entry* build_max_entry(const Footprint& fp, RecordSchema* schema) {
-        const size_t key_len = schema->GetPrimaryKeyLength();
-        auto ent = std::make_unique<Entry>(key_len, schema);
+        auto ent = std::make_unique<Entry>(schema->GetPrimaryKeyLength());
         encode_max_primary(schema, ent->buf.get());
         auto raw = ent.get();
         dck_cache::g_max.emplace(fp, std::move(ent));
         return raw;
     }
-
 
 }
 #endif //SELCC_DYNAMICCOMPOUNDKEY_H

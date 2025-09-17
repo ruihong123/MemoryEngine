@@ -14,13 +14,13 @@ namespace DSMEngine {
 class Record {
 public:
   Record(RecordSchema *schema_ptr, char* data) : schema_ptr_(schema_ptr), data_ptr_(data) {
-    data_size_ = schema_ptr_->GetSchemaSize();
+    data_size_ = schema_ptr_->GetRecordTotalSize();
     data_ptr_ = data;
     need_delete_ = false;
 //    primary_key = 0;
   }
   Record(RecordSchema *schema_ptr) : schema_ptr_(schema_ptr) {
-        data_size_ = schema_ptr_->GetSchemaSize();
+        data_size_ = schema_ptr_->GetRecordTotalSize();
         data_ptr_ = new char[data_size_];
         need_delete_ = true;
 //        primary_key = 0;
@@ -37,11 +37,11 @@ public:
     }
 
     void CopyTo(const Record *dst_record){
-        memcpy(dst_record->data_ptr_, data_ptr_, schema_ptr_->GetSchemaSize());
+        memcpy(dst_record->data_ptr_, data_ptr_, schema_ptr_->GetRecordTotalSize());
     }
 
     void CopyFrom(const Record *src_record){
-        memcpy(data_ptr_, src_record->data_ptr_, schema_ptr_->GetSchemaSize());
+        memcpy(data_ptr_, src_record->data_ptr_, schema_ptr_->GetRecordTotalSize());
     }
 
     void SwapData(Record *src_record){
@@ -90,11 +90,11 @@ public:
         }
     }
     void FillRecord(const char* &data, size_t size){
-        assert(schema_ptr_->GetSchemaSize() >= size);
+        assert(schema_ptr_->GetRecordTotalSize() >= size);
         memcpy(data_ptr_, data, size);
     }
     void ReSetRecordBuff(char* data, size_t size, bool need_delete){
-        assert(schema_ptr_->GetSchemaSize() == size);
+        assert(schema_ptr_->GetRecordTotalSize() == size);
         data_ptr_ = data;
         need_delete_ = need_delete;
     }
@@ -130,7 +130,7 @@ public:
     }
 
     const size_t& GetRecordSize() const {
-        return schema_ptr_->GetSchemaSize();
+        return schema_ptr_->GetRecordTotalSize();
     }
 
     const size_t& GetColumnCount() const {
@@ -141,7 +141,7 @@ public:
         size_t curr_offset = 0;
         size_t key_length = schema_ptr_->GetPrimaryKeyLength();
         if (key_length == 0){
-            return std::string(data_ptr_, schema_ptr_->GetSchemaSize());
+            return std::string(data_ptr_, schema_ptr_->GetRecordTotalSize());
         }
         char *key_str = new char[key_length];
         for (size_t i = 0; i < schema_ptr_->GetPrimaryColumnCount(); ++i){
@@ -158,7 +158,7 @@ public:
         size_t key_length = schema_ptr_->GetPrimaryKeyLength();
         if (key_length == 0){
             assert(false);
-//            return std::string(data_ptr_, schema_ptr_->GetSchemaSize());
+//            return std::string(data_ptr_, schema_ptr_->GetRecordTotalSize());
         }
         char *key_str = (char*)data;
         for (size_t i = 0; i < schema_ptr_->GetPrimaryColumnCount(); ++i){
@@ -172,7 +172,7 @@ public:
         size_t curr_offset = 0;
         size_t key_length = schema_ptr_->GetSecondaryKeyLength(index);
         if (key_length == 0){
-            return std::string(data_ptr_, schema_ptr_->GetSchemaSize());
+            return std::string(data_ptr_, schema_ptr_->GetRecordTotalSize());
         }
         char *key_str = new char[key_length];
         for (size_t i = 0; i < schema_ptr_->GetSecondaryColumnCount(index); ++i){

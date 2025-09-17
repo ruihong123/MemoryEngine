@@ -59,6 +59,7 @@ protected:
     schema = new RecordSchema(ITEM_TABLE_ID);
       schema->BulkloadColumns(columns);
     size_t col_ids[] = { 0 };
+    // the primary key is i_id and w_id
     schema->SetPrimaryColumns(col_ids, 1);
     schema->SetPartitionColumns(col_ids, 1);
   }
@@ -312,7 +313,7 @@ protected:
       columns.push_back(new ColumnInfo("meta", ValueType::META));
     schema = new RecordSchema(HISTORY_TABLE_ID);
       schema->BulkloadColumns(columns);
-    size_t col_ids[] = { 3, 4, 5 };
+    size_t col_ids[] = { 0, 1, 2 };
     schema->SetPrimaryColumns(col_ids, 3);
     size_t par_col_ids[] = { 3, 4 };
     schema->SetPartitionColumns(par_col_ids, 2);

@@ -127,7 +127,7 @@ class TransactionManager {
   bool AllocateNewRecord(size_t table_id, Cache::Handle *&handle,
                          GlobalAddress &data_addr, Record *&tuple);
 
-  bool InsertRecord(size_t table_id, const DynamicCompoundKeyPtr keys, size_t key_num,
+  bool InsertRecord(size_t table_id, const DynamicCompoundKey keys, size_t key_num,
                     Record *record, Cache::Handle *handle,
                     const GlobalAddress tuple_gaddr);
   // Merge the Latch and unlatch request for tuples within the same global cache line.
@@ -149,7 +149,13 @@ class TransactionManager {
     void DisableLog(){
         log_enabled_ = false;
     }
-    bool SearchRecord(size_t table_id, const DynamicCompoundKeyPtr primary_key,
+    RecordSchema* GetRecordSchema(size_t table_id){
+        return storage_manager_->tables_[table_id]->GetSchema();
+    }
+    RecordSchema* GetPrimaryIndexSchema(size_t table_id){
+        return storage_manager_->tables_[table_id]->GetPrimaryIndexSchema();
+    }
+    bool SearchRecord(size_t table_id, const DynamicCompoundKey primary_key,
                       Record *&record, AccessType access_type) {
       PROFILE_TIME_START(thread_id_, INDEX_READ);
       uint16_t target_node_id;

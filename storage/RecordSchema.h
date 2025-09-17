@@ -108,7 +108,7 @@ namespace DSMEngine {
         }
         //TODO: implement get get column by column name.
 
-        const size_t& GetSchemaSize()const{ return column_offset_; }
+        const size_t& GetRecordTotalSize()const{ return column_offset_; }
         const size_t& GetColumnCount()const{ return column_count_; }
 //        const int GetLeafCardi() const { return leaf_cardinality_;}
         const char* GetColumnName(const size_t &index)const{

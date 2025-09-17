@@ -24,20 +24,20 @@ const int kMaxThread = 32;
 int kReadRatio;
 int kThreadCount;
 uint16_t ThisNodeID;
-uint16_t tcp_port=19843;
+uint16_t tcp_port = 19843;
 //int kComputeNodeCount;
 //int kMemoryNodeCount;
 bool table_scan = false;
 bool use_range_query = true;
 
 //uint64_t kKeySpace = 64 * define::MB;
-uint64_t kKeySpace = 2*1024ull*1024ull*1024ull; // bigdata
+//uint64_t kKeySpace = 2*1024ull*1024ull*1024ull; // bigdata
 //uint64_t kKeySpace = 1*1024ull*1024ull*1024ull;
-//uint64_t kKeySpace = 50*1024*1024; //cloudlab
+uint64_t kKeySpace = 50 * 1024 * 1024; //cloudlab
 double kWarmRatio = 0.8;
 
 bool use_zipf = false;
-double zipfan =0.99;
+double zipfan = 0.99;
 bool need_check = true;
 
 std::thread th[kMaxThread];
@@ -62,18 +62,18 @@ void parse_args(int argc, char *argv[]) {
     int scan_number = atoi(argv[3]);
     ThisNodeID = atoi(argv[4]);
     tcp_port = atoi(argv[5]);
-    if(scan_number == 0)
+    if (scan_number == 0)
         table_scan = false;
     else
         table_scan = true;
 
-    printf("kReadRatio %d, kThreadCount %d, tablescan %d, ThisNodeID %d, PortNum %d\n", kReadRatio, kThreadCount, table_scan, ThisNodeID, tcp_port);
+    printf("kReadRatio %d, kThreadCount %d, tablescan %d, ThisNodeID %d, PortNum %d\n", kReadRatio, kThreadCount,
+           table_scan, ThisNodeID, tcp_port);
 }
 
 
-
 inline uint64_t to_key(uint64_t k) {
-    return (CityHash64((char *)&k, sizeof(k)) + 1) % kKeySpace;
+    return (CityHash64((char *) &k, sizeof(k)) + 1) % kKeySpace;
 }
 //template class DSMEngine::Btr<int,int>;
 //template class DSMEngine::Btr<uint64_t ,uint64_t>;
@@ -85,6 +85,7 @@ std::atomic_bool ready{false};
 //DSMEngine::Btr<uint64_t> *tree;
 DSMEngine::Btr *tree;
 DSMEngine::RDMA_Manager *rdma_mg;
+
 //extern bool enable_cache;
 void thread_run(int id) {
 //    DSMEngine::Btr<uint64_t ,uint64_t> a(nullptr, nullptr,0);
@@ -95,7 +96,7 @@ void thread_run(int id) {
     size_t compute_num = rdma_mg->GetComputeNodeNum();
 #ifndef BENCH_LOCK
     uint64_t all_thread = kThreadCount * compute_num;
-    uint64_t my_id = kThreadCount * (DSMEngine::RDMA_Manager::node_id)/2 + id;
+    uint64_t my_id = kThreadCount * (DSMEngine::RDMA_Manager::node_id) / 2 + id;
     DSMEngine::Random64 rand(my_id);
 
     printf("I am %d\n", my_id);
@@ -104,52 +105,93 @@ void thread_run(int id) {
         bench_timer.begin();
     }
 
-    uint64_t build_up_num = kKeySpace/all_thread;
-    uint64_t start_warm_key = build_up_num * (DSMEngine::RDMA_Manager::node_id/2*kThreadCount+id);
+    uint64_t build_up_num = kKeySpace / all_thread;
+    uint64_t start_warm_key = build_up_num * (DSMEngine::RDMA_Manager::node_id / 2 * kThreadCount + id);
     uint64_t end_warm_key = start_warm_key + build_up_num;
-    char* tuple_buff = new char[tree->index_scheme_ptr->GetSchemaSize()];
-    DSMEngine::Slice tuple_slice = DSMEngine::Slice(tuple_buff,tree->index_scheme_ptr->GetSchemaSize());
+    char *tuple_buff = new char[tree->index_scheme_ptr->GetRecordTotalSize()];
+    DSMEngine::Slice tuple_slice = DSMEngine::Slice(tuple_buff, tree->index_scheme_ptr->GetRecordTotalSize());
     DynamicCompoundKey key = DynamicCompoundKey(tuple_buff, tree->index_scheme_ptr);
-    uint64_t& key_content = *(uint64_t*)tuple_buff;
-    uint64_t& value = *((uint64_t*)tuple_buff+1);
+    uint64_t &key_content = *(uint64_t *) tuple_buff;
+    uint64_t &value = *((uint64_t *) tuple_buff + 1);
     for (uint64_t i = start_warm_key; i < end_warm_key; ++i) {
         key_content = i;
-        value = 2*i;
+        value = 2 * i;
         tree->insert(key, tuple_slice);
-        if (i % 1000000 == 0 && id ==0){
+        if (i % 1000000 == 0 && id == 0) {
             printf("warm up number: %lu node id is %d \n", i, rdma_mg->node_id);
             fflush(stdout);
         }
     }
     const uint64_t checked_key1 = end_warm_key + 1;
-    const uint64_t checked_key2 = end_warm_key/2;
-    if(need_check){
-        for(int i = 0; i < 1000; i++){
+    const uint64_t checked_key2 = end_warm_key / 2;
+    if (need_check && id == 0) {
+        for (int i = 0; i < 1000; i++) {
             // note that the insert(key, tuple). the key have to equal to the primary key in the tuple. There will be error.
             key_content = i;
             value = checked_key1;
             tree->insert(key, tuple_slice);
         }
-        for(int i = 0; i < 1000; i++){
+        for (int i = 0; i < 1000; i++) {
             key_content = checked_key1;
             value = i;
             tree->insert(key, tuple_slice);
         }
+        uint64_t tocheck_key_content[2];
+        uint64_t this_value[2];
+        DynamicCompoundKey to_check_key = DynamicCompoundKey((char *) &tocheck_key_content, tree->index_scheme_ptr);
+        // note that we need to set the second half of the compound key to 0, because when we search the key. Otherwise the iterator will may not cover all the key-value with key eequals checked_key1
+        tocheck_key_content[0] = checked_key1;
+        tocheck_key_content[1] = 0;
+        DSMEngine::Btr::iterator iter = tree->lower_bound(to_check_key);
 
-        for(int i = 0; i < 1000; i++){
+        iter.Get(to_check_key, &this_value[0]);
+        if (this_value[0] < checked_key1) {
+            printf("The iter stop the largest value that is smaller than the target key, part 1\n");
+            iter.Next();
+        }
+        for (int i = 0; i < 1000; i++) {
+            assert(tocheck_key_content[0] == checked_key1);
+            iter.Next();
+            iter.Get(to_check_key, (char *) this_value);
+            if (DSMEngine::RDMA_Manager::node_id == 0 && id == 0) {
+                printf("Node %u values for check 1 are %lu\n", RDMA_Manager::node_id, this_value[1]);
+                fflush(stdout);
+            }
+        }
+
+        for (int i = 0; i < 1000; i++) {
             key_content = checked_key2;
             value = i;
             tree->insert(key, tuple_slice);
         }
-    }
 
+        tocheck_key_content[0] = checked_key2;
+        tocheck_key_content[1] = 0;
+
+        DSMEngine::Btr::iterator iter2 = tree->lower_bound(to_check_key);
+
+        iter2.Get(to_check_key, &this_value[0]);
+        if (this_value[0] < checked_key2) {
+            printf("The iter stop the largest value that is smaller than the target key, part 2\n");
+            iter2.Next();
+        }
+        for (int i = 0; i < 1000; i++) {
+            assert(tocheck_key_content[0] == checked_key2);
+            iter2.Get(to_check_key, this_value);
+            iter2.Next();
+            if (DSMEngine::RDMA_Manager::node_id == 0 && id == 0) {
+                printf("values for check 2 are %lu\n", this_value[1]);
+                fflush(stdout);
+            }
+        }
+        printf("values for check has been finished\n");
+    }
 
 
     warmup_cnt.fetch_add(1);
 
     if (id == 0) {
-        while (warmup_cnt.load() != kThreadCount)
-            ;
+        while (warmup_cnt.load() != kThreadCount);
         printf("node %d finish\n", rdma_mg->node_id);
         uint64_t ns = bench_timer.end();
         printf("warmup time %lds\n", ns / 1000 / 1000 / 1000);
@@ -165,8 +207,7 @@ void thread_run(int id) {
         warmup_cnt.store(0);
     }
 
-    while (warmup_cnt.load() != 0)
-        ;
+    while (warmup_cnt.load() != 0);
 
 #endif
 
@@ -174,35 +215,10 @@ void thread_run(int id) {
     tree->run_coroutine(coro_func, id, kCoroCnt);
 
 #else
-//    if (need_check){
-//        uint64_t tocheck_key_content;
-//        uint64_t this_value[2];
-//        DynamicCompoundKey to_check_key = DynamicCompoundKey((char*)&tocheck_key_content, tree->index_scheme_ptr);
-//        tocheck_key_content = checked_key1;
-//        DSMEngine::Btr::iterator iter = tree->lower_bound(to_check_key);
-//
-//        iter.Get(to_check_key, this_value);
-//        for (int i = 0; i < 1000; i++){
-//            assert(tocheck_key_content == checked_key1);
-//            iter.Next();
-//            iter.Get(to_check_key, (char*)this_value);
-//            if (DSMEngine::RDMA_Manager::node_id == 0 && id == 0){
-//                printf("values for check 1 are %lu\n", this_value);
-//            }
-//        }
-//        tocheck_key_content = checked_key2;
-//        DSMEngine::Btr::iterator iter2 = tree->lower_bound(to_check_key);
-//
-//        iter2.Get(to_check_key, this_value);
-//        for (int i = 0; i < 1001; i++){
-//            assert(tocheck_key_content == checked_key2);
-//            iter2.Next();
-//            iter2.Get(this_key2, this_value2);
-//            if (DSMEngine::RDMA_Manager::node_id == 0 && id == 0){
-//                printf("values for check 2 are %lu\n", this_value2);
-//            }
-//        }
-//    }
+    if (need_check) {
+
+    }
+
 
     /// without coro
     unsigned int seed = rdtsc();
@@ -211,49 +227,59 @@ void thread_run(int id) {
                         (rdtsc() & (0x0000ffffffffffffull)) ^ id);
 
     Timer timer;
-    uint64_t *value_buffer = (uint64_t *)malloc(sizeof(uint64_t) * 1024 * 1024);
+    uint64_t *value_buffer = (uint64_t *) malloc(sizeof(uint64_t) * 1024 * 1024);
     uint64_t print_counter = 0;
     uint64_t scan_pos = 0;
 
     while (true) {
 
         if (need_stop || id >= kTthreadUpper) {
-            while (true)
-                ;
+            while (true);
         }
         // the dis range is [0, 64M]
 //    uint64_t dis = mehcached_zipf_next(&state);
 
-        if(use_zipf){
+        if (use_zipf) {
             key_content = mehcached_zipf_next(&state);
-        } else{
-            key_content = rand.Next()%(kKeySpace);
+        } else {
+            key_content = rand.Next() % (kKeySpace);
         }
 
 
         timer.begin();
-        if(table_scan){
+        if (table_scan) {
+            // clear the second half of the key. Secondary key = CompoundKey(key, 0). Value = 0.
+            value = 0;
             //TODO: try to not make iter a pointer here, make it a variable which will be automatically deleted when go outside the scope
             DSMEngine::Btr::iterator iter = tree->lower_bound(key);
-            uint64_t end_key = key_content + 1000*1000;
+            uint64_t end_key = key_content + 1000 * 1000;
             uint64_t this_key_content;
             uint64_t this_value[2];
-            DynamicCompoundKey this_key = DynamicCompoundKey((char*)&this_key_content, tree->index_scheme_ptr);
+            DynamicCompoundKey this_key = DynamicCompoundKey((char *) &this_key_content, tree->index_scheme_ptr);
 
             iter.Get(this_key, this_value);
-            while(iter.Valid() && this_key_content <= end_key){
+            while (iter.Valid() && this_key_content <= end_key) {
                 iter.Next();
                 iter.Get(this_key, this_value);
 
 
             }
-            print_counter = print_counter + 1000*1000;
+            print_counter = print_counter + 1000 * 1000;
 //        delete iter;
-        }else{
+        } else {
             if (rand_r(&seed) % 100 < kReadRatio) { // GET
-                tree->search(key, tuple_slice);
+//                tree->search(key, tuple_slice);
+                value = 0;
+                uint64_t this_key_content[2];
+                uint64_t this_value[2];
+                DynamicCompoundKey this_key = DynamicCompoundKey((char *) &this_key_content, tree->index_scheme_ptr);
+                DSMEngine::Btr::iterator iter = tree->lower_bound(key);
+                while (iter.Valid() && this_key_content[0] == key_content) {
+                    iter.Next();
+                    iter.Get(this_key, this_value);
+                }
 
-            }else {
+            } else {
                 value = 12;
                 tree->insert(key, tuple_slice);
             }
@@ -261,8 +287,7 @@ void thread_run(int id) {
         }
 
 
-        if (print_counter%100000 == 0)
-        {
+        if (print_counter % 100000 == 0) {
             printf("%d key-value pairs hase been executed\r", print_counter);
         }
 //      if (print_counter%100000 == 0)
@@ -276,15 +301,14 @@ void thread_run(int id) {
         }
         latency[id][us_10]++;
 
-        if (table_scan&&use_range_query){
-            tp[id][0] += 1000*1000;
-        }else{
+        if (table_scan && use_range_query) {
+            tp[id][0] += 1000 * 1000;
+        } else {
             tp[id][0]++;
         }
 
     }
 }
-
 
 
 void cal_latency() {
@@ -335,7 +359,7 @@ void cal_latency() {
 int main(int argc, char *argv[]) {
 
     std::cout << "Using Boost "
-              << BOOST_VERSION / 100000     << "."  // major version
+              << BOOST_VERSION / 100000 << "."  // major version
               << BOOST_VERSION / 100 % 1000 << "."  // minor version
               << BOOST_VERSION % 100                // patch level
               << std::endl;
@@ -345,26 +369,26 @@ int main(int argc, char *argv[]) {
             NULL,  /* dev_name */
             NULL,  /* server_name */
             tcp_port, /* tcp_port */
-            1,	 /* ib_port */ //physical
+            1,     /* ib_port */ //physical
             1, /* gid_idx */
-            4*10*1024*1024, /*initial local buffer size*/
+            4 * 10 * 1024 * 1024, /*initial local buffer size*/
             ThisNodeID
     };
 //    DSMEngine::RDMA_Manager::node_id = ThisNodeID;
 
     rdma_mg = DSMEngine::RDMA_Manager::Get_Instance(&config);
 
-    DSMEngine::Cache* cache_ptr = DSMEngine::NewLRUCache(define::kIndexCacheSize*define::MB);
+    DSMEngine::Cache *cache_ptr = DSMEngine::NewLRUCache(define::kIndexCacheSize * define::MB);
     rdma_mg->set_page_cache(cache_ptr);
-    assert(cache_ptr->GetCapacity()> 10000);
+    assert(cache_ptr->GetCapacity() > 10000);
 //  rdma_mg->registerThread();
-    DSMEngine::RecordSchema* schema_ptr = new DSMEngine::RecordSchema(0);
-    std::vector<DSMEngine::ColumnInfo*> columns;
+    DSMEngine::RecordSchema *schema_ptr = new DSMEngine::RecordSchema(0);
+    std::vector<DSMEngine::ColumnInfo *> columns;
     columns.push_back(new DSMEngine::ColumnInfo("c_id", DSMEngine::ValueType::UINT64));
     columns.push_back(new DSMEngine::ColumnInfo("c_first", DSMEngine::ValueType::FIXCHAR, static_cast<size_t>(8)));
     schema_ptr->BulkloadColumns(columns);
-    size_t column_ids[1] = {0};
-    schema_ptr->SetPrimaryColumns(column_ids,1);
+    size_t column_ids[2] = {0, 1};
+    schema_ptr->SetPrimaryColumns(column_ids, 2);
     DSMEngine::DDSM ddsm = DSMEngine::DDSM(cache_ptr, rdma_mg);
 //    tree = new Btr<Secondary_Key<uint64_t,uint64_t>>(&ddsm_, cache_ptr, schema_ptr, 0);
     tree = new Btr(&ddsm, cache_ptr, schema_ptr, 0);
@@ -372,16 +396,16 @@ int main(int argc, char *argv[]) {
 
 
 
-    char* tuple_buff = new char[schema_ptr->GetSchemaSize()];
-    DSMEngine::Slice tuple_slice = DSMEngine::Slice(tuple_buff,schema_ptr->GetSchemaSize());
+    char *tuple_buff = new char[schema_ptr->GetRecordTotalSize()];
+    DSMEngine::Slice tuple_slice = DSMEngine::Slice(tuple_buff, schema_ptr->GetRecordTotalSize());
     DynamicCompoundKey key = DynamicCompoundKey(tuple_buff, tree->index_scheme_ptr);
-    uint64_t& key_content = *(uint64_t*)tuple_buff;
-    uint64_t& value = *((uint64_t*)tuple_buff+1);
+    uint64_t &key_content = *(uint64_t *) tuple_buff;
+    uint64_t &value = *((uint64_t *) tuple_buff + 1);
     if (DSMEngine::RDMA_Manager::node_id == 0) {
         for (uint64_t i = 1; i < 1024000; ++i) {
 //        printf("insert key %d", i);
             key_content = i;
-            value = 2*i;
+            value = 2 * i;
             tree->insert(key, tuple_slice);
 //        tree->insert(i, i * 2);
         }
@@ -394,11 +418,10 @@ int main(int argc, char *argv[]) {
     }
 
 #ifndef BENCH_LOCK
-    while (!ready.load())
-        ;
+    while (!ready.load());
 #endif
 #ifndef NDEBUG
-    Show_Me_The_Print  = true;
+    Show_Me_The_Print = true;
 #endif
     timespec s, e;
     uint64_t pre_tp = 0;
@@ -415,7 +438,7 @@ int main(int argc, char *argv[]) {
         sleep(10);
         clock_gettime(CLOCK_REALTIME, &e);
         int microseconds = (e.tv_sec - s.tv_sec) * 1000000 +
-                           (double)(e.tv_nsec - s.tv_nsec) / 1000;
+                           (double) (e.tv_nsec - s.tv_nsec) / 1000;
 
         uint64_t all_tp = 0;
         for (int i = 0; i < kThreadCount; ++i) {
@@ -451,7 +474,7 @@ int main(int argc, char *argv[]) {
         }
 
         double per_node_tp = cap * 1.0 / microseconds;
-        uint64_t cluster_tp = ddsm.ClusterSum("ttt",(uint64_t)(per_node_tp * 1000));
+        uint64_t cluster_tp = ddsm.ClusterSum("ttt", (uint64_t)(per_node_tp * 1000));
 
 
         printf("%d, throughput %.4f\n", DSMEngine::RDMA_Manager::node_id, per_node_tp);

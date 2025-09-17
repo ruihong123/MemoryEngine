@@ -6,9 +6,9 @@
 #include "page.h"
 #include "Btr.h"
 namespace DSMEngine {
-    bool InternalPage::internal_page_search(const DynamicCompoundKey &k, void *result_ptr, RecordSchema* schema_ptr) {
+    bool InternalPage::internal_page_search(const DynamicCompoundKey &k, void *result_ptr, RecordSchema* index_schema_ptr) {
         SearchResult& result = *(SearchResult*)result_ptr;
-        assert(k >= GetLowest(schema_ptr));
+        assert(k >= GetLowest(index_schema_ptr));
 
 
         GlobalAddress target_global_ptr_buff;
@@ -16,11 +16,11 @@ namespace DSMEngine {
         //TOTHINK: how to make sure that concurrent write will not result in segfault,
         // such as out of buffer for cnt.
         auto cnt = hdr.last_index + 1;
-        if (k < GetRecordKeyByIndex(0, schema_ptr)) {
+        if (k < GetRecordKeyByIndex(0, index_schema_ptr)) {
             target_global_ptr_buff = hdr.leftmost_ptr;
             result.next_level = target_global_ptr_buff;
 #ifndef NDEBUG
-            DynamicCompoundKey first_key = GetRecordKeyByIndex(0, schema_ptr);
+            DynamicCompoundKey first_key = GetRecordKeyByIndex(0, index_schema_ptr);
             result.later_key = first_key;
             assert(k < first_key);
 #endif
@@ -37,7 +37,7 @@ namespace DSMEngine {
         //      If it is equal, it point to the frist one. If it is smaller, pointed to the last one.
         while (left < right) {
             mid = (left + right + 1) / 2;
-            DynamicCompoundKey mid_key = GetRecordKeyByIndex(mid, schema_ptr);
+            DynamicCompoundKey mid_key = GetRecordKeyByIndex(mid, index_schema_ptr);
             //TODO: return the first entry which equals to the target key.
             if (k > mid_key) {
                 // Key at "mid" is smaller than "target".  Therefore all
@@ -50,7 +50,7 @@ namespace DSMEngine {
             }else{
                 target_global_ptr_buff = GetRecordValueByIndex(mid);
                 result.next_level = target_global_ptr_buff;
-                assert(result.this_key <= k);
+//                assert(result.this_key <= k);
                 assert(result.next_level != GlobalAddress::Null());
                 return true;
             }
@@ -62,11 +62,12 @@ namespace DSMEngine {
         result.next_level = target_global_ptr_buff;
 #ifndef NDEBUG
         if (right < hdr.last_index){
-            result.this_key = GetRecordKeyByIndex(right, schema_ptr);
-            result.later_key = GetRecordKeyByIndex(right + 1, schema_ptr);
+            result.this_key = GetRecordKeyByIndex(right, index_schema_ptr);
+            result.later_key = GetRecordKeyByIndex(right + 1, index_schema_ptr);
         }else{
-            result.this_key = DynamicCompoundKey::MinValue();
-            result.later_key = GetHighest(schema_ptr);
+            assert(right == hdr.last_index);
+            result.this_key = GetRecordKeyByIndex(right, index_schema_ptr);
+            result.later_key = GetHighest(index_schema_ptr);
         }
 
 #endif
@@ -88,11 +89,11 @@ namespace DSMEngine {
     bool InternalPage::internal_page_store(GlobalAddress page_addr, const DynamicCompoundKey &k, GlobalAddress value, int level, RecordSchema* schema_ptr) {
         auto cnt = hdr.last_index + 1;
         assert(GetRecordValueByIndex(hdr.last_index) != GlobalAddress::Null());
-        assert(GetRecordKeyByIndex(hdr.last_index, schema_ptr) != DynamicCompoundKey::MinValue());
+        assert(GetRecordKeyByIndex(hdr.last_index, schema_ptr) != DynamicCompoundKey::MinValue(schema_ptr));
         assert(cnt != hdr.kCardinality);
         bool is_update = false;
         uint16_t insert_index = 0;
-//--------------------------------------------------
+        //--------------------------------------------------
         //binary search the btree node.
         uint16_t left = 0;
         uint16_t right = hdr.last_index;
@@ -141,7 +142,7 @@ namespace DSMEngine {
         cnt++;
         assert(hdr.last_index == last_index_prev + 1);
         assert(GetRecordValueByIndex(hdr.last_index) != GlobalAddress::Null());
-        assert(GetRecordKeyByIndex(hdr.last_index, schema_ptr)  != DynamicCompoundKey::MinValue());
+        assert(GetRecordKeyByIndex(hdr.last_index, schema_ptr)  != DynamicCompoundKey::MinValue(schema_ptr));
         return cnt == hdr.kCardinality;
     }
 
@@ -161,35 +162,46 @@ namespace DSMEngine {
         DynamicCompoundKey last_key = GetRecordKeyByIndex(hdr.last_index, record_scheme);
         assert(k < GetHighest(record_scheme) );
         assert(last_key < GetHighest(record_scheme));
-        assert(hdr.record_size == record_scheme->GetSchemaSize());
+        assert(hdr.record_size == record_scheme->GetRecordTotalSize());
 #endif
-        DynamicCompoundKey temp_key;
+        DynamicCompoundKey key_mid;
         while (left < right) {
             // Bias-free midpoint; safe for uint16_t range.
-            uint32_t mid = (left + ((right - left) >> 1));
+            mid = (left + right + 1) / 2;
+            key_mid = GetRecordKeyByIndex(mid, record_scheme);
 
-            DynamicCompoundKey key_mid = GetRecordKeyByIndex(mid, record_scheme);
-
-            // We want first key strictly greater than k.
-            // If key_mid <= k, discard [left, mid]; otherwise discard [mid+1, right).
-            if (key_mid < k) {
-                // key_mid <= k
-                left = (mid + 1);
-            } else {
-                // key_mid > k
-                right = mid;
+            if (k > key_mid) {
+                // Key at "mid" is smaller than "target".  Therefore all
+                // blocks before "mid" are uninteresting.
+                left = mid;
+            } else if (k < key_mid) {
+                // Key at "mid" is >= "target".  Therefore all blocks at or
+                // after "mid" are uninteresting.
+                right = mid - 1;
+                mid = right;
+            } else{
+                return mid;
             }
         }
+        assert(left == right);
+        assert(mid == right);
+        key_mid = GetRecordKeyByIndex(mid, record_scheme);
 
-        // Now left == right is the first i with key[i] >= k if left < n.
-        return (left < n) ? static_cast<int>(left) : -1;
+        if (k < key_mid && mid == 0) {
+
+           return -1;
+        } else{
+            assert(k >= key_mid);
+            return mid;
+        }
     }
 
     void LeafPage::GetDeepByPosition(int pos, RecordSchema *schema_ptr, DynamicCompoundKey &key, void* buff) {
         assert(pos >= 0);
         assert(pos <= hdr.last_index);
         void* tuple_ptr = GetRecordPtrByIndex(pos);
-        memcpy(&key,  tuple_ptr, hdr.key_size);
+        // The primary key of the record is always start from beginning and continuous.
+        memcpy(key.start,  tuple_ptr, hdr.key_size);
         memcpy(buff, tuple_ptr, hdr.record_size);
     }
     void LeafPage::GetShallowByPosition(int pos, RecordSchema *schema_ptr, DynamicCompoundKey &key, void*& buff) {
@@ -200,7 +212,7 @@ namespace DSMEngine {
     }
     void LeafPage::leaf_page_search(const DynamicCompoundKey &k, SearchResult &result, GlobalAddress g_page_ptr,
                                                RecordSchema *record_scheme) {
-        size_t tuple_length = record_scheme->GetSchemaSize();
+        size_t tuple_length = record_scheme->GetRecordTotalSize();
         char* tuple_start;
         uint16_t left = 0;
         // TODO: the code below will be false if we execute the leaf page delete multiple times.
@@ -235,13 +247,11 @@ namespace DSMEngine {
         // Not find or find on the first entry.
         assert(right == left);
         tuple_start = static_cast<char *>(GetRecordPtrByIndex(right)); //data_ + right * tuple_length;
-        auto r = Record(record_scheme,tuple_start);
         DynamicCompoundKey temp_key = GetRecordKeyByIndex(right, record_scheme);
-        r.GetPrimaryKey(&temp_key);
         if (k == temp_key){
             assert(right == 0);
-            assert(result.val.size() == r.GetRecordSize());
-            memcpy((void*)result.val.data(),r.data_ptr_, r.GetRecordSize());
+            assert(result.val.size() == record_scheme->GetRecordTotalSize());
+            memcpy((void*)result.val.data(),tuple_start, record_scheme->GetRecordTotalSize());
             result.find_value = true;
         }else{
             assert(k >temp_key);
@@ -250,16 +260,16 @@ namespace DSMEngine {
     }
     // [lowest, highest)
     bool LeafPage::leaf_page_store(const DynamicCompoundKey &k, const Slice &v, int &cnt,
-                                          RecordSchema *record_scheme) {
+                                          RecordSchema *index_schema) {
         cnt = hdr.last_index + 1;
         bool is_update = false;
         uint16_t insert_index = 0;
         assert(hdr.kCardinality > 0);
-        DynamicCompoundKey temp_key1 = GetRecordKeyByIndex(0, record_scheme);
-        assert(temp_key1 <= GetHighest(record_scheme));
-        assert(temp_key1 == GetLowest(record_scheme) || GetLowest(record_scheme) == DynamicCompoundKey::MinValue());
+        DynamicCompoundKey temp_key1 = GetRecordKeyByIndex(0, index_schema);
+        assert(temp_key1 <= GetHighest(index_schema));
+        assert(temp_key1 == GetLowest(index_schema) || GetLowest(index_schema) == DynamicCompoundKey::MinValue(index_schema));
         char* tuple_start;
-        assert(k >= temp_key1);
+        assert(k >= temp_key1 || GetLowest(index_schema) == DynamicCompoundKey::MinValue(index_schema));
         if (hdr.last_index == -1) {
 
             // this branc can only happen when the page is empty or the leafpage is the left most leaf page
@@ -271,7 +281,7 @@ namespace DSMEngine {
             uint16_t mid = 0;
             while (left < right) {
                 mid = (left + right + 1) / 2;
-                DynamicCompoundKey temp_key = GetRecordKeyByIndex(mid, record_scheme);
+                DynamicCompoundKey temp_key = GetRecordKeyByIndex(mid, index_schema);
                 if (k > temp_key) {
                     // Key at "mid" is smaller than "target".  Therefore all
                     // blocks before "mid" are uninteresting.
@@ -293,13 +303,16 @@ namespace DSMEngine {
             assert(left == right);
             mid = left;
 
-            DynamicCompoundKey temp_key = GetRecordKeyByIndex(left, record_scheme);
+            DynamicCompoundKey temp_key = GetRecordKeyByIndex(left, index_schema);
             tuple_start = static_cast<char*>(GetRecordPtrByIndex(left));
-            if ((k != temp_key )){
-                assert(k > temp_key);
+            if ((k > temp_key )){
                 insert_index = left +1;
+            } else if (k < temp_key){
+                // this node has to be the leftmost one.
+                assert(GetLowest(index_schema) == DynamicCompoundKey::MinValue(index_schema));
+                assert(left == 0);
+                insert_index = 0;
             }else{
-
                     assert(v.size() == hdr.record_size);
                     memcpy(temp_key.start, v.data(), hdr.record_size);
                     is_update = true;
@@ -319,12 +332,12 @@ namespace DSMEngine {
         if (insert_index <= hdr.last_index){
             // Move all the tuples at and after the insert_index,use memmove to avoid undefined behavior for overlapped address.
             memmove(tuple_start + hdr.record_size, tuple_start, (hdr.last_index - insert_index+1)*hdr.record_size);
-            auto r = Record(record_scheme,tuple_start);
+            auto r = Record(index_schema, tuple_start);
             assert(v.size() == r.GetRecordSize());
             r.FillRecord(v.data_reference(), v.size());
         }else{
             assert(insert_index < hdr.kCardinality );
-            auto r = Record(record_scheme,tuple_start);
+            auto r = Record(index_schema, tuple_start);
             assert(v.size() == r.GetRecordSize());
             r.FillRecord(v.data_reference(), v.size());
         }
@@ -335,7 +348,7 @@ namespace DSMEngine {
         // If the page get inserted, then the dirty range is the whole page, or flush to the end of tuple_start + (last_Index+1)*r.GetRecordSize()
         hdr.merge_dirty_bounds(sizeof(uint64_t), kLeafPageSize);
 #endif
-        assert(temp_key1 <= GetHighest(record_scheme));
+        assert(temp_key1 <= GetHighest(index_schema));
         return cnt == hdr.kCardinality;
     }
     // [lowest, highest)
@@ -349,7 +362,7 @@ namespace DSMEngine {
         cnt = hdr.last_index + 1;
         uint16_t insert_index = 0;
         assert(hdr.kCardinality > 0);
-        uint32_t tuple_length = record_scheme->GetSchemaSize();
+        uint32_t tuple_length = record_scheme->GetRecordTotalSize();
         assert(tuple_length == hdr.record_size);
 
 
@@ -422,7 +435,7 @@ namespace DSMEngine {
     }
 
     bool DataPage::InsertRecord(const Slice &tuple, int &cnt, RecordSchema *record_scheme, GlobalAddress& g_addr) {
-        int tuple_length = record_scheme->GetSchemaSize();
+        int tuple_length = record_scheme->GetRecordTotalSize();
         uint32_t bitmap_size = (hdr.kDataCardinality + 63) / 64;
         auto* bitmap = (uint64_t*)data_;
         char* data_start = data_ + bitmap_size*8;
@@ -441,7 +454,7 @@ namespace DSMEngine {
     }
 
     bool DataPage::AllocateRecord(int &cnt, RecordSchema *record_scheme, GlobalAddress &g_addr, char *&data_buffer) {
-        int tuple_length = record_scheme->GetSchemaSize();
+        int tuple_length = record_scheme->GetRecordTotalSize();
         uint32_t bitmap_size = (hdr.kDataCardinality + 63) / 64;
         bitmap_size*=8;
         auto* bitmap = (uint64_t*)data_;
@@ -497,7 +510,7 @@ namespace DSMEngine {
 
     bool DataPage::DeleteRecord(GlobalAddress g_addr, RecordSchema *record_scheme) {
         assert(g_addr.nodeID == hdr.this_page_g_ptr.nodeID);
-        int tuple_length = record_scheme->GetSchemaSize();
+        int tuple_length = record_scheme->GetRecordTotalSize();
         uint32_t bitmap_size = (hdr.kDataCardinality + 63) / 64;
         bitmap_size*=8;
         size_t page_offset = g_addr.offset - hdr.this_page_g_ptr.offset - bitmap_size - STRUCT_OFFSET(DataPage, data_);

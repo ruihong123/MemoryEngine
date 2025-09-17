@@ -46,8 +46,8 @@ namespace DSMEngine {
             page_hint = nullptr;
             find_value = false;
 #ifndef NDEBUG
-            this_key = DynamicCompoundKey::MinValue();
-            later_key = DynamicCompoundKey::MinValue();
+//            this_key = DynamicCompoundKey::MinValue();
+//            later_key = DynamicCompoundKey::MinValue();
 #endif
         }
     };
@@ -160,6 +160,7 @@ namespace DSMEngine {
             SetRecordByIndex(0, DynamicCompoundKey::MinValue(schema), GlobalAddress::Null(), schema);
             assert(this_page_g_ptr != GlobalAddress::Null());
             hdr.this_page_g_ptr = this_page_g_ptr;
+            hdr.kCardinality = calculate_cardinality(kInternalPageSize, schema);
             SetHighest(DynamicCompoundKey::MaxValue(schema), schema);
             SetLowest(DynamicCompoundKey::MinValue(schema), schema);
         }
@@ -181,6 +182,14 @@ namespace DSMEngine {
             char *data_ptr = data_ + 2 * key_size;
             char *target_ptr = data_ptr + index * record_size;
             return {target_ptr, schema};
+        }
+        void GetRecordKeyByIndex_DeepCopy(int index, DynamicCompoundKey dest) {
+            assert(hdr.key_size > 0 && hdr.record_size > 0);
+            uint16_t key_size = hdr.key_size;
+            uint64_t record_size = hdr.record_size;
+            char *data_ptr = data_ + 2 * key_size;
+            char *from_ptr = data_ptr + index * record_size;
+            std::memcpy(dest.start, from_ptr, key_size);
         }
 
         GlobalAddress GetRecordValueByIndex(int index) {
@@ -219,7 +228,7 @@ namespace DSMEngine {
             return (page_size - STRUCT_OFFSET(InternalPage, data_[0]) - 2 * key_size - sizeof(uint8_t)) / record_size;
         }
 
-        bool internal_page_search(const DynamicCompoundKey &k, void *result_ptr, RecordSchema *schema_ptr);
+        bool internal_page_search(const DynamicCompoundKey &k, void *result_ptr, RecordSchema *index_schema_ptr);
 
         bool internal_page_store(GlobalAddress page_addr, const DynamicCompoundKey &k, GlobalAddress value, int level,
                                  RecordSchema *schema_ptr);
@@ -240,7 +249,7 @@ namespace DSMEngine {
             hdr.p_type = P_Leaf_P;
             hdr.level = level;
             hdr.key_size = schema->GetPrimaryKeyLength();
-            hdr.record_size = schema->GetSchemaSize();
+            hdr.record_size = schema->GetRecordTotalSize();
             hdr.this_page_g_ptr = this_page_g_ptr;
             hdr.kCardinality = leaf_cardinality;
             SetHighest(DynamicCompoundKey::MaxValue(schema), schema);
@@ -294,7 +303,7 @@ namespace DSMEngine {
         }
 
         static uint64_t calculate_cardinality(uint64_t page_size, RecordSchema *scheme) {
-            uint64_t record_size = scheme->GetSchemaSize();
+            uint64_t record_size = scheme->GetRecordTotalSize();
             uint64_t key_size = scheme->GetPrimaryKeyLength();
             // the last uint8_t is for the page forward checking. 2*key_size is for the hidden upperbound and lowerbound.
             return (page_size - STRUCT_OFFSET(LeafPage, data_[0]) - 2 * key_size - sizeof(uint8_t)) / record_size;
@@ -304,6 +313,8 @@ namespace DSMEngine {
                               RecordSchema *record_scheme);
 
         // search by lowerbound ( the range should include the target key). iter.Getkey <= k (target key is included)
+        // note: we can not modify it to be set at the first key that is >= k, becuase it is possible that the returned index
+        // can exceed the last index.
         int leaf_page_pos_lb(const DynamicCompoundKey &k, RecordSchema *record_scheme);
 
         int leaf_page_find_pos_ub(const DynamicCompoundKey &k, SearchResult &result, RecordSchema *record_scheme);
@@ -313,7 +324,7 @@ namespace DSMEngine {
         void GetShallowByPosition(int pos, RecordSchema *schema_ptr, DynamicCompoundKey &key, void *&buff);
 
         // if node is full return true, if not full return false.
-        bool leaf_page_store(const DynamicCompoundKey &k, const Slice &v, int &cnt, RecordSchema *record_scheme);
+        bool leaf_page_store(const DynamicCompoundKey &k, const Slice &v, int &cnt, RecordSchema *index_schema);
 
         // if need merge return true, if not needed return false.
         bool leaf_page_delete(const DynamicCompoundKey &k, int &cnt, SearchResult &result, RecordSchema *record_scheme);
@@ -385,7 +396,7 @@ namespace DSMEngine {
         }
 
         static uint64_t calculate_cardinality(uint64_t page_size, uint64_t record_size) {
-//            8ull*(kLeafPageSize - STRUCT_OFFSET(DataPage, data_[0]) - 8) / (8ull*schema_ptr_->GetSchemaSize() +1);
+//            8ull*(kLeafPageSize - STRUCT_OFFSET(DataPage, data_[0]) - 8) / (8ull*schema_ptr_->GetRecordTotalSize() +1);
             return 8ull * (page_size - STRUCT_OFFSET(DataPage, data_[0]) - sizeof(uint64_t) - sizeof(uint8_t)) /
                    (8ull * record_size + 1);
         }
