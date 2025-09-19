@@ -37,13 +37,15 @@ int main(int argc,char* argv[])
 //     DSMEngine::RDMA_Manager::node_id = 2* Memory_server_id + 1;
   }else{
       struct DSMEngine::config_t config = {
-              NULL,  /* dev_name */
-              NULL,  /* server_name */
-              19843, /* tcp_port */
-              1,	 /* ib_port */
-              1, /* gid_idx */
-              0,
-              1};
+              .dev_name = NULL,  /* dev_name */
+              .server_name = NULL,  /* server_name */
+              .tcp_port = 19843, /* tcp_port */
+              .ib_port = 1,	 /* ib_port */
+              .gid_idx = 1, /* gid_idx */
+              .init_local_buffer_size = 0,
+              .node_id = 1,
+              .replication_num = 3
+      };
     mn_keeper = new DSMEngine::Memory_Node_Keeper(true, 19843, 88, config);
 //    DSMEngine::RDMA_Manager::node_id = 1;
   }
