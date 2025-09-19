@@ -92,11 +92,13 @@ namespace DSMEngine{
 
 //        default_gallocator->SELCC_Exclusive_Lock_noread(page_buffer, gcl_addr, handle);
         }
+        // we can not insert the record and make it visible here, because we need to revert it when the transaction aborts.
+        // Instead, we shall insert the index during the commit so that we don't need to revert the index insertion when the transaction aborts.
         bool TransactionManager::InsertRecord(size_t table_id,
                                               const DynamicCompoundKey keys,
                                               size_t key_num, Record *record,
                                               Cache::Handle *handle,
-                                              const GlobalAddress tuple_gaddr) {
+                                              const GlobalAddress tuple_gaddr) const {
 
 //			record->is_visible_ = false;
             PROFILE_TIME_START(thread_id_, INDEX_INSERT);
@@ -198,7 +200,21 @@ namespace DSMEngine{
                 // TODO: ROll back old version of the data.
                 MetaColumn meta = record->GetMeta();
                 GlobalAddress prev_delta = meta.prev_delta_;
+                // todo: if this record is new inserted by an ongoing tranaction, the prev_delta is null, we can simply abort this transaction.
+                // actually, this should never happen in TPC-C benchmark.
+                if (prev_delta == GlobalAddress::Null()) {
+                    assert(false);
+                    if (access_type == READ_ONLY) {
+                        default_gallocator->SELCC_Shared_UnLock(page_gaddr, handle);
+                    } else  {
+                        //Read_Write, Delete_Only, Insert_Only
+                        default_gallocator->SELCC_Exclusive_UnLock(page_gaddr, handle);
+                    }
+                    AbortTransaction();
+                    return false;
+                }
                 assert(prev_delta != GlobalAddress::Null());
+
                 // implement a mechanism to detect whether the local copy of delta section is up to date.
                 // if not, we need to fetch the latest version of the delta section.
 
@@ -326,7 +342,8 @@ namespace DSMEngine{
             sorted_access.insert({g_addr, access});
         }
 //        uint64_t commit_ts = GlobalTimestamp::FetchAddMonotoneTimestamp();
-        // First let us check whether the transaciton need to abort. (validate stage)
+        // -----------------(validate stage)----------------------------------------------
+        // First let us check whether the transaciton need to abort.
         if (!pure_read_txn){
             for (auto iter : sorted_access){
                 Access* access = iter.second;
@@ -413,10 +430,11 @@ namespace DSMEngine{
                 }
             }
         }
+        // -----------------(commit stage)----------------------------------------------
         // get the commit timestamp right before the commit phase.
         uint64_t commit_ts = GlobalTimestamp::FetchAddMonotoneTimestamp();
 
-        // Then let us write the data and commit. (commit stage)
+        // Then let us write the data and commit.
         for (size_t i = 0; i < access_list_.access_count_; ++i) {
             Access* access = access_list_.GetAccess(i);
             AccessType access_type = access->access_type_;
@@ -460,9 +478,10 @@ namespace DSMEngine{
 //                access->txn_local_tuple_->GetPrimaryKey(&keys[0]);
                 RecordSchema *index_schema_ptr = storage_manager_->tables_[access->access_global_record_->GetTableId()]->GetPrimaryIndexSchema();
                 char* primaryk_buff = new char[access->txn_local_tuple_->schema_ptr_->GetPrimaryKeyLength()];
+                access->txn_local_tuple_->GetPrimaryKey(primaryk_buff);
                 DynamicCompoundKey primary_key(primaryk_buff, index_schema_ptr);
                 storage_manager_->tables_[access->txn_local_tuple_->schema_ptr_->GetTableId()]->InsertPriIndex(primary_key, 1, access->access_addr_);
-
+                delete[] primaryk_buff;
             }
             delete access->access_global_record_;
             access->access_global_record_ = nullptr;

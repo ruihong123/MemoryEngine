@@ -340,14 +340,12 @@ namespace DSMEngine {
         GlobalAddress this_page_g_ptr;
         // =============================
         int32_t number_of_records;
-
-        friend class RDMA_Manager;
-
-        friend class DataPage;
-
         uint32_t kDataCardinality;
         uint32_t table_id;
+        uint64_t lsn_;
 
+        friend class RDMA_Manager;
+        friend class DataPage;
         Header() {
             dirty_upper_bound = 0;
             dirty_lower_bound = 0;

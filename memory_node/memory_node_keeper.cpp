@@ -29,22 +29,7 @@ DSMEngine::Memory_Node_Keeper::Memory_Node_Keeper(bool use_sub_compaction, uint3
 //    size_t table_size = 16*1024;
     size_t table_size = kLeafPageSize;
     rdma_mg = std::make_shared<RDMA_Manager>(config, table_size); //set memory server node id as 1.
-//    rdma_mg = new RDMA_Manager(config, table_size);
-//    rdma_mg->Mempool_initialize(FlushBuffer, RDMA_WRITE_BLOCK, 0);
-//    rdma_mg->Mempool_initialize(FilterChunk, FILTER_BLOCK, 0);
-//    rdma_mg->Mempool_initialize(IndexChunk, INDEX_BLOCK, 0);
-    //TODO: actually we don't need Prefetch buffer.
-//    rdma_mg->Mempool_initialize(std::string("Prefetch"), RDMA_WRITE_BLOCK);
-    //TODO: add a handle function for the option value to get the non-default bloombits.
-//    opts->filter_policy = new InternalFilterPolicy(NewBloomFilterPolicy(opts->bloom_bits));
-//    opts->comparator = &internal_comparator_;
-//    ClipToRange(&opts->max_open_files, 64 + kNumNonTableCacheFiles, 50000);
-//    ClipToRange(&opts->write_buffer_size, 64 << 10, 1 << 30);
-//    ClipToRange(&opts->max_file_size, 1 << 20, 1 << 30);
-//    ClipToRange(&opts->block_size, 1 << 10, 4 << 20);
     Compactor_pool_.SetBackgroundThreads(0);
-//    Message_handler_pool_.SetBackgroundThreads(2);
-//    Persistency_bg_pool_.SetBackgroundThreads(1);
 
     // Set up the connection information.
     std::string connection_conf;

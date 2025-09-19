@@ -89,8 +89,9 @@ namespace DSMEngine {
                     // SELECT O_C_ID  FROM TPCCConstants.TABLENAME_OPENORDER WHERE O_ID = ? AND O_D_ID = ? AND O_W_ID = ?
                     // UPDATE " + TPCCConstants.TABLENAME_OPENORDER + " SET O_CARRIER_ID = ? WHERE O_ID = ? AND O_D_ID = ? AND O_W_ID = ?
                     DynamicCompoundKey order_key = GetOrderPrimaryKey(no_o_ids[no_d_id - 1], no_d_id,
-                                                                      delivery_param->w_id_, transaction_manager_->GetPrimaryIndexSchema(
-                                    ORDER_TABLE_ID));
+                                                                      delivery_param->w_id_,
+                                                                      transaction_manager_->GetPrimaryIndexSchema(
+                                                                              ORDER_TABLE_ID));
                     Record *order_record = nullptr;
                     DB_QUERY(
                             SearchRecord(ORDER_TABLE_ID, order_key, order_record, READ_WRITE));
@@ -116,8 +117,9 @@ namespace DSMEngine {
                     double sum = 0, tmp = 0;
                     for (int i = 1; i < no_o_ol_cnt[no_d_id - 1] + 1; ++i) {
                         DynamicCompoundKey order_line_key = GetOrderLinePrimaryKey(no_o_ids[no_d_id - 1], no_d_id,
-                                                                                   delivery_param->w_id_, i, transaction_manager_->GetPrimaryIndexSchema(
-                                        ORDER_LINE_TABLE_ID));
+                                                                                   delivery_param->w_id_, i,
+                                                                                   transaction_manager_->GetPrimaryIndexSchema(
+                                                                                           ORDER_LINE_TABLE_ID));
                         Record *order_line_record = nullptr;
                         DB_QUERY(SearchRecord(ORDER_LINE_TABLE_ID, order_line_key,
                                               order_line_record, READ_WRITE));
@@ -140,8 +142,9 @@ namespace DSMEngine {
                     }
                     // "updateCustomer": "UPDATE CUSTOMER SET C_BALANCE = C_BALANCE + ? WHERE C_ID = ? AND C_D_ID = ? AND C_W_ID = ?"
                     DynamicCompoundKey customer_key = GetCustomerPrimaryKey(c_ids[no_d_id - 1], no_d_id,
-                                                                            delivery_param->w_id_, transaction_manager_->GetPrimaryIndexSchema(
-                                    CUSTOMER_TABLE_ID));
+                                                                            delivery_param->w_id_,
+                                                                            transaction_manager_->GetPrimaryIndexSchema(
+                                                                                    CUSTOMER_TABLE_ID));
                     Record *customer_record = nullptr;
                     DB_QUERY(SearchRecord(CUSTOMER_TABLE_ID, customer_key, customer_record,
                                           READ_WRITE));
@@ -224,8 +227,9 @@ namespace DSMEngine {
                     int ol_supply_w_id = new_order_param->i_w_ids_[i];
                     // "getStockInfo": "SELECT S_QUANTITY, S_DATA, S_YTD, S_ORDER_CNT, S_REMOTE_CNT, S_DIST_%02d FROM STOCK WHERE S_I_ID = ? AND S_W_ID = ?"
                     // "updateStock": "UPDATE STOCK SET S_QUANTITY = ?, S_YTD = ?, S_ORDER_CNT = ?, S_REMOTE_CNT = ? WHERE S_I_ID = ? AND S_W_ID = ?"
-                    DynamicCompoundKey stock_key = GetStockPrimaryKey(ol_i_id, ol_supply_w_id,transaction_manager_->GetPrimaryIndexSchema(
-                            STOCK_TABLE_ID));
+                    DynamicCompoundKey stock_key = GetStockPrimaryKey(ol_i_id, ol_supply_w_id,
+                                                                      transaction_manager_->GetPrimaryIndexSchema(
+                                                                              STOCK_TABLE_ID));
                     Record *stock_record = nullptr;
                     //DB_QUERY(SearchRecord(&context_, STOCK_TABLE_ID, stock_key, stock_record, READ_WRITE));
                     DB_QUERY(SearchRecord(
@@ -265,8 +269,9 @@ namespace DSMEngine {
 #endif
                 }
                 // "getWarehouseTaxRate": "SELECT W_TAX FROM WAREHOUSE WHERE W_ID = ?"
-                DynamicCompoundKey warehouse_key = GetWarehousePrimaryKey(new_order_param->w_id_, transaction_manager_->GetPrimaryIndexSchema(
-                        WAREHOUSE_TABLE_ID));
+                DynamicCompoundKey warehouse_key = GetWarehousePrimaryKey(new_order_param->w_id_,
+                                                                          transaction_manager_->GetPrimaryIndexSchema(
+                                                                                  WAREHOUSE_TABLE_ID));
                 Record *warehouse_record = nullptr;
                 DB_QUERY(SearchRecord(WAREHOUSE_TABLE_ID, warehouse_key, warehouse_record,
                                       (AccessType) new_order_param->warehouse_access_type_));
@@ -280,8 +285,9 @@ namespace DSMEngine {
                 // "getDistrict": "SELECT D_TAX, D_NEXT_O_ID FROM DISTRICT WHERE D_ID = ? AND D_W_ID = ?"
                 // "incrementNextOrderId": "UPDATE DISTRICT SET D_NEXT_O_ID = ? WHERE D_ID = ? AND D_W_ID = ?"
                 DynamicCompoundKey district_key = GetDistrictPrimaryKey(new_order_param->d_id_,
-                                                                        new_order_param->w_id_, transaction_manager_->GetPrimaryIndexSchema(
-                                DISTRICT_TABLE_ID));
+                                                                        new_order_param->w_id_,
+                                                                        transaction_manager_->GetPrimaryIndexSchema(
+                                                                                DISTRICT_TABLE_ID));
                 Record *district_record = nullptr;
                 DB_QUERY(SearchRecord(DISTRICT_TABLE_ID, district_key, district_record,
                                       (AccessType) new_order_param->district_access_type_));
@@ -304,8 +310,9 @@ namespace DSMEngine {
                 // "getCustomer": "SELECT C_DISCOUNT, C_LAST, C_CREDIT FROM CUSTOMER WHERE C_W_ID = ? AND C_D_ID = ? AND C_ID = ?"
                 DynamicCompoundKey customer_key = GetCustomerPrimaryKey(new_order_param->c_id_,
                                                                         new_order_param->d_id_,
-                                                                        new_order_param->w_id_, transaction_manager_->GetPrimaryIndexSchema(
-                                CUSTOMER_TABLE_ID));
+                                                                        new_order_param->w_id_,
+                                                                        transaction_manager_->GetPrimaryIndexSchema(
+                                                                                CUSTOMER_TABLE_ID));
                 Record *customer_record = nullptr;
                 DB_QUERY(SearchRecord(CUSTOMER_TABLE_ID, customer_key, customer_record,
                                       (AccessType) new_order_param->customer_access_type_));
@@ -346,8 +353,9 @@ namespace DSMEngine {
 //    }
                 DynamicCompoundKey new_order_key = GetNewOrderPrimaryKey(d_next_o_id,
                                                                          new_order_param->d_id_,
-                                                                         new_order_param->w_id_, transaction_manager_->GetPrimaryIndexSchema(
-                                NEW_ORDER_TABLE_ID));
+                                                                         new_order_param->w_id_,
+                                                                         transaction_manager_->GetPrimaryIndexSchema(
+                                                                                 NEW_ORDER_TABLE_ID));
                 DB_QUERY(InsertRecord(NEW_ORDER_TABLE_ID, new_order_key, 1,
                                       new_order_record, new_order_handle, new_order_gaddr));
 
@@ -384,8 +392,9 @@ namespace DSMEngine {
 //      order_record->Serialize(order_addr, gallocators[thread_id_]);
 //    }
                 DynamicCompoundKey order_key = GetOrderPrimaryKey(d_next_o_id, new_order_param->d_id_,
-                                                                  new_order_param->w_id_, transaction_manager_->GetPrimaryIndexSchema(
-                                ORDER_TABLE_ID));
+                                                                  new_order_param->w_id_,
+                                                                  transaction_manager_->GetPrimaryIndexSchema(
+                                                                          ORDER_TABLE_ID));
                 DB_QUERY(InsertRecord(ORDER_TABLE_ID, order_key, 1, order_record,
                                       order_handle, order_gaddr));
 
@@ -423,8 +432,9 @@ namespace DSMEngine {
                     DynamicCompoundKey order_line_key = GetOrderLinePrimaryKey(d_next_o_id,
                                                                                new_order_param->d_id_,
                                                                                new_order_param->w_id_,
-                                                                               ol_number, transaction_manager_->GetPrimaryIndexSchema(
-                                    ORDER_LINE_TABLE_ID));
+                                                                               ol_number,
+                                                                               transaction_manager_->GetPrimaryIndexSchema(
+                                                                                       ORDER_LINE_TABLE_ID));
                     //order_line_keys[1] = GetOrderLineSecondaryKey(d_next_o_id, new_order_param->d_id_, new_order_param->w_id_);
                     DB_QUERY(InsertRecord(ORDER_LINE_TABLE_ID, order_line_key, 1,
                                           order_line_record, order_line_handle,
@@ -462,8 +472,9 @@ namespace DSMEngine {
                 // "getWarehouse": "SELECT W_NAME, W_STREET_1, W_STREET_2, W_CITY, W_STATE, W_ZIP FROM WAREHOUSE WHERE W_ID = ?"
                 // "updateWarehouseBalance": "UPDATE WAREHOUSE SET W_YTD = W_YTD + ? WHERE W_ID = ?"
 
-                DynamicCompoundKey warehouse_key = GetWarehousePrimaryKey(payment_param->w_id_, transaction_manager_->GetPrimaryIndexSchema(
-                        WAREHOUSE_TABLE_ID));
+                DynamicCompoundKey warehouse_key = GetWarehousePrimaryKey(payment_param->w_id_,
+                                                                          transaction_manager_->GetPrimaryIndexSchema(
+                                                                                  WAREHOUSE_TABLE_ID));
                 Record *warehouse_record = nullptr;
                 DB_QUERY(SearchRecord(WAREHOUSE_TABLE_ID, warehouse_key, warehouse_record,
                                       READ_WRITE));
@@ -481,8 +492,9 @@ namespace DSMEngine {
                 // "getDistrict": "SELECT D_NAME, D_STREET_1, D_STREET_2, D_CITY, D_STATE, D_ZIP FROM DISTRICT WHERE D_W_ID = ? AND D_ID = ?"
                 // "updateDistrictBalance": "UPDATE DISTRICT SET D_YTD = D_YTD + ? WHERE D_W_ID  = ? AND D_ID = ?"
                 DynamicCompoundKey district_key = GetDistrictPrimaryKey(payment_param->d_id_,
-                                                                        payment_param->w_id_, transaction_manager_->GetPrimaryIndexSchema(
-                                DISTRICT_TABLE_ID));
+                                                                        payment_param->w_id_,
+                                                                        transaction_manager_->GetPrimaryIndexSchema(
+                                                                                DISTRICT_TABLE_ID));
                 Record *district_record = nullptr;
                 DB_QUERY(SearchRecord(DISTRICT_TABLE_ID, district_key, district_record,
                                       READ_WRITE));
@@ -507,8 +519,9 @@ namespace DSMEngine {
                     // "getCustomerByCustomerId": "SELECT C_ID, C_FIRST, C_MIDDLE, C_LAST, C_STREET_1, C_STREET_2, C_CITY, C_STATE, C_ZIP, C_PHONE, C_SINCE, C_CREDIT, C_CREDIT_LIM, C_DISCOUNT, C_BALANCE, C_YTD_PAYMENT, C_PAYMENT_CNT, C_DATA FROM CUSTOMER WHERE C_W_ID = ? AND C_D_ID = ? AND C_ID = ?"
                     DynamicCompoundKey customer_key = GetCustomerPrimaryKey(payment_param->c_id_,
                                                                             payment_param->c_d_id_,
-                                                                            payment_param->c_w_id_, transaction_manager_->GetPrimaryIndexSchema(
-                                    CUSTOMER_TABLE_ID));
+                                                                            payment_param->c_w_id_,
+                                                                            transaction_manager_->GetPrimaryIndexSchema(
+                                                                                    CUSTOMER_TABLE_ID));
                     DB_QUERY(SearchRecord(CUSTOMER_TABLE_ID, customer_key, customer_record,
                                           READ_WRITE));
                 }
@@ -556,8 +569,9 @@ namespace DSMEngine {
 //    }
                 DynamicCompoundKey history_key = GetHistoryPrimaryKey(payment_param->c_id_,
                                                                       payment_param->d_id_,
-                                                                      payment_param->w_id_, transaction_manager_->GetPrimaryIndexSchema(
-                                HISTORY_TABLE_ID));
+                                                                      payment_param->w_id_,
+                                                                      transaction_manager_->GetPrimaryIndexSchema(
+                                                                              HISTORY_TABLE_ID));
                 DB_QUERY(InsertRecord(HISTORY_TABLE_ID, history_key, 1, history_record,
                                       history_handle, history_gaddr));
 
@@ -587,8 +601,9 @@ namespace DSMEngine {
                 //    "getLastOrder": "SELECT O_ID, O_CARRIER_ID, O_ENTRY_D FROM ORDERS WHERE O_W_ID = ? AND O_D_ID = ? AND O_C_ID = ? ORDER BY O_ID DESC LIMIT 1"
                 // Use c_id to replace o_id to avoid the secondary , c_id is guaranteed to be smaller than district next o ID.
                 DynamicCompoundKey order_key = GetOrderPrimaryKey(order_status_param->c_id_, order_status_param->d_id_,
-                                                                  order_status_param->w_id_, transaction_manager_->GetPrimaryIndexSchema(
-                                ORDER_TABLE_ID));
+                                                                  order_status_param->w_id_,
+                                                                  transaction_manager_->GetPrimaryIndexSchema(
+                                                                          ORDER_TABLE_ID));
                 Record *order_record = nullptr;
 
                 DB_QUERY(SearchRecord(ORDER_TABLE_ID, order_key, order_record, READ_ONLY));
@@ -611,8 +626,9 @@ namespace DSMEngine {
                     DynamicCompoundKey order_line_key = GetOrderLinePrimaryKey(o_id,
                                                                                order_status_param->d_id_,
                                                                                order_status_param->w_id_,
-                                                                               i, transaction_manager_->GetPrimaryIndexSchema(
-                                    ORDER_LINE_TABLE_ID));
+                                                                               i,
+                                                                               transaction_manager_->GetPrimaryIndexSchema(
+                                                                                       ORDER_LINE_TABLE_ID));
                     DB_QUERY(SearchRecord(ORDER_LINE_TABLE_ID, order_line_key,
                                           order_line_record, READ_ONLY));
                     int i_id = 0;
@@ -645,8 +661,9 @@ namespace DSMEngine {
                 StockLevelParam *stock_level_param = static_cast<StockLevelParam *>(param);
 //     "getOId": "SELECT D_NEXT_O_ID FROM DISTRICT WHERE D_W_ID = ? AND D_ID = ?"
                 DynamicCompoundKey district_key = GetDistrictPrimaryKey(stock_level_param->d_id_,
-                                                                        stock_level_param->w_id_, transaction_manager_->GetPrimaryIndexSchema(
-                                DISTRICT_TABLE_ID));
+                                                                        stock_level_param->w_id_,
+                                                                        transaction_manager_->GetPrimaryIndexSchema(
+                                                                                DISTRICT_TABLE_ID));
                 Record *district_record = nullptr;
                 DB_QUERY(SearchRecord(DISTRICT_TABLE_ID, district_key, district_record,
                                       READ_ONLY));
@@ -663,11 +680,11 @@ namespace DSMEngine {
                 for (int o_id = d_next_o_id - 5; o_id < d_next_o_id; ++o_id) {
                     // "getStockCount": "SELECT COUNT(DISTINCT(OL_I_ID)) FROM ORDER_LINE, STOCK WHERE OL_W_ID = ? AND OL_D_ID = ? AND OL_O_ID < ? AND OL_O_ID >= ? AND S_W_ID = ? AND S_I_ID = OL_I_ID AND S_QUANTITY < ?"
                     DynamicCompoundKey order_key = GetOrderPrimaryKey(o_id, stock_level_param->d_id_,
-                                                                      stock_level_param->w_id_, transaction_manager_->GetPrimaryIndexSchema(
-                                    ORDER_TABLE_ID));
+                                                                      stock_level_param->w_id_,
+                                                                      transaction_manager_->GetPrimaryIndexSchema(
+                                                                              ORDER_TABLE_ID));
                     Record *order_record = nullptr;
-                    DB_QUERY(
-                            SearchRecord(ORDER_TABLE_ID, order_key, order_record, READ_ONLY));
+                    DB_QUERY(SearchRecord(ORDER_TABLE_ID, order_key, order_record, READ_ONLY));
                     //It is possible that the new order first modify the district next o id, but the real new order was not inserted to the DB yet.
                     if (!order_record) {
                         transaction_manager_->AbortTransaction();

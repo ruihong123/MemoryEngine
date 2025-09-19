@@ -129,7 +129,7 @@ class TransactionManager {
 
   bool InsertRecord(size_t table_id, const DynamicCompoundKey keys, size_t key_num,
                     Record *record, Cache::Handle *handle,
-                    const GlobalAddress tuple_gaddr);
+                    const GlobalAddress tuple_gaddr) const;
   // Merge the Latch and unlatch request for tuples within the same global cache line.
   bool AcquireLatchForTuple(char*& tuple_buffer,GlobalAddress tuple_gaddr, AccessType access_type);
   bool AcquireXLatchForTuple(char *&tuple_buffer, GlobalAddress tuple_gaddr, Cache::Handle*& handle);
