@@ -18,6 +18,7 @@
 #include <sstream>
 #include <arpa/inet.h>
 #include <infiniband/verbs.h>
+#include <libmemcached/memcached.h>
 #include <netdb.h>
 #include <sys/socket.h>
 #include <sys/time.h>
@@ -45,13 +46,20 @@
 #if __BYTE_ORDER == __LITTLE_ENDIAN
 #elif __BYTE_ORDER == __BIG_ENDIAN
 static inline uint64_t htonll(uint64_t x) { return x; }
-static inline uint64_t ntohll(uint64_t x) { return x; }
+  static inline uint64_t ntohll(uint64_t x) { return x; }
 #else
 #error __BYTE_ORDER is neither __LITTLE_ENDIAN nor __BIG_ENDIAN
 #endif
 #define RDMA_WRITE_BLOCK  (8*1024*1024)
 #define INDEX_BLOCK  (8*1024*1024)
 #define FILTER_BLOCK  (2*1024*1024)
+// Replication strategy macros
+#define REPLICA_WRITE_PRIMARY_ONLY 0    // Write to primary only
+#define REPLICA_WRITE_ALL 1             // Write to all replicas (default)
+#define REPLICA_WRITE_PRIMARY_ASYNC 2   // Write to primary + async replication
+#define REPLICA_WRITE_MAJORITY 3        // Write to majority
+#define REPLICA_TYPE REPLICA_WRITE_ALL  // Current replication strategy
+
 namespace DSMEngine {
     class Cache;
 
@@ -63,7 +71,20 @@ namespace DSMEngine {
     static const char *EnumStrings[] = {"Internal_and_Leaf", "LockTable", "Message", "Version_edit", "IndexChunk",
                                         "FilterChunk", "FlushBuffer", "DataChunk"};
 
-    static char config_file_name[100] = "../connection.conf";
+    static char config_file_name[100] = "../connection_replication.conf";
+
+    // Physical node info for a logical region
+    struct PhysicalRegion {
+        uint16_t phys_id;     // physical node ID
+        uint64_t base_ptr;    // base pointer/offset on this physical node
+        uint32_t rkey;        // remote key for RDMA operations
+    };
+
+    // Logical memory group for replication with size support
+    struct LogicalGroup {
+        std::vector<PhysicalRegion> physical_regions; // primary first
+        uint64_t bytes{0};   // region size (0 = unspecified)
+    };
 
     struct config_t {
         const char *dev_name;    /* IB device name */
@@ -460,74 +481,74 @@ namespace DSMEngine {
             uint32_t counter = 0;
 #else
             uint32_t head = 0;
-            uint32_t tail = 0;
-            size_t max_size = ATOMIC_OUTSTANDING_SIZE;
+        uint32_t tail = 0;
+        size_t max_size = ATOMIC_OUTSTANDING_SIZE;
 #ifndef NDEBUG
-            uint32_t issued_counter = 0;
-            uint32_t signalled_counter = 0;
-            std::vector<uint16_t > polled_number;
+        uint32_t issued_counter = 0;
+        uint32_t signalled_counter = 0;
+        std::vector<uint16_t > polled_number;
 #endif
-            ibv_mr* try_enqueue() {
-                if (is_full()) {
-                    assert(size() == max_size - 1);
-                    return nullptr;
+        ibv_mr* try_enqueue() {
+            if (is_full()) {
+                assert(size() == max_size - 1);
+                return nullptr;
+            }
+            head = (head + 1) % max_size;
+            return mrs[head];
+        }
+
+
+
+        void dequeue(size_t num) {
+            assert(size() >= num);
+            auto old_size = size();
+            if (num > 0 && is_empty()) {
+                throw std::runtime_error("Buffer is empty");
+            }
+
+            tail = (tail + num) % max_size;
+            auto new_size = size();
+            assert(new_size == old_size - num);
+//            return item;
+        }
+
+        bool is_empty() {
+            return head == tail;
+        }
+        // current logic can at most have ATOMIC_OUTSTANDING_SIZE - 1 elements in the queue.
+        bool is_full() {
+            return (head + 1) % max_size == tail;
+        }
+
+        size_t size() {
+            if (tail <= head) {
+                return head - tail;
+            }
+            return max_size - tail + head;
+        }
+        ibv_mr* enqueue(RDMA_Manager* rdma_mg, GlobalAddress lock_addr) {
+            auto temp_mr = try_enqueue();
+            while (!temp_mr) {
+                ibv_wc wc[ATOMIC_OUTSTANDING_SIZE] = {};
+                std::string qptype = "write_local_flush";
+                int result = rdma_mg->try_poll_completions(wc, ATOMIC_OUTSTANDING_SIZE, qptype, true, lock_addr.nodeID);
+
+                assert(result < ATOMIC_OUTSTANDING_SIZE);
+                signalled_counter= signalled_counter+result;
+                if (result>0){
+                    //TODO: ADD thread id into print. need to understand what thread have issued wr more than 1000
+                    printf("Node %u thread %d poll %d from completion queue, head is %u tail is %u, signal counter is %u, issued counter is %u \n", rdma_mg->node_id, rdma_mg->get_thread_id(), result, head, tail, signalled_counter, issued_counter);
+                    fflush(stdout);
+                    polled_number.push_back(result);
                 }
-                head = (head + 1) % max_size;
-                return mrs[head];
+                dequeue(result);
+                temp_mr = try_enqueue();
             }
-
-
-
-            void dequeue(size_t num) {
-                assert(size() >= num);
-                auto old_size = size();
-                if (num > 0 && is_empty()) {
-                    throw std::runtime_error("Buffer is empty");
-                }
-
-                tail = (tail + num) % max_size;
-                auto new_size = size();
-                assert(new_size == old_size - num);
-    //            return item;
-            }
-
-            bool is_empty() {
-                return head == tail;
-            }
-            // current logic can at most have ATOMIC_OUTSTANDING_SIZE - 1 elements in the queue.
-            bool is_full() {
-                return (head + 1) % max_size == tail;
-            }
-
-            size_t size() {
-                if (tail <= head) {
-                    return head - tail;
-                }
-                return max_size - tail + head;
-            }
-            ibv_mr* enqueue(RDMA_Manager* rdma_mg, GlobalAddress lock_addr) {
-                auto temp_mr = try_enqueue();
-                while (!temp_mr) {
-                    ibv_wc wc[ATOMIC_OUTSTANDING_SIZE] = {};
-                    std::string qptype = "write_local_flush";
-                    int result = rdma_mg->try_poll_completions(wc, ATOMIC_OUTSTANDING_SIZE, qptype, true, lock_addr.nodeID);
-
-                    assert(result < ATOMIC_OUTSTANDING_SIZE);
-                    signalled_counter= signalled_counter+result;
-                    if (result>0){
-                        //TODO: ADD thread id into print. need to understand what thread have issued wr more than 1000
-                        printf("Node %u thread %d poll %d from completion queue, head is %u tail is %u, signal counter is %u, issued counter is %u \n", rdma_mg->node_id, rdma_mg->get_thread_id(), result, head, tail, signalled_counter, issued_counter);
-                        fflush(stdout);
-                        polled_number.push_back(result);
-                    }
-                    dequeue(result);
-                    temp_mr = try_enqueue();
-                }
-                issued_counter++;
-    //            printf("enqueue %p\n", temp_mr);
-    //            fflush(stdout);
-                return temp_mr;
-            }
+            issued_counter++;
+//            printf("enqueue %p\n", temp_mr);
+//            fflush(stdout);
+            return temp_mr;
+        }
 #endif
 
             Async_Tasks() {
@@ -594,7 +615,9 @@ namespace DSMEngine {
         /**
          *
          */
-        size_t GetMemoryNodeNum();
+        size_t GetPhysicalMemNodeNum();
+
+        size_t GetLogicalMemNodeNum();
 
         size_t GetComputeNodeNum();
 
@@ -731,7 +754,7 @@ namespace DSMEngine {
         //TODO: Make it register not per 1GB, allocate and register the memory all at once.
         ibv_mr *Preregister_Memory(size_t gb_number); //Pre register the memroy do not allocate bit map
         // Remote Memory registering will call RDMA send and receive to the remote memory it also push the new SST bit map to the Remote_Leaf_Node_Bitmap
-        bool Remote_Memory_Register(size_t size, uint16_t target_node_id, Chunk_type pool_name);
+        bool Remote_Memory_Register(size_t size, uint16_t target_region_id, Chunk_type pool_name);
 
 
         bool Send_heart_beat();
@@ -807,7 +830,7 @@ namespace DSMEngine {
 
 #if ACCESS_MODE == 0
         bool global_Rlock_and_read_page_without_INVALID(ibv_mr *page_buffer, GlobalAddress page_addr, int page_size, GlobalAddress lock_addr,
-                                                        ibv_mr *cas_buffer, int r_time = 0, CoroContext *cxt= nullptr, int coro_id = 0);
+                                                    ibv_mr *cas_buffer, int r_time = 0, CoroContext *cxt= nullptr, int coro_id = 0);
 #endif
 
         bool
@@ -841,9 +864,9 @@ namespace DSMEngine {
 
 #if ACCESS_MODE == 0
         bool global_Wlock_without_INVALID(ibv_mr *page_buffer, GlobalAddress page_addr, size_t page_size, GlobalAddress lock_addr,
-                                          ibv_mr *cas_buffer, int r_time = -1, CoroContext *cxt= nullptr, int coro_id = 0);
-        bool global_Wlock_and_read_page_without_INVALID(ibv_mr *page_buffer, GlobalAddress page_addr, int page_size, GlobalAddress lock_addr,
-                                                        ibv_mr *cas_buffer, int r_time = -1, CoroContext *cxt= nullptr, int coro_id = 0);
+                                      ibv_mr *cas_buffer, int r_time = -1, CoroContext *cxt= nullptr, int coro_id = 0);
+    bool global_Wlock_and_read_page_without_INVALID(ibv_mr *page_buffer, GlobalAddress page_addr, int page_size, GlobalAddress lock_addr,
+                                                    ibv_mr *cas_buffer, int r_time = -1, CoroContext *cxt= nullptr, int coro_id = 0);
 #endif
 
         // THis function acctually does not flush global lock words, otherwise the RDMA write will interfere with RDMA FAA making the CAS failed always
@@ -853,7 +876,7 @@ namespace DSMEngine {
 
         bool global_write_page_and_WHandover(ibv_mr *page_buffer, GlobalAddress page_addr, size_t page_size,
                                              uint8_t next_holder_id,
-                                             GlobalAddress remote_lock_addr, bool async = false,
+                                             GlobalAddress remote_lock_addr,
                                              Cache_Handle *handle = nullptr);
 
         bool global_WHandover(ibv_mr *page_buffer, GlobalAddress page_addr, size_t page_size, uint8_t next_holder_id,
@@ -907,13 +930,70 @@ namespace DSMEngine {
         //TOFIX: There will be memory leak for the remote_mr and mr_input for local/remote memory
         // allocation.
         //TODO: make all the memory allocator thread local and make the thread pinned and never get destroy.
-        GlobalAddress Allocate_Remote_RDMA_Slot(Chunk_type pool_name, uint16_t target_node_id);
+        GlobalAddress Allocate_Remote_RDMA_Slot(Chunk_type pool_name, uint16_t target_region_id);
 
-        void Allocate_Remote_RDMA_Slot(ibv_mr &remote_mr, Chunk_type pool_name, uint16_t target_node_id);
+        void Allocate_Remote_RDMA_Slot(ibv_mr &remote_mr, Chunk_type pool_name, uint16_t target_region_id);
 
         void Allocate_Local_RDMA_Slot(ibv_mr &mr_input, Chunk_type pool_name);
 
         size_t Calculate_size_of_pool(Chunk_type pool_name);
+
+        // Logical memory group helpers
+        inline bool IsLogicalMemoryId(uint16_t id) const {
+            return logical_groups.find(id) != logical_groups.end();
+        }
+        inline uint16_t ResolvePhysicalMemoryNode(uint16_t id) const {
+            auto it = logical_groups.find(id);
+            return (it == logical_groups.end() ? id : it->second.physical_regions.front().phys_id);
+        }
+        inline const std::vector<PhysicalRegion>& PhysicalRegions(uint16_t id) const {
+            static const std::vector<PhysicalRegion> kEmpty;
+            auto it = logical_groups.find(id);
+            return (it == logical_groups.end() ? kEmpty : it->second.physical_regions);
+        }
+        inline uint64_t RegionBytes(uint16_t logical_id) const {
+            auto it = logical_groups.find(logical_id);
+            return (it == logical_groups.end() ? 0 : it->second.bytes);
+        }
+        inline uint64_t GetBasePtr(uint16_t logical_id, uint16_t physical_id) const {
+            auto it = logical_groups.find(logical_id);
+            if (it == logical_groups.end()) return 0;
+            for (const auto& phys_reg : it->second.physical_regions) {
+                if (phys_reg.phys_id == physical_id) {
+                    return phys_reg.base_ptr;
+                }
+            }
+            return 0;
+        }
+        inline uint32_t GetRkey(uint16_t logical_id, uint16_t physical_id) const {
+            auto it = logical_groups.find(logical_id);
+            if (it == logical_groups.end()) return 0;
+            for (const auto& phys_reg : it->second.physical_regions) {
+                if (phys_reg.phys_id == physical_id) {
+                    return phys_reg.rkey;
+                }
+            }
+            return 0;
+        }
+        
+        // Method to update metadata (base pointer and rkey) from memcached (for compute nodes)
+        void UpdateReplicaMetadata(uint16_t logical_id, uint16_t physical_id, uint64_t base_ptr, uint32_t rkey);
+        
+        // Method to fetch all metadata (base pointers and rkeys) from memcached (for compute nodes)
+        void fetchReplicaMetadata();
+        
+        // Replication helper methods (internal use)
+        uint16_t GetPrimaryPhysicalId(uint16_t logical_id) const;
+        const std::vector<PhysicalRegion>& GetReplicaSet(uint16_t logical_id) const;
+        uint64_t TranslateLogicalToPhysicalAddress(uint16_t logical_id, uint64_t logical_offset, uint16_t physical_id) const;
+        uint32_t GetPhysicalRkey(uint16_t logical_id, uint16_t physical_id) const;
+        
+        // Memcached support methods
+        bool connectMemcached();
+        bool disconnectMemcached();
+        void memcachedSet(const char *key, uint32_t klen, const char *val, uint32_t vlen);
+        char *memcachedGet(const char *key, uint32_t klen, size_t *v_size = nullptr);
+        uint64_t memcachedIncrement(const char *key, uint32_t klen, uint64_t increment = 1);
 
         // this function will determine whether the pointer is with in the registered memory
         bool CheckInsideLocalBuff(
@@ -972,7 +1052,10 @@ namespace DSMEngine {
         std::map<uint16_t, std::vector<ibv_mr *> *> remote_mem_delta_pool; /* a vector for all the remote memory regions*/
         // TODO: seperate the pool for different shards
         std::vector<ibv_mr *> local_mem_regions; /* a vector for all the local memory regions.*/
-        std::map<uint16_t, ibv_mr *> replicaMR_map; /* a map for logical memory retgion ID to real memory region*/
+        std::map<uint16_t, ibv_mr *> replicaMR_map; /* a map for logical memory region ID to real memory region*/
+        
+        // Logical memory id (odd) → replication group + size
+        std::map<uint16_t, LogicalGroup> logical_groups{};
         ibv_mr *preregistered_region;
         std::list<ibv_mr *> pre_allocated_pool;
         bool pre_allocated_flag = false;
@@ -981,9 +1064,9 @@ namespace DSMEngine {
 //TODO: seperate the remote registered memory as different chunk types. similar to name_to_mem_pool
         std::map<uint16_t, std::map<void *, In_Use_Array *> *> Remote_Leaf_Node_Bitmap;
         std::map<uint16_t, std::map<void *, In_Use_Array *> *> Remote_Delta_Bitmap;
-        std::map<uint16_t, ibv_mr *> mr_map_data;
-        std::map<uint16_t, uint32_t> rkey_map_data;
-        std::map<uint16_t, uint64_t> base_addr_map_data;
+        // Replication strategy compile-time flag
+        // 0 = Write to primary only (no replication for writes)
+
 
         std::map<uint16_t, ibv_mr *> mr_map_lock;
         std::map<uint16_t, uint32_t> rkey_map_lock;
@@ -1039,6 +1122,9 @@ namespace DSMEngine {
         //TODO: remove the page cache from RDMA manager. make the communicaiton thread exectute a function variable
         // which contains a pointer to the page_cache
         DSMEngine::Cache *page_cache_;
+        // Memcached support for replication metadata
+        memcached_st *memc;
+        std::mutex memc_mutex;
         bool exit_flag = false;
         std::unordered_map<uint16_t, ibv_mr *> comm_thread_recv_mrs;
         std::unordered_map<uint16_t, int> comm_thread_buffer;
@@ -1084,7 +1170,7 @@ namespace DSMEngine {
         std::map<uint32_t, std::condition_variable *> communication_cvs;
 #ifdef PROCESSANALYSIS
         static std::atomic<uint64_t> RDMAReadTimeElapseSum;
-        static std::atomic<uint64_t> ReadCount;
+  static std::atomic<uint64_t> ReadCount;
 
 #endif
 

@@ -259,7 +259,7 @@ public:
 //    };
     union {
         struct {
-            uint64_t nodeID: 16;
+            uint64_t nodeID: 16;  // Now represents logical region ID in replication mode
             uint64_t offset : 48;
         };
         uint64_t val;
@@ -273,6 +273,7 @@ public:
 //    }
 
     //The memory node ID is odd number not including 0.
+    // In replication mode, nodeID represents logical region ID
     static GlobalAddress Null() {
         static GlobalAddress zero{0, 0};
         return zero;

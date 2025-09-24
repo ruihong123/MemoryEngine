@@ -1020,7 +1020,7 @@ int main(int argc, char* argv[]) {
     assert(cache_ptr->GetCapacity()> 10000);
     DDSM ddsm = DDSM(cache_ptr, rdma_mg);
     compute_num = ddsm.rdma_mg->GetComputeNodeNum();
-    memory_num = ddsm.rdma_mg->GetMemoryNodeNum();
+    memory_num = ddsm.rdma_mg->GetPhysicalMemNodeNum();
     NUMOFBLOCKS = allocated_mem_size/(kLeafPageSize);
     printf("number of blocks is %lu\n", NUMOFBLOCKS);
     SYNC_KEY = NUMOFBLOCKS;

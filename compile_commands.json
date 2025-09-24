@@ -1,0 +1,302 @@
+[
+{
+  "directory": "/home/ruihong/Projects/MemoryEngine/build",
+  "command": "/usr/bin/c++  -DBOOST_ALLOW_DEPRECATED_HEADERS -I/home/ruihong/Projects/MemoryEngine -I/home/ruihong/Projects/MemoryEngine/txn -I/home/ruihong/Projects/MemoryEngine/storage -I/home/ruihong/Projects/MemoryEngine/tpcc -I/home/ruihong/Projects/MemoryEngine/bench -I/home/ruihong/Projects/MemoryEngine/utils -I/home/ruihong/Projects/MemoryEngine/include   -DROCKSDB_SUPPORT_THREAD_LOCAL -DMVOCC -DBACKOFF -Wall -Wextra  -pthread -ggdb -Wno-error -Wno-unused -Wno-format -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits -Wno-unused-variable -Wno-unused-value -Wno-unused-parameter   -w -std=gnu++17 -o CMakeFiles/second_btree_bench.dir/test/benchmark_btree_secondary.cpp.o -c /home/ruihong/Projects/MemoryEngine/test/benchmark_btree_secondary.cpp",
+  "file": "/home/ruihong/Projects/MemoryEngine/test/benchmark_btree_secondary.cpp"
+},
+{
+  "directory": "/home/ruihong/Projects/MemoryEngine/build",
+  "command": "/usr/bin/c++  -DBOOST_ALLOW_DEPRECATED_HEADERS -I/home/ruihong/Projects/MemoryEngine -I/home/ruihong/Projects/MemoryEngine/txn -I/home/ruihong/Projects/MemoryEngine/storage -I/home/ruihong/Projects/MemoryEngine/tpcc -I/home/ruihong/Projects/MemoryEngine/bench -I/home/ruihong/Projects/MemoryEngine/utils -I/home/ruihong/Projects/MemoryEngine/include   -DROCKSDB_SUPPORT_THREAD_LOCAL -DMVOCC -DBACKOFF -Wall -Wextra  -pthread -ggdb -Wno-error -Wno-unused -Wno-format -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits -Wno-unused-variable -Wno-unused-value -Wno-unused-parameter   -w -std=gnu++17 -o CMakeFiles/btree_bench.dir/test/benchmark_btree.cpp.o -c /home/ruihong/Projects/MemoryEngine/test/benchmark_btree.cpp",
+  "file": "/home/ruihong/Projects/MemoryEngine/test/benchmark_btree.cpp"
+},
+{
+  "directory": "/home/ruihong/Projects/MemoryEngine/build",
+  "command": "/usr/bin/c++  -DBOOST_ALLOW_DEPRECATED_HEADERS -I/home/ruihong/Projects/MemoryEngine -I/home/ruihong/Projects/MemoryEngine/txn -I/home/ruihong/Projects/MemoryEngine/storage -I/home/ruihong/Projects/MemoryEngine/tpcc -I/home/ruihong/Projects/MemoryEngine/bench -I/home/ruihong/Projects/MemoryEngine/utils   -DROCKSDB_SUPPORT_THREAD_LOCAL -DMVOCC -DBACKOFF -Wall -Wextra  -pthread -ggdb -Wno-error -Wno-unused -Wno-format -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits -Wno-unused-variable -Wno-unused-value -Wno-unused-parameter   -w -std=gnu++17 -o CMakeFiles/cpu_scale_test.dir/CPU_cache_scalability.cpp.o -c /home/ruihong/Projects/MemoryEngine/CPU_cache_scalability.cpp",
+  "file": "/home/ruihong/Projects/MemoryEngine/CPU_cache_scalability.cpp"
+},
+{
+  "directory": "/home/ruihong/Projects/MemoryEngine/build",
+  "command": "/usr/bin/c++  -DBOOST_ALLOW_DEPRECATED_HEADERS -I/home/ruihong/Projects/MemoryEngine -I/home/ruihong/Projects/MemoryEngine/txn -I/home/ruihong/Projects/MemoryEngine/storage -I/home/ruihong/Projects/MemoryEngine/tpcc -I/home/ruihong/Projects/MemoryEngine/bench -I/home/ruihong/Projects/MemoryEngine/utils -I/home/ruihong/Projects/MemoryEngine/include   -DROCKSDB_SUPPORT_THREAD_LOCAL -DMVOCC -DBACKOFF -Wall -Wextra  -pthread -ggdb -Wno-error -Wno-unused -Wno-format -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits -Wno-unused-variable -Wno-unused-value -Wno-unused-parameter   -w -std=gnu++17 -o CMakeFiles/micro_bench.dir/test/benchmark_micro.cpp.o -c /home/ruihong/Projects/MemoryEngine/test/benchmark_micro.cpp",
+  "file": "/home/ruihong/Projects/MemoryEngine/test/benchmark_micro.cpp"
+},
+{
+  "directory": "/home/ruihong/Projects/MemoryEngine/build",
+  "command": "/usr/bin/c++  -DBOOST_ALLOW_DEPRECATED_HEADERS -I/home/ruihong/Projects/MemoryEngine -I/home/ruihong/Projects/MemoryEngine/txn -I/home/ruihong/Projects/MemoryEngine/storage -I/home/ruihong/Projects/MemoryEngine/tpcc -I/home/ruihong/Projects/MemoryEngine/bench -I/home/ruihong/Projects/MemoryEngine/utils -I/home/ruihong/Projects/MemoryEngine/include   -DROCKSDB_SUPPORT_THREAD_LOCAL -DMVOCC -DBACKOFF -Wall -Wextra  -pthread -ggdb -Wno-error -Wno-unused -Wno-format -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits -Wno-unused-variable -Wno-unused-value -Wno-unused-parameter   -w -std=gnu++17 -o CMakeFiles/memory_server_tpcc.dir/server_termination_tpcc.cc.o -c /home/ruihong/Projects/MemoryEngine/server_termination_tpcc.cc",
+  "file": "/home/ruihong/Projects/MemoryEngine/server_termination_tpcc.cc"
+},
+{
+  "directory": "/home/ruihong/Projects/MemoryEngine/build",
+  "command": "/usr/bin/c++  -DBOOST_ALLOW_DEPRECATED_HEADERS -I/home/ruihong/Projects/MemoryEngine -I/home/ruihong/Projects/MemoryEngine/txn -I/home/ruihong/Projects/MemoryEngine/storage -I/home/ruihong/Projects/MemoryEngine/tpcc -I/home/ruihong/Projects/MemoryEngine/bench -I/home/ruihong/Projects/MemoryEngine/utils -I/home/ruihong/Projects/MemoryEngine/include   -DROCKSDB_SUPPORT_THREAD_LOCAL -DMVOCC -DBACKOFF -Wall -Wextra  -pthread -ggdb -Wno-error -Wno-unused -Wno-format -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits -Wno-unused-variable -Wno-unused-value -Wno-unused-parameter   -w -std=gnu++17 -o CMakeFiles/memory_server_tpcc.dir/memory_node/memory_node_keeper.cpp.o -c /home/ruihong/Projects/MemoryEngine/memory_node/memory_node_keeper.cpp",
+  "file": "/home/ruihong/Projects/MemoryEngine/memory_node/memory_node_keeper.cpp"
+},
+{
+  "directory": "/home/ruihong/Projects/MemoryEngine/build",
+  "command": "/usr/bin/c++  -DBOOST_ALLOW_DEPRECATED_HEADERS -I/home/ruihong/Projects/MemoryEngine -I/home/ruihong/Projects/MemoryEngine/txn -I/home/ruihong/Projects/MemoryEngine/storage -I/home/ruihong/Projects/MemoryEngine/tpcc -I/home/ruihong/Projects/MemoryEngine/bench -I/home/ruihong/Projects/MemoryEngine/utils -I/home/ruihong/Projects/MemoryEngine/include   -DROCKSDB_SUPPORT_THREAD_LOCAL -DMVOCC -DBACKOFF -Wall -Wextra  -pthread -ggdb -Wno-error -Wno-unused -Wno-format -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits -Wno-unused-variable -Wno-unused-value -Wno-unused-parameter   -w -std=gnu++17 -o CMakeFiles/memory_server_term.dir/server_termination.cc.o -c /home/ruihong/Projects/MemoryEngine/server_termination.cc",
+  "file": "/home/ruihong/Projects/MemoryEngine/server_termination.cc"
+},
+{
+  "directory": "/home/ruihong/Projects/MemoryEngine/build",
+  "command": "/usr/bin/c++  -DBOOST_ALLOW_DEPRECATED_HEADERS -I/home/ruihong/Projects/MemoryEngine -I/home/ruihong/Projects/MemoryEngine/txn -I/home/ruihong/Projects/MemoryEngine/storage -I/home/ruihong/Projects/MemoryEngine/tpcc -I/home/ruihong/Projects/MemoryEngine/bench -I/home/ruihong/Projects/MemoryEngine/utils -I/home/ruihong/Projects/MemoryEngine/include   -DROCKSDB_SUPPORT_THREAD_LOCAL -DMVOCC -DBACKOFF -Wall -Wextra  -pthread -ggdb -Wno-error -Wno-unused -Wno-format -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits -Wno-unused-variable -Wno-unused-value -Wno-unused-parameter   -w -std=gnu++17 -o CMakeFiles/memory_server_term.dir/memory_node/memory_node_keeper.cpp.o -c /home/ruihong/Projects/MemoryEngine/memory_node/memory_node_keeper.cpp",
+  "file": "/home/ruihong/Projects/MemoryEngine/memory_node/memory_node_keeper.cpp"
+},
+{
+  "directory": "/home/ruihong/Projects/MemoryEngine/build",
+  "command": "/usr/bin/c++  -DBOOST_ALLOW_DEPRECATED_HEADERS -I/home/ruihong/Projects/MemoryEngine -I/home/ruihong/Projects/MemoryEngine/txn -I/home/ruihong/Projects/MemoryEngine/storage -I/home/ruihong/Projects/MemoryEngine/tpcc -I/home/ruihong/Projects/MemoryEngine/bench -I/home/ruihong/Projects/MemoryEngine/utils -I/home/ruihong/Projects/MemoryEngine/include   -DROCKSDB_SUPPORT_THREAD_LOCAL -DMVOCC -DBACKOFF -Wall -Wextra  -pthread -ggdb -Wno-error -Wno-unused -Wno-format -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits -Wno-unused-variable -Wno-unused-value -Wno-unused-parameter   -w -std=gnu++17 -o CMakeFiles/memory_server.dir/server.cc.o -c /home/ruihong/Projects/MemoryEngine/server.cc",
+  "file": "/home/ruihong/Projects/MemoryEngine/server.cc"
+},
+{
+  "directory": "/home/ruihong/Projects/MemoryEngine/build",
+  "command": "/usr/bin/c++  -DBOOST_ALLOW_DEPRECATED_HEADERS -I/home/ruihong/Projects/MemoryEngine -I/home/ruihong/Projects/MemoryEngine/txn -I/home/ruihong/Projects/MemoryEngine/storage -I/home/ruihong/Projects/MemoryEngine/tpcc -I/home/ruihong/Projects/MemoryEngine/bench -I/home/ruihong/Projects/MemoryEngine/utils -I/home/ruihong/Projects/MemoryEngine/include   -DROCKSDB_SUPPORT_THREAD_LOCAL -DMVOCC -DBACKOFF -Wall -Wextra  -pthread -ggdb -Wno-error -Wno-unused -Wno-format -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits -Wno-unused-variable -Wno-unused-value -Wno-unused-parameter   -w -std=gnu++17 -o CMakeFiles/memory_server.dir/memory_node/memory_node_keeper.cpp.o -c /home/ruihong/Projects/MemoryEngine/memory_node/memory_node_keeper.cpp",
+  "file": "/home/ruihong/Projects/MemoryEngine/memory_node/memory_node_keeper.cpp"
+},
+{
+  "directory": "/home/ruihong/Projects/MemoryEngine/build",
+  "command": "/usr/bin/c++  -DBOOST_ALLOW_DEPRECATED_HEADERS -I/home/ruihong/Projects/MemoryEngine -I/home/ruihong/Projects/MemoryEngine/txn -I/home/ruihong/Projects/MemoryEngine/storage -I/home/ruihong/Projects/MemoryEngine/tpcc -I/home/ruihong/Projects/MemoryEngine/bench -I/home/ruihong/Projects/MemoryEngine/utils -I/home/ruihong/Projects/MemoryEngine/include   -DROCKSDB_SUPPORT_THREAD_LOCAL -DMVOCC -DBACKOFF -Wall -Wextra  -pthread -ggdb -Wno-error -Wno-unused -Wno-format -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits -Wno-unused-variable -Wno-unused-value -Wno-unused-parameter   -w -std=gnu++17 -o CMakeFiles/tpcc.dir/bench/BenchmarkArguments.cpp.o -c /home/ruihong/Projects/MemoryEngine/bench/BenchmarkArguments.cpp",
+  "file": "/home/ruihong/Projects/MemoryEngine/bench/BenchmarkArguments.cpp"
+},
+{
+  "directory": "/home/ruihong/Projects/MemoryEngine/build",
+  "command": "/usr/bin/c++  -DBOOST_ALLOW_DEPRECATED_HEADERS -I/home/ruihong/Projects/MemoryEngine -I/home/ruihong/Projects/MemoryEngine/txn -I/home/ruihong/Projects/MemoryEngine/storage -I/home/ruihong/Projects/MemoryEngine/tpcc -I/home/ruihong/Projects/MemoryEngine/bench -I/home/ruihong/Projects/MemoryEngine/utils -I/home/ruihong/Projects/MemoryEngine/include   -DROCKSDB_SUPPORT_THREAD_LOCAL -DMVOCC -DBACKOFF -Wall -Wextra  -pthread -ggdb -Wno-error -Wno-unused -Wno-format -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits -Wno-unused-variable -Wno-unused-value -Wno-unused-parameter   -w -std=gnu++17 -o CMakeFiles/tpcc.dir/storage/Common.cpp.o -c /home/ruihong/Projects/MemoryEngine/storage/Common.cpp",
+  "file": "/home/ruihong/Projects/MemoryEngine/storage/Common.cpp"
+},
+{
+  "directory": "/home/ruihong/Projects/MemoryEngine/build",
+  "command": "/usr/bin/c++  -DBOOST_ALLOW_DEPRECATED_HEADERS -I/home/ruihong/Projects/MemoryEngine -I/home/ruihong/Projects/MemoryEngine/txn -I/home/ruihong/Projects/MemoryEngine/storage -I/home/ruihong/Projects/MemoryEngine/tpcc -I/home/ruihong/Projects/MemoryEngine/bench -I/home/ruihong/Projects/MemoryEngine/utils -I/home/ruihong/Projects/MemoryEngine/include   -DROCKSDB_SUPPORT_THREAD_LOCAL -DMVOCC -DBACKOFF -Wall -Wextra  -pthread -ggdb -Wno-error -Wno-unused -Wno-format -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits -Wno-unused-variable -Wno-unused-value -Wno-unused-parameter   -w -std=gnu++17 -o CMakeFiles/tpcc.dir/storage/DDSM.cpp.o -c /home/ruihong/Projects/MemoryEngine/storage/DDSM.cpp",
+  "file": "/home/ruihong/Projects/MemoryEngine/storage/DDSM.cpp"
+},
+{
+  "directory": "/home/ruihong/Projects/MemoryEngine/build",
+  "command": "/usr/bin/c++  -DBOOST_ALLOW_DEPRECATED_HEADERS -I/home/ruihong/Projects/MemoryEngine -I/home/ruihong/Projects/MemoryEngine/txn -I/home/ruihong/Projects/MemoryEngine/storage -I/home/ruihong/Projects/MemoryEngine/tpcc -I/home/ruihong/Projects/MemoryEngine/bench -I/home/ruihong/Projects/MemoryEngine/utils -I/home/ruihong/Projects/MemoryEngine/include   -DROCKSDB_SUPPORT_THREAD_LOCAL -DMVOCC -DBACKOFF -Wall -Wextra  -pthread -ggdb -Wno-error -Wno-unused -Wno-format -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits -Wno-unused-variable -Wno-unused-value -Wno-unused-parameter   -w -std=gnu++17 -o CMakeFiles/tpcc.dir/storage/DynamicCompoundKey.cpp.o -c /home/ruihong/Projects/MemoryEngine/storage/DynamicCompoundKey.cpp",
+  "file": "/home/ruihong/Projects/MemoryEngine/storage/DynamicCompoundKey.cpp"
+},
+{
+  "directory": "/home/ruihong/Projects/MemoryEngine/build",
+  "command": "/usr/bin/c++  -DBOOST_ALLOW_DEPRECATED_HEADERS -I/home/ruihong/Projects/MemoryEngine -I/home/ruihong/Projects/MemoryEngine/txn -I/home/ruihong/Projects/MemoryEngine/storage -I/home/ruihong/Projects/MemoryEngine/tpcc -I/home/ruihong/Projects/MemoryEngine/bench -I/home/ruihong/Projects/MemoryEngine/utils -I/home/ruihong/Projects/MemoryEngine/include   -DROCKSDB_SUPPORT_THREAD_LOCAL -DMVOCC -DBACKOFF -Wall -Wextra  -pthread -ggdb -Wno-error -Wno-unused -Wno-format -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits -Wno-unused-variable -Wno-unused-value -Wno-unused-parameter   -w -std=gnu++17 -o CMakeFiles/tpcc.dir/storage/Meta.cpp.o -c /home/ruihong/Projects/MemoryEngine/storage/Meta.cpp",
+  "file": "/home/ruihong/Projects/MemoryEngine/storage/Meta.cpp"
+},
+{
+  "directory": "/home/ruihong/Projects/MemoryEngine/build",
+  "command": "/usr/bin/c++  -DBOOST_ALLOW_DEPRECATED_HEADERS -I/home/ruihong/Projects/MemoryEngine -I/home/ruihong/Projects/MemoryEngine/txn -I/home/ruihong/Projects/MemoryEngine/storage -I/home/ruihong/Projects/MemoryEngine/tpcc -I/home/ruihong/Projects/MemoryEngine/bench -I/home/ruihong/Projects/MemoryEngine/utils -I/home/ruihong/Projects/MemoryEngine/include   -DROCKSDB_SUPPORT_THREAD_LOCAL -DMVOCC -DBACKOFF -Wall -Wextra  -pthread -ggdb -Wno-error -Wno-unused -Wno-format -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits -Wno-unused-variable -Wno-unused-value -Wno-unused-parameter   -w -std=gnu++17 -o CMakeFiles/tpcc.dir/storage/Table.cpp.o -c /home/ruihong/Projects/MemoryEngine/storage/Table.cpp",
+  "file": "/home/ruihong/Projects/MemoryEngine/storage/Table.cpp"
+},
+{
+  "directory": "/home/ruihong/Projects/MemoryEngine/build",
+  "command": "/usr/bin/c++  -DBOOST_ALLOW_DEPRECATED_HEADERS -I/home/ruihong/Projects/MemoryEngine -I/home/ruihong/Projects/MemoryEngine/txn -I/home/ruihong/Projects/MemoryEngine/storage -I/home/ruihong/Projects/MemoryEngine/tpcc -I/home/ruihong/Projects/MemoryEngine/bench -I/home/ruihong/Projects/MemoryEngine/utils -I/home/ruihong/Projects/MemoryEngine/include   -DROCKSDB_SUPPORT_THREAD_LOCAL -DMVOCC -DBACKOFF -Wall -Wextra  -pthread -ggdb -Wno-error -Wno-unused -Wno-format -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits -Wno-unused-variable -Wno-unused-value -Wno-unused-parameter   -w -std=gnu++17 -o CMakeFiles/tpcc.dir/storage/page.cpp.o -c /home/ruihong/Projects/MemoryEngine/storage/page.cpp",
+  "file": "/home/ruihong/Projects/MemoryEngine/storage/page.cpp"
+},
+{
+  "directory": "/home/ruihong/Projects/MemoryEngine/build",
+  "command": "/usr/bin/c++  -DBOOST_ALLOW_DEPRECATED_HEADERS -I/home/ruihong/Projects/MemoryEngine -I/home/ruihong/Projects/MemoryEngine/txn -I/home/ruihong/Projects/MemoryEngine/storage -I/home/ruihong/Projects/MemoryEngine/tpcc -I/home/ruihong/Projects/MemoryEngine/bench -I/home/ruihong/Projects/MemoryEngine/utils -I/home/ruihong/Projects/MemoryEngine/include   -DROCKSDB_SUPPORT_THREAD_LOCAL -DMVOCC -DBACKOFF -Wall -Wextra  -pthread -ggdb -Wno-error -Wno-unused -Wno-format -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits -Wno-unused-variable -Wno-unused-value -Wno-unused-parameter   -w -std=gnu++17 -o CMakeFiles/tpcc.dir/tpcc/TpccBenchmarkMain.cpp.o -c /home/ruihong/Projects/MemoryEngine/tpcc/TpccBenchmarkMain.cpp",
+  "file": "/home/ruihong/Projects/MemoryEngine/tpcc/TpccBenchmarkMain.cpp"
+},
+{
+  "directory": "/home/ruihong/Projects/MemoryEngine/build",
+  "command": "/usr/bin/c++  -DBOOST_ALLOW_DEPRECATED_HEADERS -I/home/ruihong/Projects/MemoryEngine -I/home/ruihong/Projects/MemoryEngine/txn -I/home/ruihong/Projects/MemoryEngine/storage -I/home/ruihong/Projects/MemoryEngine/tpcc -I/home/ruihong/Projects/MemoryEngine/bench -I/home/ruihong/Projects/MemoryEngine/utils -I/home/ruihong/Projects/MemoryEngine/include   -DROCKSDB_SUPPORT_THREAD_LOCAL -DMVOCC -DBACKOFF -Wall -Wextra  -pthread -ggdb -Wno-error -Wno-unused -Wno-format -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits -Wno-unused-variable -Wno-unused-value -Wno-unused-parameter   -w -std=gnu++17 -o CMakeFiles/tpcc.dir/tpcc/TpccParams.cpp.o -c /home/ruihong/Projects/MemoryEngine/tpcc/TpccParams.cpp",
+  "file": "/home/ruihong/Projects/MemoryEngine/tpcc/TpccParams.cpp"
+},
+{
+  "directory": "/home/ruihong/Projects/MemoryEngine/build",
+  "command": "/usr/bin/c++  -DBOOST_ALLOW_DEPRECATED_HEADERS -I/home/ruihong/Projects/MemoryEngine -I/home/ruihong/Projects/MemoryEngine/txn -I/home/ruihong/Projects/MemoryEngine/storage -I/home/ruihong/Projects/MemoryEngine/tpcc -I/home/ruihong/Projects/MemoryEngine/bench -I/home/ruihong/Projects/MemoryEngine/utils -I/home/ruihong/Projects/MemoryEngine/include   -DROCKSDB_SUPPORT_THREAD_LOCAL -DMVOCC -DBACKOFF -Wall -Wextra  -pthread -ggdb -Wno-error -Wno-unused -Wno-format -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits -Wno-unused-variable -Wno-unused-value -Wno-unused-parameter   -w -std=gnu++17 -o CMakeFiles/tpcc.dir/tpcc/TpccRandomGenerator.cpp.o -c /home/ruihong/Projects/MemoryEngine/tpcc/TpccRandomGenerator.cpp",
+  "file": "/home/ruihong/Projects/MemoryEngine/tpcc/TpccRandomGenerator.cpp"
+},
+{
+  "directory": "/home/ruihong/Projects/MemoryEngine/build",
+  "command": "/usr/bin/c++  -DBOOST_ALLOW_DEPRECATED_HEADERS -I/home/ruihong/Projects/MemoryEngine -I/home/ruihong/Projects/MemoryEngine/txn -I/home/ruihong/Projects/MemoryEngine/storage -I/home/ruihong/Projects/MemoryEngine/tpcc -I/home/ruihong/Projects/MemoryEngine/bench -I/home/ruihong/Projects/MemoryEngine/utils -I/home/ruihong/Projects/MemoryEngine/include   -DROCKSDB_SUPPORT_THREAD_LOCAL -DMVOCC -DBACKOFF -Wall -Wextra  -pthread -ggdb -Wno-error -Wno-unused -Wno-format -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits -Wno-unused-variable -Wno-unused-value -Wno-unused-parameter   -w -std=gnu++17 -o CMakeFiles/tpcc.dir/txn/DeltaRecord.cpp.o -c /home/ruihong/Projects/MemoryEngine/txn/DeltaRecord.cpp",
+  "file": "/home/ruihong/Projects/MemoryEngine/txn/DeltaRecord.cpp"
+},
+{
+  "directory": "/home/ruihong/Projects/MemoryEngine/build",
+  "command": "/usr/bin/c++  -DBOOST_ALLOW_DEPRECATED_HEADERS -I/home/ruihong/Projects/MemoryEngine -I/home/ruihong/Projects/MemoryEngine/txn -I/home/ruihong/Projects/MemoryEngine/storage -I/home/ruihong/Projects/MemoryEngine/tpcc -I/home/ruihong/Projects/MemoryEngine/bench -I/home/ruihong/Projects/MemoryEngine/utils -I/home/ruihong/Projects/MemoryEngine/include   -DROCKSDB_SUPPORT_THREAD_LOCAL -DMVOCC -DBACKOFF -Wall -Wextra  -pthread -ggdb -Wno-error -Wno-unused -Wno-format -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits -Wno-unused-variable -Wno-unused-value -Wno-unused-parameter   -w -std=gnu++17 -o CMakeFiles/tpcc.dir/txn/DeltaSection.cpp.o -c /home/ruihong/Projects/MemoryEngine/txn/DeltaSection.cpp",
+  "file": "/home/ruihong/Projects/MemoryEngine/txn/DeltaSection.cpp"
+},
+{
+  "directory": "/home/ruihong/Projects/MemoryEngine/build",
+  "command": "/usr/bin/c++  -DBOOST_ALLOW_DEPRECATED_HEADERS -I/home/ruihong/Projects/MemoryEngine -I/home/ruihong/Projects/MemoryEngine/txn -I/home/ruihong/Projects/MemoryEngine/storage -I/home/ruihong/Projects/MemoryEngine/tpcc -I/home/ruihong/Projects/MemoryEngine/bench -I/home/ruihong/Projects/MemoryEngine/utils -I/home/ruihong/Projects/MemoryEngine/include   -DROCKSDB_SUPPORT_THREAD_LOCAL -DMVOCC -DBACKOFF -Wall -Wextra  -pthread -ggdb -Wno-error -Wno-unused -Wno-format -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits -Wno-unused-variable -Wno-unused-value -Wno-unused-parameter   -w -std=gnu++17 -o CMakeFiles/tpcc.dir/txn/GlobalTimestamp.cpp.o -c /home/ruihong/Projects/MemoryEngine/txn/GlobalTimestamp.cpp",
+  "file": "/home/ruihong/Projects/MemoryEngine/txn/GlobalTimestamp.cpp"
+},
+{
+  "directory": "/home/ruihong/Projects/MemoryEngine/build",
+  "command": "/usr/bin/c++  -DBOOST_ALLOW_DEPRECATED_HEADERS -I/home/ruihong/Projects/MemoryEngine -I/home/ruihong/Projects/MemoryEngine/txn -I/home/ruihong/Projects/MemoryEngine/storage -I/home/ruihong/Projects/MemoryEngine/tpcc -I/home/ruihong/Projects/MemoryEngine/bench -I/home/ruihong/Projects/MemoryEngine/utils -I/home/ruihong/Projects/MemoryEngine/include   -DROCKSDB_SUPPORT_THREAD_LOCAL -DMVOCC -DBACKOFF -Wall -Wextra  -pthread -ggdb -Wno-error -Wno-unused -Wno-format -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits -Wno-unused-variable -Wno-unused-value -Wno-unused-parameter   -w -std=gnu++17 -o CMakeFiles/tpcc.dir/txn/TransactionManager2PL.cpp.o -c /home/ruihong/Projects/MemoryEngine/txn/TransactionManager2PL.cpp",
+  "file": "/home/ruihong/Projects/MemoryEngine/txn/TransactionManager2PL.cpp"
+},
+{
+  "directory": "/home/ruihong/Projects/MemoryEngine/build",
+  "command": "/usr/bin/c++  -DBOOST_ALLOW_DEPRECATED_HEADERS -I/home/ruihong/Projects/MemoryEngine -I/home/ruihong/Projects/MemoryEngine/txn -I/home/ruihong/Projects/MemoryEngine/storage -I/home/ruihong/Projects/MemoryEngine/tpcc -I/home/ruihong/Projects/MemoryEngine/bench -I/home/ruihong/Projects/MemoryEngine/utils -I/home/ruihong/Projects/MemoryEngine/include   -DROCKSDB_SUPPORT_THREAD_LOCAL -DMVOCC -DBACKOFF -Wall -Wextra  -pthread -ggdb -Wno-error -Wno-unused -Wno-format -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits -Wno-unused-variable -Wno-unused-value -Wno-unused-parameter   -w -std=gnu++17 -o CMakeFiles/tpcc.dir/txn/TransactionManagerMVOCC.cpp.o -c /home/ruihong/Projects/MemoryEngine/txn/TransactionManagerMVOCC.cpp",
+  "file": "/home/ruihong/Projects/MemoryEngine/txn/TransactionManagerMVOCC.cpp"
+},
+{
+  "directory": "/home/ruihong/Projects/MemoryEngine/build",
+  "command": "/usr/bin/c++  -DBOOST_ALLOW_DEPRECATED_HEADERS -I/home/ruihong/Projects/MemoryEngine -I/home/ruihong/Projects/MemoryEngine/txn -I/home/ruihong/Projects/MemoryEngine/storage -I/home/ruihong/Projects/MemoryEngine/tpcc -I/home/ruihong/Projects/MemoryEngine/bench -I/home/ruihong/Projects/MemoryEngine/utils -I/home/ruihong/Projects/MemoryEngine/include   -DROCKSDB_SUPPORT_THREAD_LOCAL -DMVOCC -DBACKOFF -Wall -Wextra  -pthread -ggdb -Wno-error -Wno-unused -Wno-format -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits -Wno-unused-variable -Wno-unused-value -Wno-unused-parameter   -w -std=gnu++17 -o CMakeFiles/tpcc.dir/txn/TransactionManagerOCC.cpp.o -c /home/ruihong/Projects/MemoryEngine/txn/TransactionManagerOCC.cpp",
+  "file": "/home/ruihong/Projects/MemoryEngine/txn/TransactionManagerOCC.cpp"
+},
+{
+  "directory": "/home/ruihong/Projects/MemoryEngine/build",
+  "command": "/usr/bin/c++  -DBOOST_ALLOW_DEPRECATED_HEADERS -I/home/ruihong/Projects/MemoryEngine -I/home/ruihong/Projects/MemoryEngine/txn -I/home/ruihong/Projects/MemoryEngine/storage -I/home/ruihong/Projects/MemoryEngine/tpcc -I/home/ruihong/Projects/MemoryEngine/bench -I/home/ruihong/Projects/MemoryEngine/utils -I/home/ruihong/Projects/MemoryEngine/include   -DROCKSDB_SUPPORT_THREAD_LOCAL -DMVOCC -DBACKOFF -Wall -Wextra  -pthread -ggdb -Wno-error -Wno-unused -Wno-format -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits -Wno-unused-variable -Wno-unused-value -Wno-unused-parameter   -w -std=gnu++17 -o CMakeFiles/tpcc.dir/txn/TransactionManagerST.cpp.o -c /home/ruihong/Projects/MemoryEngine/txn/TransactionManagerST.cpp",
+  "file": "/home/ruihong/Projects/MemoryEngine/txn/TransactionManagerST.cpp"
+},
+{
+  "directory": "/home/ruihong/Projects/MemoryEngine/build",
+  "command": "/usr/bin/c++  -DBOOST_ALLOW_DEPRECATED_HEADERS -I/home/ruihong/Projects/MemoryEngine -I/home/ruihong/Projects/MemoryEngine/txn -I/home/ruihong/Projects/MemoryEngine/storage -I/home/ruihong/Projects/MemoryEngine/tpcc -I/home/ruihong/Projects/MemoryEngine/bench -I/home/ruihong/Projects/MemoryEngine/utils -I/home/ruihong/Projects/MemoryEngine/include   -DROCKSDB_SUPPORT_THREAD_LOCAL -DMVOCC -DBACKOFF -Wall -Wextra  -pthread -ggdb -Wno-error -Wno-unused -Wno-format -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits -Wno-unused-variable -Wno-unused-value -Wno-unused-parameter   -w -std=gnu++17 -o CMakeFiles/tpcc.dir/txn/TransactionManagerTIMESTAMP.cpp.o -c /home/ruihong/Projects/MemoryEngine/txn/TransactionManagerTIMESTAMP.cpp",
+  "file": "/home/ruihong/Projects/MemoryEngine/txn/TransactionManagerTIMESTAMP.cpp"
+},
+{
+  "directory": "/home/ruihong/Projects/MemoryEngine/build",
+  "command": "/usr/bin/c++  -DBOOST_ALLOW_DEPRECATED_HEADERS -I/home/ruihong/Projects/MemoryEngine -I/home/ruihong/Projects/MemoryEngine/txn -I/home/ruihong/Projects/MemoryEngine/storage -I/home/ruihong/Projects/MemoryEngine/tpcc -I/home/ruihong/Projects/MemoryEngine/bench -I/home/ruihong/Projects/MemoryEngine/utils -I/home/ruihong/Projects/MemoryEngine/include   -DROCKSDB_SUPPORT_THREAD_LOCAL -DMVOCC -DBACKOFF -Wall -Wextra  -pthread -ggdb -Wno-error -Wno-unused -Wno-format -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits -Wno-unused-variable -Wno-unused-value -Wno-unused-parameter   -w -std=gnu++17 -o CMakeFiles/tpcc.dir/txn/TxnManagerTo.cpp.o -c /home/ruihong/Projects/MemoryEngine/txn/TxnManagerTo.cpp",
+  "file": "/home/ruihong/Projects/MemoryEngine/txn/TxnManagerTo.cpp"
+},
+{
+  "directory": "/home/ruihong/Projects/MemoryEngine/build",
+  "command": "/usr/bin/c++  -DBOOST_ALLOW_DEPRECATED_HEADERS -I/home/ruihong/Projects/MemoryEngine -I/home/ruihong/Projects/MemoryEngine/txn -I/home/ruihong/Projects/MemoryEngine/storage -I/home/ruihong/Projects/MemoryEngine/tpcc -I/home/ruihong/Projects/MemoryEngine/bench -I/home/ruihong/Projects/MemoryEngine/utils -I/home/ruihong/Projects/MemoryEngine/include   -DROCKSDB_SUPPORT_THREAD_LOCAL -DMVOCC -DBACKOFF -Wall -Wextra  -pthread -ggdb -Wno-error -Wno-unused -Wno-format -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits -Wno-unused-variable -Wno-unused-value -Wno-unused-parameter   -w -std=gnu++17 -o CMakeFiles/DSMEngine.dir/utils/Local_opt_locks.cpp.o -c /home/ruihong/Projects/MemoryEngine/utils/Local_opt_locks.cpp",
+  "file": "/home/ruihong/Projects/MemoryEngine/utils/Local_opt_locks.cpp"
+},
+{
+  "directory": "/home/ruihong/Projects/MemoryEngine/build",
+  "command": "/usr/bin/c++  -DBOOST_ALLOW_DEPRECATED_HEADERS -I/home/ruihong/Projects/MemoryEngine -I/home/ruihong/Projects/MemoryEngine/txn -I/home/ruihong/Projects/MemoryEngine/storage -I/home/ruihong/Projects/MemoryEngine/tpcc -I/home/ruihong/Projects/MemoryEngine/bench -I/home/ruihong/Projects/MemoryEngine/utils -I/home/ruihong/Projects/MemoryEngine/include   -DROCKSDB_SUPPORT_THREAD_LOCAL -DMVOCC -DBACKOFF -Wall -Wextra  -pthread -ggdb -Wno-error -Wno-unused -Wno-format -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits -Wno-unused-variable -Wno-unused-value -Wno-unused-parameter   -w -std=gnu++17 -o CMakeFiles/DSMEngine.dir/btr/btr_itr.cpp.o -c /home/ruihong/Projects/MemoryEngine/btr/btr_itr.cpp",
+  "file": "/home/ruihong/Projects/MemoryEngine/btr/btr_itr.cpp"
+},
+{
+  "directory": "/home/ruihong/Projects/MemoryEngine/build",
+  "command": "/usr/bin/c++  -DBOOST_ALLOW_DEPRECATED_HEADERS -I/home/ruihong/Projects/MemoryEngine -I/home/ruihong/Projects/MemoryEngine/txn -I/home/ruihong/Projects/MemoryEngine/storage -I/home/ruihong/Projects/MemoryEngine/tpcc -I/home/ruihong/Projects/MemoryEngine/bench -I/home/ruihong/Projects/MemoryEngine/utils -I/home/ruihong/Projects/MemoryEngine/include   -DROCKSDB_SUPPORT_THREAD_LOCAL -DMVOCC -DBACKOFF -Wall -Wextra  -pthread -ggdb -Wno-error -Wno-unused -Wno-format -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits -Wno-unused-variable -Wno-unused-value -Wno-unused-parameter   -w -std=gnu++17 -o CMakeFiles/DSMEngine.dir/storage/DynamicCompoundKey.cpp.o -c /home/ruihong/Projects/MemoryEngine/storage/DynamicCompoundKey.cpp",
+  "file": "/home/ruihong/Projects/MemoryEngine/storage/DynamicCompoundKey.cpp"
+},
+{
+  "directory": "/home/ruihong/Projects/MemoryEngine/build",
+  "command": "/usr/bin/c++  -DBOOST_ALLOW_DEPRECATED_HEADERS -I/home/ruihong/Projects/MemoryEngine -I/home/ruihong/Projects/MemoryEngine/txn -I/home/ruihong/Projects/MemoryEngine/storage -I/home/ruihong/Projects/MemoryEngine/tpcc -I/home/ruihong/Projects/MemoryEngine/bench -I/home/ruihong/Projects/MemoryEngine/utils -I/home/ruihong/Projects/MemoryEngine/include   -DROCKSDB_SUPPORT_THREAD_LOCAL -DMVOCC -DBACKOFF -Wall -Wextra  -pthread -ggdb -Wno-error -Wno-unused -Wno-format -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits -Wno-unused-variable -Wno-unused-value -Wno-unused-parameter   -w -std=gnu++17 -o CMakeFiles/DSMEngine.dir/btr/Btr.cpp.o -c /home/ruihong/Projects/MemoryEngine/btr/Btr.cpp",
+  "file": "/home/ruihong/Projects/MemoryEngine/btr/Btr.cpp"
+},
+{
+  "directory": "/home/ruihong/Projects/MemoryEngine/build",
+  "command": "/usr/bin/c++  -DBOOST_ALLOW_DEPRECATED_HEADERS -I/home/ruihong/Projects/MemoryEngine -I/home/ruihong/Projects/MemoryEngine/txn -I/home/ruihong/Projects/MemoryEngine/storage -I/home/ruihong/Projects/MemoryEngine/tpcc -I/home/ruihong/Projects/MemoryEngine/bench -I/home/ruihong/Projects/MemoryEngine/utils -I/home/ruihong/Projects/MemoryEngine/include   -DROCKSDB_SUPPORT_THREAD_LOCAL -DMVOCC -DBACKOFF -Wall -Wextra  -pthread -ggdb -Wno-error -Wno-unused -Wno-format -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits -Wno-unused-variable -Wno-unused-value -Wno-unused-parameter   -w -std=gnu++17 -o CMakeFiles/DSMEngine.dir/utils/ThreadPool.cpp.o -c /home/ruihong/Projects/MemoryEngine/utils/ThreadPool.cpp",
+  "file": "/home/ruihong/Projects/MemoryEngine/utils/ThreadPool.cpp"
+},
+{
+  "directory": "/home/ruihong/Projects/MemoryEngine/build",
+  "command": "/usr/bin/c++  -DBOOST_ALLOW_DEPRECATED_HEADERS -I/home/ruihong/Projects/MemoryEngine -I/home/ruihong/Projects/MemoryEngine/txn -I/home/ruihong/Projects/MemoryEngine/storage -I/home/ruihong/Projects/MemoryEngine/tpcc -I/home/ruihong/Projects/MemoryEngine/bench -I/home/ruihong/Projects/MemoryEngine/utils -I/home/ruihong/Projects/MemoryEngine/include   -DROCKSDB_SUPPORT_THREAD_LOCAL -DMVOCC -DBACKOFF -Wall -Wextra  -pthread -ggdb -Wno-error -Wno-unused -Wno-format -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits -Wno-unused-variable -Wno-unused-value -Wno-unused-parameter   -w -std=gnu++17 -o CMakeFiles/DSMEngine.dir/port/port_posix.cc.o -c /home/ruihong/Projects/MemoryEngine/port/port_posix.cc",
+  "file": "/home/ruihong/Projects/MemoryEngine/port/port_posix.cc"
+},
+{
+  "directory": "/home/ruihong/Projects/MemoryEngine/build",
+  "command": "/usr/bin/c++  -DBOOST_ALLOW_DEPRECATED_HEADERS -I/home/ruihong/Projects/MemoryEngine -I/home/ruihong/Projects/MemoryEngine/txn -I/home/ruihong/Projects/MemoryEngine/storage -I/home/ruihong/Projects/MemoryEngine/tpcc -I/home/ruihong/Projects/MemoryEngine/bench -I/home/ruihong/Projects/MemoryEngine/utils -I/home/ruihong/Projects/MemoryEngine/include   -DROCKSDB_SUPPORT_THREAD_LOCAL -DMVOCC -DBACKOFF -Wall -Wextra  -pthread -ggdb -Wno-error -Wno-unused -Wno-format -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits -Wno-unused-variable -Wno-unused-value -Wno-unused-parameter   -w -std=gnu++17 -o CMakeFiles/DSMEngine.dir/utils/arena.cc.o -c /home/ruihong/Projects/MemoryEngine/utils/arena.cc",
+  "file": "/home/ruihong/Projects/MemoryEngine/utils/arena.cc"
+},
+{
+  "directory": "/home/ruihong/Projects/MemoryEngine/build",
+  "command": "/usr/bin/c++  -DBOOST_ALLOW_DEPRECATED_HEADERS -I/home/ruihong/Projects/MemoryEngine -I/home/ruihong/Projects/MemoryEngine/txn -I/home/ruihong/Projects/MemoryEngine/storage -I/home/ruihong/Projects/MemoryEngine/tpcc -I/home/ruihong/Projects/MemoryEngine/bench -I/home/ruihong/Projects/MemoryEngine/utils -I/home/ruihong/Projects/MemoryEngine/include   -DROCKSDB_SUPPORT_THREAD_LOCAL -DMVOCC -DBACKOFF -Wall -Wextra  -pthread -ggdb -Wno-error -Wno-unused -Wno-format -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits -Wno-unused-variable -Wno-unused-value -Wno-unused-parameter   -w -std=gnu++17 -o CMakeFiles/DSMEngine.dir/utils/concurrent_arena.cc.o -c /home/ruihong/Projects/MemoryEngine/utils/concurrent_arena.cc",
+  "file": "/home/ruihong/Projects/MemoryEngine/utils/concurrent_arena.cc"
+},
+{
+  "directory": "/home/ruihong/Projects/MemoryEngine/build",
+  "command": "/usr/bin/c++  -DBOOST_ALLOW_DEPRECATED_HEADERS -I/home/ruihong/Projects/MemoryEngine -I/home/ruihong/Projects/MemoryEngine/txn -I/home/ruihong/Projects/MemoryEngine/storage -I/home/ruihong/Projects/MemoryEngine/tpcc -I/home/ruihong/Projects/MemoryEngine/bench -I/home/ruihong/Projects/MemoryEngine/utils -I/home/ruihong/Projects/MemoryEngine/include   -DROCKSDB_SUPPORT_THREAD_LOCAL -DMVOCC -DBACKOFF -Wall -Wextra  -pthread -ggdb -Wno-error -Wno-unused -Wno-format -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits -Wno-unused-variable -Wno-unused-value -Wno-unused-parameter   -w -std=gnu++17 -o CMakeFiles/DSMEngine.dir/storage/cache.cc.o -c /home/ruihong/Projects/MemoryEngine/storage/cache.cc",
+  "file": "/home/ruihong/Projects/MemoryEngine/storage/cache.cc"
+},
+{
+  "directory": "/home/ruihong/Projects/MemoryEngine/build",
+  "command": "/usr/bin/c++  -DBOOST_ALLOW_DEPRECATED_HEADERS -I/home/ruihong/Projects/MemoryEngine -I/home/ruihong/Projects/MemoryEngine/txn -I/home/ruihong/Projects/MemoryEngine/storage -I/home/ruihong/Projects/MemoryEngine/tpcc -I/home/ruihong/Projects/MemoryEngine/bench -I/home/ruihong/Projects/MemoryEngine/utils -I/home/ruihong/Projects/MemoryEngine/include   -DROCKSDB_SUPPORT_THREAD_LOCAL -DMVOCC -DBACKOFF -Wall -Wextra  -pthread -ggdb -Wno-error -Wno-unused -Wno-format -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits -Wno-unused-variable -Wno-unused-value -Wno-unused-parameter   -w -std=gnu++17 -o CMakeFiles/DSMEngine.dir/utils/coding.cc.o -c /home/ruihong/Projects/MemoryEngine/utils/coding.cc",
+  "file": "/home/ruihong/Projects/MemoryEngine/utils/coding.cc"
+},
+{
+  "directory": "/home/ruihong/Projects/MemoryEngine/build",
+  "command": "/usr/bin/c++  -DBOOST_ALLOW_DEPRECATED_HEADERS -I/home/ruihong/Projects/MemoryEngine -I/home/ruihong/Projects/MemoryEngine/txn -I/home/ruihong/Projects/MemoryEngine/storage -I/home/ruihong/Projects/MemoryEngine/tpcc -I/home/ruihong/Projects/MemoryEngine/bench -I/home/ruihong/Projects/MemoryEngine/utils -I/home/ruihong/Projects/MemoryEngine/include   -DROCKSDB_SUPPORT_THREAD_LOCAL -DMVOCC -DBACKOFF -Wall -Wextra  -pthread -ggdb -Wno-error -Wno-unused -Wno-format -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits -Wno-unused-variable -Wno-unused-value -Wno-unused-parameter   -w -std=gnu++17 -o CMakeFiles/DSMEngine.dir/storage/Common.cpp.o -c /home/ruihong/Projects/MemoryEngine/storage/Common.cpp",
+  "file": "/home/ruihong/Projects/MemoryEngine/storage/Common.cpp"
+},
+{
+  "directory": "/home/ruihong/Projects/MemoryEngine/build",
+  "command": "/usr/bin/c++  -DBOOST_ALLOW_DEPRECATED_HEADERS -I/home/ruihong/Projects/MemoryEngine -I/home/ruihong/Projects/MemoryEngine/txn -I/home/ruihong/Projects/MemoryEngine/storage -I/home/ruihong/Projects/MemoryEngine/tpcc -I/home/ruihong/Projects/MemoryEngine/bench -I/home/ruihong/Projects/MemoryEngine/utils -I/home/ruihong/Projects/MemoryEngine/include   -DROCKSDB_SUPPORT_THREAD_LOCAL -DMVOCC -DBACKOFF -Wall -Wextra  -pthread -ggdb -Wno-error -Wno-unused -Wno-format -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits -Wno-unused-variable -Wno-unused-value -Wno-unused-parameter   -w -std=gnu++17 -o CMakeFiles/DSMEngine.dir/utils/comparator.cc.o -c /home/ruihong/Projects/MemoryEngine/utils/comparator.cc",
+  "file": "/home/ruihong/Projects/MemoryEngine/utils/comparator.cc"
+},
+{
+  "directory": "/home/ruihong/Projects/MemoryEngine/build",
+  "command": "/usr/bin/c++  -DBOOST_ALLOW_DEPRECATED_HEADERS -I/home/ruihong/Projects/MemoryEngine -I/home/ruihong/Projects/MemoryEngine/txn -I/home/ruihong/Projects/MemoryEngine/storage -I/home/ruihong/Projects/MemoryEngine/tpcc -I/home/ruihong/Projects/MemoryEngine/bench -I/home/ruihong/Projects/MemoryEngine/utils -I/home/ruihong/Projects/MemoryEngine/include   -DROCKSDB_SUPPORT_THREAD_LOCAL -DMVOCC -DBACKOFF -Wall -Wextra  -pthread -ggdb -Wno-error -Wno-unused -Wno-format -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits -Wno-unused-variable -Wno-unused-value -Wno-unused-parameter   -w -std=gnu++17 -o CMakeFiles/DSMEngine.dir/utils/hash.cc.o -c /home/ruihong/Projects/MemoryEngine/utils/hash.cc",
+  "file": "/home/ruihong/Projects/MemoryEngine/utils/hash.cc"
+},
+{
+  "directory": "/home/ruihong/Projects/MemoryEngine/build",
+  "command": "/usr/bin/c++  -DBOOST_ALLOW_DEPRECATED_HEADERS -I/home/ruihong/Projects/MemoryEngine -I/home/ruihong/Projects/MemoryEngine/txn -I/home/ruihong/Projects/MemoryEngine/storage -I/home/ruihong/Projects/MemoryEngine/tpcc -I/home/ruihong/Projects/MemoryEngine/bench -I/home/ruihong/Projects/MemoryEngine/utils -I/home/ruihong/Projects/MemoryEngine/include   -DROCKSDB_SUPPORT_THREAD_LOCAL -DMVOCC -DBACKOFF -Wall -Wextra  -pthread -ggdb -Wno-error -Wno-unused -Wno-format -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits -Wno-unused-variable -Wno-unused-value -Wno-unused-parameter   -w -std=gnu++17 -o CMakeFiles/DSMEngine.dir/utils/logging.cc.o -c /home/ruihong/Projects/MemoryEngine/utils/logging.cc",
+  "file": "/home/ruihong/Projects/MemoryEngine/utils/logging.cc"
+},
+{
+  "directory": "/home/ruihong/Projects/MemoryEngine/build",
+  "command": "/usr/bin/c++  -DBOOST_ALLOW_DEPRECATED_HEADERS -I/home/ruihong/Projects/MemoryEngine -I/home/ruihong/Projects/MemoryEngine/txn -I/home/ruihong/Projects/MemoryEngine/storage -I/home/ruihong/Projects/MemoryEngine/tpcc -I/home/ruihong/Projects/MemoryEngine/bench -I/home/ruihong/Projects/MemoryEngine/utils -I/home/ruihong/Projects/MemoryEngine/include   -DROCKSDB_SUPPORT_THREAD_LOCAL -DMVOCC -DBACKOFF -Wall -Wextra  -pthread -ggdb -Wno-error -Wno-unused -Wno-format -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits -Wno-unused-variable -Wno-unused-value -Wno-unused-parameter   -w -std=gnu++17 -o CMakeFiles/DSMEngine.dir/utils/mutexlock.cpp.o -c /home/ruihong/Projects/MemoryEngine/utils/mutexlock.cpp",
+  "file": "/home/ruihong/Projects/MemoryEngine/utils/mutexlock.cpp"
+},
+{
+  "directory": "/home/ruihong/Projects/MemoryEngine/build",
+  "command": "/usr/bin/c++  -DBOOST_ALLOW_DEPRECATED_HEADERS -I/home/ruihong/Projects/MemoryEngine -I/home/ruihong/Projects/MemoryEngine/txn -I/home/ruihong/Projects/MemoryEngine/storage -I/home/ruihong/Projects/MemoryEngine/tpcc -I/home/ruihong/Projects/MemoryEngine/bench -I/home/ruihong/Projects/MemoryEngine/utils -I/home/ruihong/Projects/MemoryEngine/include   -DROCKSDB_SUPPORT_THREAD_LOCAL -DMVOCC -DBACKOFF -Wall -Wextra  -pthread -ggdb -Wno-error -Wno-unused -Wno-format -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits -Wno-unused-variable -Wno-unused-value -Wno-unused-parameter   -w -std=gnu++17 -o CMakeFiles/DSMEngine.dir/storage/page.cpp.o -c /home/ruihong/Projects/MemoryEngine/storage/page.cpp",
+  "file": "/home/ruihong/Projects/MemoryEngine/storage/page.cpp"
+},
+{
+  "directory": "/home/ruihong/Projects/MemoryEngine/build",
+  "command": "/usr/bin/c++  -DBOOST_ALLOW_DEPRECATED_HEADERS -I/home/ruihong/Projects/MemoryEngine -I/home/ruihong/Projects/MemoryEngine/txn -I/home/ruihong/Projects/MemoryEngine/storage -I/home/ruihong/Projects/MemoryEngine/tpcc -I/home/ruihong/Projects/MemoryEngine/bench -I/home/ruihong/Projects/MemoryEngine/utils -I/home/ruihong/Projects/MemoryEngine/include   -DROCKSDB_SUPPORT_THREAD_LOCAL -DMVOCC -DBACKOFF -Wall -Wextra  -pthread -ggdb -Wno-error -Wno-unused -Wno-format -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits -Wno-unused-variable -Wno-unused-value -Wno-unused-parameter   -w -std=gnu++17 -o CMakeFiles/DSMEngine.dir/storage/DDSM.cpp.o -c /home/ruihong/Projects/MemoryEngine/storage/DDSM.cpp",
+  "file": "/home/ruihong/Projects/MemoryEngine/storage/DDSM.cpp"
+},
+{
+  "directory": "/home/ruihong/Projects/MemoryEngine/build",
+  "command": "/usr/bin/c++  -DBOOST_ALLOW_DEPRECATED_HEADERS -I/home/ruihong/Projects/MemoryEngine -I/home/ruihong/Projects/MemoryEngine/txn -I/home/ruihong/Projects/MemoryEngine/storage -I/home/ruihong/Projects/MemoryEngine/tpcc -I/home/ruihong/Projects/MemoryEngine/bench -I/home/ruihong/Projects/MemoryEngine/utils -I/home/ruihong/Projects/MemoryEngine/include   -DROCKSDB_SUPPORT_THREAD_LOCAL -DMVOCC -DBACKOFF -Wall -Wextra  -pthread -ggdb -Wno-error -Wno-unused -Wno-format -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits -Wno-unused-variable -Wno-unused-value -Wno-unused-parameter   -w -std=gnu++17 -o CMakeFiles/DSMEngine.dir/storage/Table.cpp.o -c /home/ruihong/Projects/MemoryEngine/storage/Table.cpp",
+  "file": "/home/ruihong/Projects/MemoryEngine/storage/Table.cpp"
+},
+{
+  "directory": "/home/ruihong/Projects/MemoryEngine/build",
+  "command": "/usr/bin/c++  -DBOOST_ALLOW_DEPRECATED_HEADERS -I/home/ruihong/Projects/MemoryEngine -I/home/ruihong/Projects/MemoryEngine/txn -I/home/ruihong/Projects/MemoryEngine/storage -I/home/ruihong/Projects/MemoryEngine/tpcc -I/home/ruihong/Projects/MemoryEngine/bench -I/home/ruihong/Projects/MemoryEngine/utils -I/home/ruihong/Projects/MemoryEngine/include   -DROCKSDB_SUPPORT_THREAD_LOCAL -DMVOCC -DBACKOFF -Wall -Wextra  -pthread -ggdb -Wno-error -Wno-unused -Wno-format -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits -Wno-unused-variable -Wno-unused-value -Wno-unused-parameter   -w -std=gnu++17 -o CMakeFiles/DSMEngine.dir/utils/options.cc.o -c /home/ruihong/Projects/MemoryEngine/utils/options.cc",
+  "file": "/home/ruihong/Projects/MemoryEngine/utils/options.cc"
+},
+{
+  "directory": "/home/ruihong/Projects/MemoryEngine/build",
+  "command": "/usr/bin/c++  -DBOOST_ALLOW_DEPRECATED_HEADERS -I/home/ruihong/Projects/MemoryEngine -I/home/ruihong/Projects/MemoryEngine/txn -I/home/ruihong/Projects/MemoryEngine/storage -I/home/ruihong/Projects/MemoryEngine/tpcc -I/home/ruihong/Projects/MemoryEngine/bench -I/home/ruihong/Projects/MemoryEngine/utils -I/home/ruihong/Projects/MemoryEngine/include   -DROCKSDB_SUPPORT_THREAD_LOCAL -DMVOCC -DBACKOFF -Wall -Wextra  -pthread -ggdb -Wno-error -Wno-unused -Wno-format -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits -Wno-unused-variable -Wno-unused-value -Wno-unused-parameter   -w -std=gnu++17 -o CMakeFiles/DSMEngine.dir/utils/random.cc.o -c /home/ruihong/Projects/MemoryEngine/utils/random.cc",
+  "file": "/home/ruihong/Projects/MemoryEngine/utils/random.cc"
+},
+{
+  "directory": "/home/ruihong/Projects/MemoryEngine/build",
+  "command": "/usr/bin/c++  -DBOOST_ALLOW_DEPRECATED_HEADERS -I/home/ruihong/Projects/MemoryEngine -I/home/ruihong/Projects/MemoryEngine/txn -I/home/ruihong/Projects/MemoryEngine/storage -I/home/ruihong/Projects/MemoryEngine/tpcc -I/home/ruihong/Projects/MemoryEngine/bench -I/home/ruihong/Projects/MemoryEngine/utils -I/home/ruihong/Projects/MemoryEngine/include   -DROCKSDB_SUPPORT_THREAD_LOCAL -DMVOCC -DBACKOFF -Wall -Wextra  -pthread -ggdb -Wno-error -Wno-unused -Wno-format -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits -Wno-unused-variable -Wno-unused-value -Wno-unused-parameter   -w -std=gnu++17 -o CMakeFiles/DSMEngine.dir/storage/rdma.cc.o -c /home/ruihong/Projects/MemoryEngine/storage/rdma.cc",
+  "file": "/home/ruihong/Projects/MemoryEngine/storage/rdma.cc"
+},
+{
+  "directory": "/home/ruihong/Projects/MemoryEngine/build",
+  "command": "/usr/bin/c++  -DBOOST_ALLOW_DEPRECATED_HEADERS -I/home/ruihong/Projects/MemoryEngine -I/home/ruihong/Projects/MemoryEngine/txn -I/home/ruihong/Projects/MemoryEngine/storage -I/home/ruihong/Projects/MemoryEngine/tpcc -I/home/ruihong/Projects/MemoryEngine/bench -I/home/ruihong/Projects/MemoryEngine/utils -I/home/ruihong/Projects/MemoryEngine/include   -DROCKSDB_SUPPORT_THREAD_LOCAL -DMVOCC -DBACKOFF -Wall -Wextra  -pthread -ggdb -Wno-error -Wno-unused -Wno-format -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits -Wno-unused-variable -Wno-unused-value -Wno-unused-parameter   -w -std=gnu++17 -o CMakeFiles/DSMEngine.dir/utils/thread_local.cc.o -c /home/ruihong/Projects/MemoryEngine/utils/thread_local.cc",
+  "file": "/home/ruihong/Projects/MemoryEngine/utils/thread_local.cc"
+},
+{
+  "directory": "/home/ruihong/Projects/MemoryEngine/build",
+  "command": "/usr/bin/c++  -DBOOST_ALLOW_DEPRECATED_HEADERS -I/home/ruihong/Projects/MemoryEngine -I/home/ruihong/Projects/MemoryEngine/txn -I/home/ruihong/Projects/MemoryEngine/storage -I/home/ruihong/Projects/MemoryEngine/tpcc -I/home/ruihong/Projects/MemoryEngine/bench -I/home/ruihong/Projects/MemoryEngine/utils -I/home/ruihong/Projects/MemoryEngine/include   -DROCKSDB_SUPPORT_THREAD_LOCAL -DMVOCC -DBACKOFF -Wall -Wextra  -pthread -ggdb -Wno-error -Wno-unused -Wno-format -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits -Wno-unused-variable -Wno-unused-value -Wno-unused-parameter   -w -std=gnu++17 -o CMakeFiles/DSMEngine.dir/utils/status.cc.o -c /home/ruihong/Projects/MemoryEngine/utils/status.cc",
+  "file": "/home/ruihong/Projects/MemoryEngine/utils/status.cc"
+},
+{
+  "directory": "/home/ruihong/Projects/MemoryEngine/build",
+  "command": "/usr/bin/c++  -DBOOST_ALLOW_DEPRECATED_HEADERS -I/home/ruihong/Projects/MemoryEngine -I/home/ruihong/Projects/MemoryEngine/txn -I/home/ruihong/Projects/MemoryEngine/storage -I/home/ruihong/Projects/MemoryEngine/tpcc -I/home/ruihong/Projects/MemoryEngine/bench -I/home/ruihong/Projects/MemoryEngine/utils -I/home/ruihong/Projects/MemoryEngine/include   -DROCKSDB_SUPPORT_THREAD_LOCAL -DMVOCC -DBACKOFF -Wall -Wextra  -pthread -ggdb -Wno-error -Wno-unused -Wno-format -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits -Wno-unused-variable -Wno-unused-value -Wno-unused-parameter   -w -std=gnu++17 -o CMakeFiles/DSMEngine.dir/utils/env_posix.cc.o -c /home/ruihong/Projects/MemoryEngine/utils/env_posix.cc",
+  "file": "/home/ruihong/Projects/MemoryEngine/utils/env_posix.cc"
+},
+{
+  "directory": "/home/ruihong/Projects/MemoryEngine/build",
+  "command": "/usr/bin/c++  -DBOOST_ALLOW_DEPRECATED_HEADERS -I/home/ruihong/Projects/MemoryEngine -I/home/ruihong/Projects/MemoryEngine/txn -I/home/ruihong/Projects/MemoryEngine/storage -I/home/ruihong/Projects/MemoryEngine/tpcc -I/home/ruihong/Projects/MemoryEngine/bench -I/home/ruihong/Projects/MemoryEngine/utils -I/home/ruihong/Projects/MemoryEngine/include   -DROCKSDB_SUPPORT_THREAD_LOCAL -DMVOCC -DBACKOFF -Wall -Wextra  -pthread -ggdb -Wno-error -Wno-unused -Wno-format -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits -Wno-unused-variable -Wno-unused-value -Wno-unused-parameter   -w -std=gnu++17 -o CMakeFiles/DSMEngine.dir/utils/env.cc.o -c /home/ruihong/Projects/MemoryEngine/utils/env.cc",
+  "file": "/home/ruihong/Projects/MemoryEngine/utils/env.cc"
+},
+{
+  "directory": "/home/ruihong/Projects/MemoryEngine/build",
+  "command": "/usr/bin/c++  -DBOOST_ALLOW_DEPRECATED_HEADERS -I/home/ruihong/Projects/MemoryEngine -I/home/ruihong/Projects/MemoryEngine/txn -I/home/ruihong/Projects/MemoryEngine/storage -I/home/ruihong/Projects/MemoryEngine/tpcc -I/home/ruihong/Projects/MemoryEngine/bench -I/home/ruihong/Projects/MemoryEngine/utils -I/home/ruihong/Projects/MemoryEngine/include   -DROCKSDB_SUPPORT_THREAD_LOCAL -DMVOCC -DBACKOFF -Wall -Wextra  -pthread -ggdb -Wno-error -Wno-unused -Wno-format -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits -Wno-unused-variable -Wno-unused-value -Wno-unused-parameter   -w -std=gnu++17 -o CMakeFiles/DSMEngine.dir/txn/TransactionManagerMVOCC.cpp.o -c /home/ruihong/Projects/MemoryEngine/txn/TransactionManagerMVOCC.cpp",
+  "file": "/home/ruihong/Projects/MemoryEngine/txn/TransactionManagerMVOCC.cpp"
+},
+{
+  "directory": "/home/ruihong/Projects/MemoryEngine/build",
+  "command": "/usr/bin/c++  -DBOOST_ALLOW_DEPRECATED_HEADERS -I/home/ruihong/Projects/MemoryEngine -I/home/ruihong/Projects/MemoryEngine/txn -I/home/ruihong/Projects/MemoryEngine/storage -I/home/ruihong/Projects/MemoryEngine/tpcc -I/home/ruihong/Projects/MemoryEngine/bench -I/home/ruihong/Projects/MemoryEngine/utils -I/home/ruihong/Projects/MemoryEngine/include   -DROCKSDB_SUPPORT_THREAD_LOCAL -DMVOCC -DBACKOFF -Wall -Wextra  -pthread -ggdb -Wno-error -Wno-unused -Wno-format -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits -Wno-unused-variable -Wno-unused-value -Wno-unused-parameter   -w -std=gnu++17 -o CMakeFiles/DSMEngine.dir/txn/TransactionManagerOCC.cpp.o -c /home/ruihong/Projects/MemoryEngine/txn/TransactionManagerOCC.cpp",
+  "file": "/home/ruihong/Projects/MemoryEngine/txn/TransactionManagerOCC.cpp"
+},
+{
+  "directory": "/home/ruihong/Projects/MemoryEngine/build",
+  "command": "/usr/bin/c++  -DBOOST_ALLOW_DEPRECATED_HEADERS -I/home/ruihong/Projects/MemoryEngine -I/home/ruihong/Projects/MemoryEngine/txn -I/home/ruihong/Projects/MemoryEngine/storage -I/home/ruihong/Projects/MemoryEngine/tpcc -I/home/ruihong/Projects/MemoryEngine/bench -I/home/ruihong/Projects/MemoryEngine/utils -I/home/ruihong/Projects/MemoryEngine/include   -DROCKSDB_SUPPORT_THREAD_LOCAL -DMVOCC -DBACKOFF -Wall -Wextra  -pthread -ggdb -Wno-error -Wno-unused -Wno-format -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits -Wno-unused-variable -Wno-unused-value -Wno-unused-parameter   -w -std=gnu++17 -o CMakeFiles/DSMEngine.dir/txn/TransactionManager2PL.cpp.o -c /home/ruihong/Projects/MemoryEngine/txn/TransactionManager2PL.cpp",
+  "file": "/home/ruihong/Projects/MemoryEngine/txn/TransactionManager2PL.cpp"
+},
+{
+  "directory": "/home/ruihong/Projects/MemoryEngine/build",
+  "command": "/usr/bin/c++  -DBOOST_ALLOW_DEPRECATED_HEADERS -I/home/ruihong/Projects/MemoryEngine -I/home/ruihong/Projects/MemoryEngine/txn -I/home/ruihong/Projects/MemoryEngine/storage -I/home/ruihong/Projects/MemoryEngine/tpcc -I/home/ruihong/Projects/MemoryEngine/bench -I/home/ruihong/Projects/MemoryEngine/utils -I/home/ruihong/Projects/MemoryEngine/include   -DROCKSDB_SUPPORT_THREAD_LOCAL -DMVOCC -DBACKOFF -Wall -Wextra  -pthread -ggdb -Wno-error -Wno-unused -Wno-format -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits -Wno-unused-variable -Wno-unused-value -Wno-unused-parameter   -w -std=gnu++17 -o CMakeFiles/DSMEngine.dir/txn/TxnManagerTo.cpp.o -c /home/ruihong/Projects/MemoryEngine/txn/TxnManagerTo.cpp",
+  "file": "/home/ruihong/Projects/MemoryEngine/txn/TxnManagerTo.cpp"
+},
+{
+  "directory": "/home/ruihong/Projects/MemoryEngine/build",
+  "command": "/usr/bin/c++  -DBOOST_ALLOW_DEPRECATED_HEADERS -I/home/ruihong/Projects/MemoryEngine -I/home/ruihong/Projects/MemoryEngine/txn -I/home/ruihong/Projects/MemoryEngine/storage -I/home/ruihong/Projects/MemoryEngine/tpcc -I/home/ruihong/Projects/MemoryEngine/bench -I/home/ruihong/Projects/MemoryEngine/utils -I/home/ruihong/Projects/MemoryEngine/include   -DROCKSDB_SUPPORT_THREAD_LOCAL -DMVOCC -DBACKOFF -Wall -Wextra  -pthread -ggdb -Wno-error -Wno-unused -Wno-format -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits -Wno-unused-variable -Wno-unused-value -Wno-unused-parameter   -w -std=gnu++17 -o CMakeFiles/DSMEngine.dir/txn/DeltaSection.cpp.o -c /home/ruihong/Projects/MemoryEngine/txn/DeltaSection.cpp",
+  "file": "/home/ruihong/Projects/MemoryEngine/txn/DeltaSection.cpp"
+},
+{
+  "directory": "/home/ruihong/Projects/MemoryEngine/build",
+  "command": "/usr/bin/c++  -DBOOST_ALLOW_DEPRECATED_HEADERS -I/home/ruihong/Projects/MemoryEngine -I/home/ruihong/Projects/MemoryEngine/txn -I/home/ruihong/Projects/MemoryEngine/storage -I/home/ruihong/Projects/MemoryEngine/tpcc -I/home/ruihong/Projects/MemoryEngine/bench -I/home/ruihong/Projects/MemoryEngine/utils -I/home/ruihong/Projects/MemoryEngine/include   -DROCKSDB_SUPPORT_THREAD_LOCAL -DMVOCC -DBACKOFF -Wall -Wextra  -pthread -ggdb -Wno-error -Wno-unused -Wno-format -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits -Wno-unused-variable -Wno-unused-value -Wno-unused-parameter   -w -std=gnu++17 -o CMakeFiles/DSMEngine.dir/txn/DeltaRecord.cpp.o -c /home/ruihong/Projects/MemoryEngine/txn/DeltaRecord.cpp",
+  "file": "/home/ruihong/Projects/MemoryEngine/txn/DeltaRecord.cpp"
+}
+]

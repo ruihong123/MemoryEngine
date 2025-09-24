@@ -61,16 +61,16 @@ int main(int argc,char* argv[])
 //  mn_keeper->SetBackgroundThreads(0, DSMEngine::ThreadPoolType::CompactionThreadPool);
   std::thread* TPC_connection_handler = new std::thread(&DSMEngine::Memory_Node_Keeper::Server_to_Client_Communication, mn_keeper);
   TPC_connection_handler->detach();
-  DSMEngine::DDSM ddsm(nullptr, nullptr);
+  DSMEngine::DDSM ddsm(nullptr, mn_keeper->rdma_mg.get());
     uint64_t temp = SYNC_KEY +  mn_keeper->rdma_mg->node_id;
     ddsm.memSet((char*)&temp, sizeof(temp), (char*)&mn_keeper->rdma_mg->node_id, sizeof(mn_keeper->rdma_mg->node_id));
     char* ret;
-    for (int i = 0; i < mn_keeper->rdma_mg->GetComputeNodeNum() + mn_keeper->rdma_mg->GetMemoryNodeNum(); i++) {
+    for (int i = 0; i < mn_keeper->rdma_mg->GetComputeNodeNum() + mn_keeper->rdma_mg->GetPhysicalMemNodeNum(); i++) {
         temp = SYNC_KEY + i;
         size_t len;
         ret = ddsm.memGet((char*)&temp, sizeof(temp), &len);
     }
-    SYNC_KEY += mn_keeper->rdma_mg->GetComputeNodeNum() + mn_keeper->rdma_mg->GetMemoryNodeNum();
+    SYNC_KEY += mn_keeper->rdma_mg->GetComputeNodeNum() + mn_keeper->rdma_mg->GetPhysicalMemNodeNum();
     mn_keeper->ExitAllThreads();
   delete mn_keeper;
   delete TPC_connection_handler;

@@ -79,14 +79,10 @@ namespace DSMEngine {
         Cache *page_cache;
         RDMA_Manager *rdma_mg = nullptr;
         //TODO: implement a thread local cache line hold memo.
-        memcached_st *memc;
-        std::mutex memc_mutex;
         GlobalAddress catalog_ptr = GlobalAddress::Null();
         DDSM(Cache *page_cache, RDMA_Manager *rdma_mg = nullptr) : page_cache(page_cache), rdma_mg(rdma_mg) {
-            if (!connectMemcached()) {
-                printf("Failed to connect to memcached\n");
-                return;
-            }
+            // Memcached connection is now handled by RDMA_Manager
+            // No need to connect here as RDMA_Manager provides the memcached interface
             char temp[100] = "Try me ahahahahaha! kkk";
             memSet(reinterpret_cast<const char *>(&temp), 100, reinterpret_cast<const char *>(&temp), 100);
             if (rdma_mg->node_id == 0){
@@ -100,7 +96,7 @@ namespace DSMEngine {
             }
         }
         ~DDSM(){
-            disconnectMemcached();
+            // Memcached disconnection is now handled by RDMA_Manager
         }
         void Update_Root_GCL(uint16_t tree_id, GlobalAddress new_root_gptr){
             if (catalog_ptr == GlobalAddress::Null()){
@@ -155,10 +151,9 @@ namespace DSMEngine {
         bool SELCC_Lock_Upgrade(void*& page_buffer, GlobalAddress page_addr, Cache::Handle* handle);
 
         void SELCC_Exclusive_UnLock(GlobalAddress page_addr, Cache::Handle *handle);
-        bool connectMemcached();
-        bool disconnectMemcached();
+        
+        // Memcached methods now use RDMA_Manager's interface
         void memSet(const char *key, uint32_t klen, const char *val, uint32_t vlen);
-        //blocking function.
         char *memGet(const char *key, uint32_t klen, size_t *v_size = nullptr);
         uint64_t ClusterSum(const std::string &sum_key, uint64_t value);
         uint64_t memFetchAndAdd(const char *key, uint32_t klen);

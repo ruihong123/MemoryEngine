@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.10)
 project(SELCC)
 
+# Generate compile_commands.json for IntelliSense
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 set(CMAKE_CXX_STANDARD 17)
 
 # Disable all warnings

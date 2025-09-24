@@ -1,17 +1,21 @@
 #! /usr/bin/env bash
+# Updated script to work with replication-aware config format
+# Uses connection_db_replica.conf as source (compute nodes limited by $node)
+# Creates connection_replication.conf as the working config
 bin=`dirname "$0"`
 bin=`cd "$bin"; pwd`
 SRC_HOME=$bin/..
-BIN_HOME=$bin/../release
+BIN_HOME=$bin/../debug
 home_dir="/home/wang4996/MemoryEngine/"
-conf_file_all=$bin/../connection_dbservers.conf
-conf_file=$bin/../connection.conf
+
+conf_file_all=$bin/../connection_db_replica.conf
+conf_file=$bin/../connection_replication.conf
 # alpha = 1/(1-theta)
 #compute_nodes=$bin/compute_nodes
 #memory_nodes=$bin/memory_nodes
 log_file=$bin/log
 cache_mem_size=8 # 8 gb Local memory size
-remote_mem_size_base=48 # 48 gb Remote memory size
+remote_mem_size_base=40 # 48 gb Remote memory size
 #master_ip=db3.cs.purdue.edu # make sure this is in accordance with the server whose is_master=1
 master_port=12311
 port=$((10000+RANDOM%1000))
@@ -26,6 +30,14 @@ run() {
 
 #    compute_line_all=$(sed -n '1p' conf_file_all)
 #    memory_line_all=$(sed -n '2p' conf_file_all)
+    # Get compute nodes from conf_file_all (connection_db_replica.conf) - skip comments and empty lines
+    compute_line_all=$(grep -v '^#' "$conf_file_all" | grep -v '^$' | sed -n '1p')
+    
+    # Get memory nodes from conf_file_all (connection_db_replica.conf) - skip comments and empty lines
+    memory_line_all=$(grep -v '^#' "$conf_file_all" | grep -v '^$' | sed -n '2p')
+    
+    # Create the working config file
+    # First line: compute nodes from conf_file_all (limited by $node)
     awk -v pos="$node" -F' ' '{
         for (i=1; i<=NF; i++) {
             if (i <= pos) {
@@ -34,12 +46,18 @@ run() {
             }
         }
         print ""
-    }' "$conf_file_all" > "$conf_file"
+    }' <(echo "$compute_line_all") > "$conf_file"
+    
+    # Second line: memory nodes from conf_file_all (unchanged)
+    echo "$memory_line_all" >> "$conf_file"
+    
+    # Copy all replication configuration lines (lines 3+) from conf_file_all - skip comments and empty lines
+    grep -v '^#' "$conf_file_all" | grep -v '^$' | tail -n +3 >> "$conf_file"
 
     old_IFS=$IFS
     IFS=' '
-    compute_line=$(sed -n '1p' $conf_file)
-    memory_line=$(sed -n '2p' $conf_file)
+    compute_line=$(grep -v '^#' $conf_file | grep -v '^$' | sed -n '1p')
+    memory_line=$(grep -v '^#' $conf_file | grep -v '^$' | sed -n '2p')
     read -r -a compute_nodes <<< "$compute_line"
     read -r -a memory_nodes <<< "$memory_line"
     compute_num=${#compute_nodes[@]}
@@ -84,15 +102,15 @@ run() {
     i=0
     while [ $i -lt $memory_num ]
     do
-      echo "Rsync the connection.conf to ${memory_nodes[$i]}"
-      rsync -vz $home_dir/connection.conf ${memory_nodes[$i]}:$home_dir/connection.conf
+      echo "Rsync the connection_replication.conf to ${memory_nodes[$i]}"
+      rsync -vz $home_dir/connection_replication.conf ${memory_nodes[$i]}:$home_dir/connection_replication.conf
       i=$((i+1))
     done
     i=0
     while [ $i -lt $compute_num ]
     do
-      echo "Rsync the connection.conf to ${compute_nodes[$i]}"
-      rsync -vz $home_dir/connection.conf ${compute_nodes[$i]}:$home_dir/connection.conf
+      echo "Rsync the connection_replication.conf to ${compute_nodes[$i]}"
+      rsync -vz $home_dir/connection_replication.conf ${compute_nodes[$i]}:$home_dir/connection_replication.conf
       i=$((i+1))
     done
     i=0
@@ -106,8 +124,18 @@ run() {
 #    compute_num=$((compute_num+1))
 #    memory_num=$((memory_num+1))
 #    echo `cat $slaves`
-    echo $compute_num
-    echo $memory_num
+    echo "Physical compute nodes: $compute_num"
+    echo "Physical memory nodes: $memory_num"
+    
+    # Count logical memory regions for replication (skip comments and empty lines)
+    logical_memory_num=$(grep -v '^#' "$conf_file" | tail -n +3 | grep -v '^$' | wc -l)
+    if [ $logical_memory_num -eq 0 ]; then
+        # Fallback to physical memory nodes if no logical regions defined
+        logical_memory_num=$memory_num
+        echo "No logical memory regions defined, using physical memory nodes: $logical_memory_num"
+    else
+        echo "Logical memory regions: $logical_memory_num"
+    fi
   	read -r -a memcached_node <<< $(head -n 1 $SRC_HOME/memcached_db_servers.conf)
   	echo "restart memcached on ${memcached_node[0]}"
     ssh -o StrictHostKeyChecking=no ${memcached_node[0]} "sudo service memcached restart"
@@ -148,8 +176,16 @@ run() {
 #        fi
         echo ""
         echo "compute = $compute, ip = $ip, port = $port"
-        echo "$BIN_HOME/micro_bench --op_type $op_type --workload $workload --zipfian_alpha $zipfian_alpha --no_thread $thread --shared_ratio $shared_ratio --read_ratio $read_ratio --space_locality $space_locality --time_locality $time_locality --result_file $result_file --this_node_id $((2*$i)) --tcp_port $port --is_master $is_master --cache_size $cache_mem_size --allocated_mem_size $remote_mem_size --compute_num $compute_num --memory_num $memory_num | tee -a $log_file.$ip"
-        ssh -o StrictHostKeyChecking=no $ip	"ulimit -c 50000000 && cd $BIN_HOME && ./micro_bench --op_type $op_type --workload $workload --zipfian_alpha $zipfian_alpha --no_thread $thread --shared_ratio $shared_ratio --read_ratio $read_ratio --space_locality $space_locality --time_locality $time_locality --result_file $result_file --this_node_id $((2*$i)) --tcp_port $port --is_master $is_master --cache_size $cache_mem_size --allocated_mem_size $remote_mem_size --compute_num $compute_num --memory_num $memory_num | tee -a $log_file.$ip" &
+        # For replication config, we need to count logical memory regions
+        # Count the number of logical memory regions (lines 3+ in config, skip comments)
+        logical_memory_num=$(grep -v '^#' "$conf_file" | tail -n +3 | grep -v '^$' | wc -l)
+        if [ $logical_memory_num -eq 0 ]; then
+            # Fallback to physical memory nodes if no logical regions defined
+            logical_memory_num=$memory_num
+        fi
+        
+        echo "$BIN_HOME/micro_bench --op_type $op_type --workload $workload --zipfian_alpha $zipfian_alpha --no_thread $thread --shared_ratio $shared_ratio --read_ratio $read_ratio --space_locality $space_locality --time_locality $time_locality --result_file $result_file --this_node_id $((2*$i)) --tcp_port $port --is_master $is_master --cache_size $cache_mem_size --allocated_mem_size $remote_mem_size --compute_num $compute_num --memory_num $logical_memory_num | tee -a $log_file.$ip"
+        ssh -o StrictHostKeyChecking=no $ip	"ulimit -c 50000000 && cd $BIN_HOME && ./micro_bench --op_type $op_type --workload $workload --zipfian_alpha $zipfian_alpha --no_thread $thread --shared_ratio $shared_ratio --read_ratio $read_ratio --space_locality $space_locality --time_locality $time_locality --result_file $result_file --this_node_id $((2*$i)) --tcp_port $port --is_master $is_master --cache_size $cache_mem_size --allocated_mem_size $remote_mem_size --compute_num $compute_num --memory_num $logical_memory_num | tee -a $log_file.$ip" &
         sleep 1
         i=$((i+1))
   #    	if [ "$i" = "$node" ]; then
@@ -487,7 +523,7 @@ thread_range="16 32"
 remote_range="100"
 shared_range="100"
 size_grow=0 # 0 not grow, 1 grow with node number
-read_range="0 50 95 100"
+read_range="0 50 95"
 space_range="0"
 time_range="0"
 workload_range="0 1" # 0 uniform, 1 single zipfian, n >1 multispot zipfian.

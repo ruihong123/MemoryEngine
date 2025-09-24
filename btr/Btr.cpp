@@ -1715,7 +1715,7 @@ namespace DSMEngine {
                     GlobalAddress lock_addr = {};
                     // root node lock addr. but this could result in a deadlock for transaction cc.
                     lock_addr.nodeID = 1;
-                    lock_addr.offset = 0;
+                    lock_addr.offset = tree_id * sizeof(GlobalAddress);
                     auto cas_buffer = rdma_mg->Get_local_CAS_mr();
                     //aquire the global lock to avoid mulitple node creating the new  root node
                     acquire_global_lock:
@@ -1985,7 +1985,7 @@ namespace DSMEngine {
                     GlobalAddress lock_addr = {};
                     // root node lock addr. but this could result in a deadlock for transaction cc.
                     lock_addr.nodeID = 1;
-                    lock_addr.offset = 0;
+                    lock_addr.offset = tree_id * sizeof(GlobalAddress);
                     auto cas_buffer = rdma_mg->Get_local_CAS_mr();
                     //aquire the global lock
                     acquire_global_lock:

@@ -7,6 +7,9 @@
 //#include "db/table_cache.h"
 #include <fstream>
 #include <list>
+#include <sstream>
+#include <limits>
+#include <cctype>
 
 //#include "table/table_builder_bams.h"
 //#include "table/table_builder_memoryside.h"
@@ -18,7 +21,6 @@ std::shared_ptr<RDMA_Manager> Memory_Node_Keeper::rdma_mg = std::shared_ptr<RDMA
 DSMEngine::Memory_Node_Keeper::Memory_Node_Keeper(bool use_sub_compaction, uint32_t tcp_port, int pr_s,
                                                   DSMEngine::config_t &config)
     : pr_size(pr_s),
-
       usesubcompaction(use_sub_compaction)
 
 {
@@ -58,12 +60,91 @@ DSMEngine::Memory_Node_Keeper::Memory_Node_Keeper(bool use_sub_compaction, uint3
       i++;
     }
     rdma_mg->memory_nodes.insert({2*i + 1, connection_conf});
-    i++;
+    
+    // Parse optional replication/size lines (v2) - same as compute side
+    auto parse_size = [&](const std::string& tok) -> uint64_t {
+        // Returns bytes; throws on malformed input
+        auto s = tok; for (auto& c: s) c = std::tolower(c);
+        auto mul = 1.0L;
+        if      (s.length() >= 3 && s.substr(s.length()-3) == "kib") { mul = 1024.0L; s.erase(s.size()-3); }
+        else if (s.length() >= 3 && s.substr(s.length()-3) == "mib") { mul = 1024.0L*1024; s.erase(s.size()-3); }
+        else if (s.length() >= 3 && s.substr(s.length()-3) == "gib") { mul = 1024.0L*1024*1024; s.erase(s.size()-3); }
+        else if (s.length() >= 3 && s.substr(s.length()-3) == "tib") { mul = 1024.0L*1024*1024*1024; s.erase(s.size()-3); }
+        else if ((s.length() >= 2 && s.substr(s.length()-2) == "kb") || (s.length() >= 1 && s.back() == 'k')) { mul = 1e3L;  s.erase(s.back()=='b'?2:1); }
+        else if ((s.length() >= 2 && s.substr(s.length()-2) == "mb") || (s.length() >= 1 && s.back() == 'm')) { mul = 1e6L;  s.erase(s.back()=='b'?2:1); }
+        else if ((s.length() >= 2 && s.substr(s.length()-2) == "gb") || (s.length() >= 1 && s.back() == 'g')) { mul = 1e9L;  s.erase(s.back()=='b'?2:1); }
+        else if ((s.length() >= 2 && s.substr(s.length()-2) == "tb") || (s.length() >= 1 && s.back() == 't')) { mul = 1e12L; s.erase(s.back()=='b'?2:1); }
+        // else: plain bytes
+        long double v = 0;
+        try { v = std::stold(s); } catch (...) { throw std::invalid_argument("bad size: "+tok); }
+        long double bytes = v * mul;
+        if (bytes < 0 || bytes > static_cast<long double>(std::numeric_limits<uint64_t>::max())) {
+            throw std::out_of_range("size too large: "+tok);
+        }
+        return static_cast<uint64_t>(bytes + 0.5L);
+    };
+
+    std::string line;
+    // Prepare ordered vector to resolve memory indices → physical ids
+    std::vector<uint16_t> mem_phys_ids; mem_phys_ids.reserve(rdma_mg->memory_nodes.size());
+    for (const auto& kv : rdma_mg->memory_nodes) mem_phys_ids.push_back(kv.first); // ascending odd ids
+
+    while (std::getline(myfile, line)) {
+        // skip comments/empties
+        auto p = line.find_first_not_of(" \t\r\n");
+        if (p == std::string::npos || line[p] == '#') continue;
+
+        std::istringstream iss(line);
+        int lid_int; std::string size_tok;
+        if (!(iss >> lid_int)) continue;
+        uint16_t logical_id = static_cast<uint16_t>(lid_int);
+
+        uint64_t region_bytes = 0;
+        // size is optional; if absent, region_bytes stays 0 (unspecified)
+        std::streampos after_id = iss.tellg();
+        if (iss >> size_tok) {
+            // Look ahead: if token is purely digits or ends with unit → treat as size; else revert
+            bool is_size = std::isdigit(size_tok[0]);
+            for (auto c: size_tok) if (std::isalpha(c)) { is_size = true; break; }
+            if (!is_size) { iss.seekg(after_id); size_tok.clear(); }
+        }
+        if (!size_tok.empty()) {
+            try { region_bytes = parse_size(size_tok); } catch (const std::exception& e) {
+                fprintf(stderr, "config: invalid size for logical %u: %s\n", logical_id, e.what());
+                continue;
+            }
+        }
+
+        std::vector<PhysicalRegion> physical_regions;
+        int mem_idx;
+        while (iss >> mem_idx) {
+            if (mem_idx < 0 || static_cast<size_t>(mem_idx) >= mem_phys_ids.size()) continue;
+            physical_regions.push_back({mem_phys_ids[mem_idx], 0}); // base_ptr will be set later by memory node
+        }
+        if (physical_regions.empty()) {
+            // Identity fallback if no replica list provided
+            if (rdma_mg->memory_nodes.count(logical_id)) physical_regions.push_back({logical_id, 0});
+        }
+        if (!physical_regions.empty()) {
+            rdma_mg->logical_groups[logical_id] = LogicalGroup{std::move(physical_regions), region_bytes};
+        }
+    }
+
+    // Backward-compat: if no logical groups parsed, build identity groups
+    if (rdma_mg->logical_groups.empty()) {
+        for (const auto& kv : rdma_mg->memory_nodes) {
+            rdma_mg->logical_groups[kv.first] = LogicalGroup{{{kv.first, 0}}, /*bytes=*/0};
+        }
+    }
+
+    myfile.close();
+    
+    // Memcached connection is now handled by RDMA_Manager
   }
 
   Memory_Node_Keeper::~Memory_Node_Keeper() {
 //    delete opts->filter_policy;
-
+    // Memcached disconnection is now handled by RDMA_Manager
   }
 
 
@@ -121,6 +202,15 @@ DSMEngine::Memory_Node_Keeper::Memory_Node_Keeper(bool use_sub_compaction, uint3
         {
           rdma_mg->Preregister_Memory(pr_size);
           rdma_mg->pre_allocated_flag = true;
+          
+          // Broadcast metadata (base pointers and rkeys) for all logical regions this memory node hosts
+          for (const auto& [logical_id, group] : rdma_mg->logical_groups) {
+              for (const auto& phys_reg : group.physical_regions) {
+                  if (phys_reg.phys_id == rdma_mg->node_id) {
+                      broadcastReplicaMetadata(logical_id, phys_reg.phys_id, phys_reg.base_ptr, phys_reg.rkey);
+                  }
+              }
+          }
         }
     }
       ibv_mr* mr_data = rdma_mg->preregistered_region;
@@ -625,6 +715,29 @@ int Memory_Node_Keeper::server_sock_connect(const char* servername, int port) {
 
 
 
+}
+
+// Memcached helper methods implementation - now uses RDMA_Manager
+
+void DSMEngine::Memory_Node_Keeper::broadcastReplicaMetadata(uint16_t logical_id, uint16_t physical_id, uint64_t base_ptr, uint32_t rkey) {
+    // Use RDMA_Manager's memcached interface
+    if (!rdma_mg) {
+        fprintf(stderr, "Memory_Node_Keeper: RDMA_Manager not available for memcached operation\n");
+        return;
+    }
+    
+    // Create key: "metadata_logical_<logical_id>_physical_<physical_id>"
+    char key[100];
+    snprintf(key, sizeof(key), "metadata_logical_%u_physical_%u", logical_id, physical_id);
+    
+    // Create value: combined format "base_ptr:rkey"
+    char value[64];
+    snprintf(value, sizeof(value), "%lu:%u", base_ptr, rkey);
+    
+    // Use RDMA_Manager's memcached interface
+    rdma_mg->memcachedSet(key, strlen(key), value, strlen(value));
+    printf("Broadcasted metadata: logical_id=%u, physical_id=%u, base_ptr=%lu, rkey=%u\n", 
+           logical_id, physical_id, base_ptr, rkey);
 }
 
 

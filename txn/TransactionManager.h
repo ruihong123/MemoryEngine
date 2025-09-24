@@ -68,7 +68,7 @@ class TransactionManager {
           rdma_mg->Set_message_handling_func(ProcessSnapshotPush, SnapshotPush);
       }
 
-      uint8_t target_node_id = 2*((rdma_mg->node_id/2) % rdma_mg->GetMemoryNodeNum()) +1;
+      uint8_t target_node_id = 2*((rdma_mg->node_id/2) % rdma_mg->GetLogicalMemNodeNum()) +1;
       GlobalAddress remote_addr = rdma_mg->Allocate_Remote_RDMA_Slot(Chunk_type::DeltaChunk, target_node_id);
       assert((remote_addr.offset % 128*define::MB)%10*define::MB == 0);
       ibv_mr* local_mr = new ibv_mr{};

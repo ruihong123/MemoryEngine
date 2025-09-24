@@ -390,99 +390,34 @@ namespace DSMEngine {
     }
 #endif
 
-    bool DDSM::connectMemcached() {
-        memcached_server_st *servers = NULL;
-        memcached_return rc;
-        // Need to change this hardcoded file location.
-//        std::ifstream conf("../memcached_ip.conf");
-        std::ifstream conf("../memcached_db_servers.conf");
-        if (!conf) {
-            fprintf(stderr, "can't open memcached_ip.conf\n");
-            return false;
-        }
-
-        std::string addr, port;
-        std::getline(conf, addr);
-        std::getline(conf, port);
-
-        memc = memcached_create(NULL);
-        servers = memcached_server_list_append(servers, trim(addr).c_str(),
-                                               std::stoi(trim(port)), &rc);
-        rc = memcached_server_push(memc, servers);
-
-        if (rc != MEMCACHED_SUCCESS) {
-            fprintf(stderr, "Counld't add server:%s\n", memcached_strerror(memc, rc));
-            sleep(1);
-            return false;
-        }
-
-        memcached_behavior_set(memc, MEMCACHED_BEHAVIOR_BINARY_PROTOCOL, 1);
-        return true;
-    }
-
-    bool DDSM::disconnectMemcached() {
-        if (memc) {
-            memcached_quit(memc);
-            memcached_free(memc);
-            memc = NULL;
-        }
-        return true;
-    }
+    // connectMemcached and disconnectMemcached are now handled by RDMA_Manager
     void DDSM::memSet(const char *key, uint32_t klen, const char *val,
                         uint32_t vlen) {
-
-        volatile memcached_return rc;
-        while (true) {
-            memc_mutex.lock();
-
-            rc = memcached_set(memc, key, klen, val, vlen, (time_t)0, (uint32_t)0);
-            if (rc == MEMCACHED_SUCCESS) {
-                memc_mutex.unlock();
-                break;
-            }else{
-                memc_mutex.unlock();
-
-            }
-
-            usleep(400);
+        // Use RDMA_Manager's memcached interface
+        if (rdma_mg) {
+            rdma_mg->memcachedSet(key, klen, val, vlen);
+        } else {
+            fprintf(stderr, "DDSM: RDMA_Manager not available for memcached operation\n");
         }
     }
 
     char *DDSM::memGet(const char *key, uint32_t klen, size_t *v_size) {
-
-        size_t l;
-        char *res;
-        uint32_t flags;
-        memcached_return rc;
-
-        while (true) {
-            memc_mutex.lock();
-            res = memcached_get(memc, key, klen, &l, &flags, &rc);
-            if (rc == MEMCACHED_SUCCESS) {
-                memc_mutex.unlock();
-                break;
-            }else{
-                memc_mutex.unlock();
-
-            }
-            usleep(400 * rdma_mg->node_id);
+        // Use RDMA_Manager's memcached interface
+        if (rdma_mg) {
+            return rdma_mg->memcachedGet(key, klen, v_size);
+        } else {
+            fprintf(stderr, "DDSM: RDMA_Manager not available for memcached operation\n");
+            return nullptr;
         }
-
-        if (v_size != nullptr) {
-            *v_size = l;
-        }
-
-        return res;
     }
 
     uint64_t DDSM::memFetchAndAdd(const char *key, uint32_t klen) {
-        uint64_t res;
-        while (true) {
-            memcached_return rc = memcached_increment(memc, key, klen, 1, &res);
-            if (rc == MEMCACHED_SUCCESS) {
-                return res;
-            }
-            usleep(10000);
+        // Use RDMA_Manager's memcached interface
+        if (rdma_mg) {
+            return rdma_mg->memcachedIncrement(key, klen, 1);
+        } else {
+            fprintf(stderr, "DDSM: RDMA_Manager not available for memcached operation\n");
+            return 0;
         }
     }
 

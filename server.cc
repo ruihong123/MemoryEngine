@@ -32,7 +32,8 @@ int main(int argc,char* argv[])
               1,	 /* ib_port */
               1, /* gid_idx */
               0,
-              Memory_server_id};
+              Memory_server_id
+      };
      mn_keeper = new DSMEngine::Memory_Node_Keeper(true, tcp_port, pr_size, config);
 //     DSMEngine::RDMA_Manager::node_id = 2* Memory_server_id + 1;
   }else{

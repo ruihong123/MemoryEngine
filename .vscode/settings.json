@@ -1,0 +1,42 @@
+{
+    "C_Cpp.intelliSenseEngine": "default",
+    "C_Cpp.errorSquiggles": "enabled",
+    "C_Cpp.autocomplete": "default",
+    "C_Cpp.suggestSnippets": true,
+    "C_Cpp.enhancedColorization": "enabled",
+    "C_Cpp.intelliSenseEngineFailureRecovery": "enabled",
+    "C_Cpp.workspaceSymbols": "all",
+    "C_Cpp.includePath": [
+        "${workspaceFolder}/**",
+        "${workspaceFolder}/include",
+        "${workspaceFolder}/storage",
+        "${workspaceFolder}/utils",
+        "${workspaceFolder}/txn",
+        "${workspaceFolder}/tpcc",
+        "${workspaceFolder}/bench",
+        "${workspaceFolder}/port",
+        "${workspaceFolder}/btr",
+        "${workspaceFolder}/memory_node",
+        "${workspaceFolder}/Rtree"
+    ],
+    "C_Cpp.defines": [
+        "ROCKSDB_SUPPORT_THREAD_LOCAL",
+        "MVOCC",
+        "BACKOFF",
+        "BOOST_ALLOW_DEPRECATED_HEADERS"
+    ],
+    "C_Cpp.default.cppStandard": "c++17",
+    "C_Cpp.default.cStandard": "c17",
+    "C_Cpp.default.compilerPath": "/usr/bin/gcc",
+    "C_Cpp.default.intelliSenseMode": "linux-gcc-x64",
+    "files.associations": {
+        "*.h": "c",
+        "*.hpp": "cpp",
+        "*.cc": "cpp",
+        "*.cpp": "cpp"
+    },
+    "cmake.buildArgs": ["-j", "8"],
+    "cmake.buildParallelJobs": 8,
+    "cmake.generator": "Ninja"
+}
+

@@ -1,0 +1,45 @@
+{
+    "configurations": [
+        {
+            "name": "Linux",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "${workspaceFolder}/include",
+                "${workspaceFolder}/storage",
+                "${workspaceFolder}/utils",
+                "${workspaceFolder}/txn",
+                "${workspaceFolder}/tpcc",
+                "${workspaceFolder}/bench",
+                "${workspaceFolder}/port",
+                "${workspaceFolder}/btr",
+                "${workspaceFolder}/memory_node",
+                "${workspaceFolder}/Rtree",
+                "/usr/include",
+                "/usr/local/include",
+                "/usr/include/infiniband",
+                "/usr/include/boost"
+            ],
+            "defines": [
+                "ROCKSDB_SUPPORT_THREAD_LOCAL",
+                "MVOCC",
+                "BACKOFF",
+                "BOOST_ALLOW_DEPRECATED_HEADERS"
+            ],
+            "compilerPath": "/usr/bin/gcc",
+            "cStandard": "c17",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "linux-gcc-x64",
+            "compileCommands": "${workspaceFolder}/compile_commands.json",
+            "configurationProvider": "ms-vscode.cmake-tools",
+            "browse": {
+                "path": [
+                    "${workspaceFolder}/**"
+                ],
+                "limitSymbolsToIncludedHeaders": true,
+                "databaseFilename": "${workspaceFolder}/.vscode/browse.vc.db"
+            }
+        }
+    ],
+    "version": 4
+}
+

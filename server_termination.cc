@@ -61,7 +61,7 @@ int main(int argc,char* argv[])
 //  mn_keeper->SetBackgroundThreads(0, DSMEngine::ThreadPoolType::CompactionThreadPool);
   std::thread* TPC_connection_handler = new std::thread(&DSMEngine::Memory_Node_Keeper::Server_to_Client_Communication, mn_keeper);
   TPC_connection_handler->detach();
-  DSMEngine::DDSM ddsm(nullptr, nullptr);
+  DSMEngine::DDSM ddsm(nullptr, mn_keeper->rdma_mg.get());
     int temp = SYNC_KEY + Memcache_offset + mn_keeper->rdma_mg->node_id;
     char* ret;
     for (int i = 0; i < mn_keeper->rdma_mg->GetComputeNodeNum(); i++) {
