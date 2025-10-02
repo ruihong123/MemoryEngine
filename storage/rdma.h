@@ -58,7 +58,7 @@ static inline uint64_t htonll(uint64_t x) { return x; }
 #define REPLICA_WRITE_ALL 1             // Write to all replicas (default)
 #define REPLICA_WRITE_PRIMARY_ASYNC 2   // Write to primary + async replication
 #define REPLICA_WRITE_MAJORITY 3        // Write to majority
-#define REPLICA_TYPE REPLICA_WRITE_ALL  // Current replication strategy
+#define REPLICA_TYPE REPLICA_WRITE_PRIMARY_ONLY  // Current replication strategy
 
 namespace DSMEngine {
     class Cache;
@@ -229,6 +229,11 @@ namespace DSMEngine {
     struct PullSP {
 
     };
+    struct MRRequest {
+        size_t mem_size;
+        uint8_t target_region_id;
+
+    };
 //struct WUnlock_message{
 //    GlobalAddress page_addr;
 //};
@@ -236,7 +241,7 @@ namespace DSMEngine {
 // In other word, the threads will not need to figure out whether this message is a reply or response,
 // when receive a message from the main queue pair.
     union RDMA_Request_Content {
-        size_t mem_size;
+        MRRequest mr_request;
         Registered_qp_config qp_config;
         Registered_qp_config_xcompute qp_config_xcompute;
         fs_sync_command fs_sync_cmd;
@@ -475,7 +480,16 @@ namespace DSMEngine {
     public:
         class Async_Tasks {
         public:
-            void *handles[ATOMIC_OUTSTANDING_SIZE] = {nullptr};
+            enum task_type {
+                write_local_flush,
+                read_unlock_async,
+                write_handover_async,
+                handover_async,
+                write_downtoR_async,
+                write_replica_async,
+            };
+            task_type work_type[ATOMIC_OUTSTANDING_SIZE] = {};
+            // std::vector<task_type> work_type = {};
             ibv_mr *mrs[ATOMIC_OUTSTANDING_SIZE] = {nullptr};
 #if ASYNC_PLAN == 1
             uint32_t counter = 0;
@@ -746,7 +760,7 @@ namespace DSMEngine {
         //Allocate memory as "size", then slice the whole region into small chunks according to the pool name
         bool Local_Memory_Register(
                 char **p2buffpointer, ibv_mr **p2mrpointer, size_t size,
-                Chunk_type pool_name);  // register the memory on the local side
+                Chunk_type pool_name, uint16_t logical_region_id = 0);  // register the memory on the local side
         // bulk deallocation preparation.
 
         // The RPC to bulk deallocation.
@@ -870,11 +884,11 @@ namespace DSMEngine {
 #endif
 
         // THis function acctually does not flush global lock words, otherwise the RDMA write will interfere with RDMA FAA making the CAS failed always
-        bool global_write_page_and_Wunlock(ibv_mr *page_buffer, GlobalAddress page_addr, size_t page_size,
+        bool global_write_page_and_Wunlock_Async(ibv_mr *page_buffer, GlobalAddress page_addr, size_t page_size,
                                            GlobalAddress remote_lock_addr, Cache_Handle *handle = nullptr,
                                            bool async = true);
 
-        bool global_write_page_and_WHandover(ibv_mr *page_buffer, GlobalAddress page_addr, size_t page_size,
+        [[maybe_unused]] bool global_write_page_and_WHandover_Async(ibv_mr *page_buffer, GlobalAddress page_addr, size_t page_size,
                                              uint8_t next_holder_id,
                                              GlobalAddress remote_lock_addr,
                                              Cache_Handle *handle = nullptr);
@@ -882,7 +896,7 @@ namespace DSMEngine {
         bool global_WHandover(ibv_mr *page_buffer, GlobalAddress page_addr, size_t page_size, uint8_t next_holder_id,
                               GlobalAddress remote_lock_addr, bool async);
 
-        bool global_write_page_and_WdowntoR(ibv_mr *page_buffer, GlobalAddress page_addr, size_t page_size,
+        bool global_write_page_and_WdowntoR_Async(ibv_mr *page_buffer, GlobalAddress page_addr, size_t page_size,
                                             GlobalAddress remote_lock_addr, uint8_t next_holder_id, bool async = true,
                                             Cache_Handle *handle = nullptr);
 
@@ -905,6 +919,11 @@ namespace DSMEngine {
         void
         Prepare_WR_Write(ibv_send_wr &sr, ibv_sge &sge, GlobalAddress remote_ptr, ibv_mr *local_mr, size_t msg_size,
                          size_t send_flag, Chunk_type pool_name);
+
+        void
+        Prepare_WR_Write_Replication(ibv_send_wr &sr, ibv_sge &sge, GlobalAddress remote_ptr, ibv_mr *local_mr, 
+                                     size_t msg_size, size_t send_flag, Chunk_type pool_name, 
+                                     uint16_t target_physical_node_id);
 
         int Batch_Submit_WRs(ibv_send_wr *sr, int poll_num, uint16_t target_node_id, std::string qp_type = "default");
 
@@ -1057,7 +1076,7 @@ namespace DSMEngine {
         // Logical memory id (odd) → replication group + size
         std::map<uint16_t, LogicalGroup> logical_groups{};
         ibv_mr *preregistered_region;
-        std::list<ibv_mr *> pre_allocated_pool;
+        std::unordered_map<uint16_t, std::list<ibv_mr *>> pre_allocated_pool; // pool for main memory region copy.
         bool pre_allocated_flag = false;
         static thread_local uint64_t round_robin_cur;
 //  std::map<void*, In_Use_Array*>* Remote_Leaf_Node_Bitmap;

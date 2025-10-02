@@ -5,6 +5,7 @@
 
 //#include "db/filename.h"
 //#include "db/table_cache.h"
+#include <cassert>
 #include <fstream>
 #include <list>
 #include <sstream>
@@ -65,23 +66,20 @@ DSMEngine::Memory_Node_Keeper::Memory_Node_Keeper(bool use_sub_compaction, uint3
     auto parse_size = [&](const std::string& tok) -> uint64_t {
         // Returns bytes; throws on malformed input
         auto s = tok; for (auto& c: s) c = std::tolower(c);
-        auto mul = 1.0L;
-        if      (s.length() >= 3 && s.substr(s.length()-3) == "kib") { mul = 1024.0L; s.erase(s.size()-3); }
-        else if (s.length() >= 3 && s.substr(s.length()-3) == "mib") { mul = 1024.0L*1024; s.erase(s.size()-3); }
-        else if (s.length() >= 3 && s.substr(s.length()-3) == "gib") { mul = 1024.0L*1024*1024; s.erase(s.size()-3); }
-        else if (s.length() >= 3 && s.substr(s.length()-3) == "tib") { mul = 1024.0L*1024*1024*1024; s.erase(s.size()-3); }
-        else if ((s.length() >= 2 && s.substr(s.length()-2) == "kb") || (s.length() >= 1 && s.back() == 'k')) { mul = 1e3L;  s.erase(s.back()=='b'?2:1); }
-        else if ((s.length() >= 2 && s.substr(s.length()-2) == "mb") || (s.length() >= 1 && s.back() == 'm')) { mul = 1e6L;  s.erase(s.back()=='b'?2:1); }
-        else if ((s.length() >= 2 && s.substr(s.length()-2) == "gb") || (s.length() >= 1 && s.back() == 'g')) { mul = 1e9L;  s.erase(s.back()=='b'?2:1); }
-        else if ((s.length() >= 2 && s.substr(s.length()-2) == "tb") || (s.length() >= 1 && s.back() == 't')) { mul = 1e12L; s.erase(s.back()=='b'?2:1); }
+        uint64_t mul = 1ULL;
+        if ((s.length() >= 2 && s.substr(s.length()-2) == "kb") || (s.length() >= 1 && s.back() == 'k')) { mul = 1024ULL;  s.erase(s.back()=='b'?s.length()-2:s.length()-1); }
+        else if ((s.length() >= 2 && s.substr(s.length()-2) == "mb") || (s.length() >= 1 && s.back() == 'm')) { mul = 1024ULL*1024;  s.erase(s.back()=='b'?s.length()-2:s.length()-1); }
+        else if ((s.length() >= 2 && s.substr(s.length()-2) == "gb") || (s.length() >= 1 && s.back() == 'g')) { mul = 1024ULL*1024*1024;  s.erase(s.back()=='b'?s.length()-2:s.length()-1); }
+        else if ((s.length() >= 2 && s.substr(s.length()-2) == "tb") || (s.length() >= 1 && s.back() == 't')) { mul = 1024ULL*1024*1024*1024; s.erase(s.back()=='b'?s.length()-2:s.length()-1); }
         // else: plain bytes
-        long double v = 0;
-        try { v = std::stold(s); } catch (...) { throw std::invalid_argument("bad size: "+tok); }
-        long double bytes = v * mul;
-        if (bytes < 0 || bytes > static_cast<long double>(std::numeric_limits<uint64_t>::max())) {
-            throw std::out_of_range("size too large: "+tok);
+        uint64_t v = 0;
+        try { v = std::stoull(s); } catch (...) { throw std::invalid_argument("bad size: "+tok); }
+        uint64_t bytes = v * mul;
+        assert(bytes != 2147483648);
+        if (bytes == 0) {
+            throw std::out_of_range("size is zero: "+tok);
         }
-        return static_cast<uint64_t>(bytes + 0.5L);
+        return bytes;
     };
 
     std::string line;
@@ -119,7 +117,7 @@ DSMEngine::Memory_Node_Keeper::Memory_Node_Keeper(bool use_sub_compaction, uint3
         int mem_idx;
         while (iss >> mem_idx) {
             if (mem_idx < 0 || static_cast<size_t>(mem_idx) >= mem_phys_ids.size()) continue;
-            physical_regions.push_back({mem_phys_ids[mem_idx], 0}); // base_ptr will be set later by memory node
+            physical_regions.push_back({mem_phys_ids[mem_idx], 0, 0}); // base_ptr will be synchronized later via memcached
         }
         if (physical_regions.empty()) {
             // Identity fallback if no replica list provided
@@ -500,20 +498,49 @@ int Memory_Node_Keeper::server_sock_connect(const char* servername, int port) {
   char* buff;
   {
     std::unique_lock<std::shared_mutex> lck(rdma_mg->local_mem_mutex);
-    assert(request->content.mem_size == define::Alloc_Granu); // Preallocation requrie memory is in chunk of 128MB
-      if (!rdma_mg->Local_Memory_Register(&buff, &mr, request->content.mem_size,
-                                          Regular_Page)) {
-        fprintf(stderr, "memory registering failed by size of 0x%x\n",
-                static_cast<unsigned>(request->content.mem_size));
-          assert(false);
-
-      }
+    assert(request->content.mr_request.mem_size == define::Alloc_Granu); // Preallocation requrie memory is in chunk of 128MB
+    
+    // Extract logical region ID from the request
+    uint16_t logical_region_id = request->content.mr_request.target_region_id;
+    // printf("Memory node %u: Processing MR request for logical region %u\n", 
+    //        rdma_mg->node_id, logical_region_id);
+    
+    try {
+        if (!rdma_mg->Local_Memory_Register(&buff, &mr, request->content.mr_request.mem_size,
+                                            Regular_Page, logical_region_id)) {
+            fprintf(stderr, "Memory registering failed for logical region %u by size of 0x%x\n",
+                    logical_region_id, static_cast<unsigned>(request->content.mr_request.mem_size));
+            // Send error reply instead of asserting
+            send_pointer->received = false;
+            send_pointer->content.mr = {}; // Empty MR to indicate failure
+            
+            rdma_mg->RDMA_Write(request->buffer, request->rkey, &send_mr,
+                                sizeof(RDMA_Reply), client_ip, IBV_SEND_SIGNALED, 1, target_node_id);
+            rdma_mg->Deallocate_Local_RDMA_Slot(send_mr.addr, Message);
+            delete request;
+            return;
+        }
+    } catch (const std::runtime_error& e) {
+        lck.unlock();
+        fprintf(stderr, "Exception in memory registration: %s\n", e.what());
+        // Send error reply for exception case
+        send_pointer->received = true;
+        send_pointer->content.mr = {}; // Empty MR to indicate failure
+        send_pointer->content.mr.addr = (void*)1; // Set addr to 1 to mark error
+        
+        rdma_mg->RDMA_Write(request->buffer, request->rkey, &send_mr,
+                            sizeof(RDMA_Reply), client_ip, IBV_SEND_SIGNALED, 1, target_node_id);
+        rdma_mg->Deallocate_Local_RDMA_Slot(send_mr.addr, Message);
+        delete request;
+        return;
+    }
   }
 
   send_pointer->content.mr = *mr;
   assert(send_pointer->content.mr.length == define::Alloc_Granu);
   send_pointer->received = true;
-
+  // printf("Node %u: Writing MR to client %s at position %p\n", rdma_mg->node_id, client_ip.c_str(), request->buffer);
+  // fflush(stdout);
   rdma_mg->RDMA_Write(request->buffer, request->rkey, &send_mr,
                       sizeof(RDMA_Reply), client_ip, IBV_SEND_SIGNALED, 1, target_node_id);
   rdma_mg->Deallocate_Local_RDMA_Slot(send_mr.addr, Message);

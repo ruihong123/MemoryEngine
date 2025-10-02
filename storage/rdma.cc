@@ -1,3 +1,4 @@
+#include <cassert>
 #include <fstream>
 #include "rdma.h"
 #include <cstdint>
@@ -6,9 +7,11 @@
 #include "storage/page.h"
 #include "HugePageAlloc.h"
 #include "include/cache.h"
+#include <infiniband/verbs.h>
 #include <sstream>
 #include <limits>
 #include <cctype>
+#include <stdexcept>
 #include <thread>
 #include <chrono>
 #include <vector>
@@ -731,23 +734,31 @@ std::atomic<uint64_t> RDMA_Manager::ReadCount = 0;
 //    Register the memory through ibv_reg_mr on the local side. this function will be called by both of the server side and client side.
     bool RDMA_Manager::Local_Memory_Register(char **p2buffpointer,
                                              ibv_mr **p2mrpointer, size_t size,
-                                             Chunk_type pool_name) {
-        printf("Local memroy register\n");
+                                             Chunk_type pool_name, uint16_t logical_region_id) {
+        printf("Local memory register for logical region %u\n", logical_region_id);
         int mr_flags = 0;
-        if (node_id % 2 == 1 && !pre_allocated_pool.empty() && pool_name != Message) {
-            *p2mrpointer = pre_allocated_pool.back();
-            pre_allocated_pool.pop_back();
-            *p2buffpointer = (char *) (*p2mrpointer)->addr;
-            printf("Allcoate from the preallocated pool, total_registered_size is %zu\n", total_registered_size);
-            fflush(stdout);
+        
+        // For memory nodes: check if this node hosts the requested logical region (any copy)
+        if (node_id % 2 == 1 && pool_name != Message) {
+            // Check if we have pre-allocated chunks for this logical region
+            auto it = pre_allocated_pool.find(logical_region_id);
+            if (it != pre_allocated_pool.end() && !it->second.empty()) {
+                *p2mrpointer = it->second.back();
+                it->second.pop_back();
+                *p2buffpointer = (char *) (*p2mrpointer)->addr;
+                printf("Allocate from pre-allocated pool for logical region %u, total_registered_size is %zu\n", 
+                       logical_region_id, total_registered_size);
+                fflush(stdout);
+            } else {
+                // Logical region doesn't exist on this node or pool is empty
+                printf("Error: Logical region %u does not exist on this node or pool is empty\n", logical_region_id);
+                assert(false);
+                throw std::runtime_error("Logical region " + std::to_string(logical_region_id) + " does not exist on this node or pool is empty");
+                exit(1);
+            }
         } else {
             //If this node is a compute node, allocate the memory on demanding.
 //      printf("Note: Allocate memory from OS, not allocate from the preallocated pool.\n");
-            if (node_id % 2 == 1 && pool_name == Regular_Page) {
-                printf("Allocate Registered Memory outside the preallocated pool is wrong, the base pointer has been changed\n");
-                assert(false);
-                exit(0);
-            }
             *p2buffpointer = (char *) hugePageAlloc(size);
 //      *p2buffpointer = (char*)hugePageAlloc(size);
             if (!*p2buffpointer) {
@@ -796,33 +807,35 @@ std::atomic<uint64_t> RDMA_Manager::ReadCount = 0;
     };
 
     ibv_mr *RDMA_Manager::Preregister_Memory(size_t gb_number) {
+        // Compute nodes should never call Preregister_Memory
+        if (node_id % 2 == 0) {
+            throw std::runtime_error("Preregister_Memory should not be called on compute nodes (node_id=" + std::to_string(node_id) + ")");
+        }
+        
+        // Assert we're on a memory node
+        assert(node_id % 2 == 1);
+        
         int mr_flags = 0;
         uint64_t size = gb_number * define::GB;
-//  if (node_id == 2){
-//    void* dummy = malloc(size*2);
-//  }
 
         std::fprintf(stderr, "Pre allocate registered memory %zu GB %30s\r", size, "");
         std::fflush(stderr);
         ibv_mr *mrpointer;
         
-        // For memory nodes: allocate memory for all logical regions this node hosts
-        if (node_id % 2 == 1) { // Memory node
-            // Calculate total required size for this physical node
-            uint64_t total_required_size = 0;
-            for (const auto& [logical_id, group] : logical_groups) {
-                for (const auto& phys_reg : group.physical_regions) {
-                    if (phys_reg.phys_id == node_id && group.bytes > 0) {
-                        total_required_size += group.bytes;
-                    }
+        // Calculate total required size for this physical node
+        uint64_t total_required_size = 0;
+        for (const auto& [logical_id, group] : logical_groups) {
+            for (const auto& phys_reg : group.physical_regions) {
+                if (phys_reg.phys_id == node_id && group.bytes > 0) {
+                    total_required_size += group.bytes;
                 }
             }
-            
-            // Use the larger of requested size or calculated required size
-            if (total_required_size > size) {
-                size = total_required_size;
-                std::fprintf(stderr, "Adjusted memory size to %zu bytes for logical regions\n", size);
-            }
+        }
+        
+        // Use the larger of requested size or calculated required size
+        if (total_required_size > size) {
+            size = total_required_size;
+            std::fprintf(stderr, "Adjusted memory size to %zu bytes for logical regions\n", size);
         }
         
         // todo: change the config file format to support multiple memory region replication.
@@ -848,42 +861,72 @@ std::atomic<uint64_t> RDMA_Manager::ReadCount = 0;
         }
         local_mem_regions.push_back(mrpointer);
         
-        // For memory nodes: update base pointers and rkeys, then broadcast them
-        if (node_id % 2 == 1) { // Memory node
-            uint64_t current_offset = 0;
-            for (auto& [logical_id, group] : logical_groups) {
-                for (auto& phys_reg : group.physical_regions) {
-                    if (phys_reg.phys_id == node_id) {
-                        phys_reg.base_ptr = current_offset;
-                        phys_reg.rkey = mrpointer->rkey; // Use the registered memory region's rkey
-                        printf("Memory node %u: Set base_ptr=%lu, rkey=%u for logical_id=%u\n", 
-                                node_id, current_offset, phys_reg.rkey, logical_id);
-                        
-                        // Broadcast the base pointer and rkey via memcached
-                        // Note: This requires access to the Memory_Node_Keeper instance
-                        // For now, we'll store it and broadcast later in the memory node keeper
-                        
-                        if (group.bytes > 0) {
-                            current_offset += group.bytes;
-                        }
+        // Update base pointers and rkeys for all logical regions hosted on this memory node
+        uint64_t current_offset = 0;
+        for (auto& [logical_id, group] : logical_groups) {
+            for (auto& phys_reg : group.physical_regions) {
+                if (phys_reg.phys_id == node_id) {
+                    phys_reg.base_ptr = reinterpret_cast<uint64_t>(buff_pointer) + current_offset;
+                    phys_reg.rkey = mrpointer->rkey; // Use the registered memory region's rkey
+                    printf("Memory node %u: Set base_ptr=%lu, rkey=%u for logical_id=%u (offset=%lu)\n", 
+                            node_id, phys_reg.base_ptr, phys_reg.rkey, logical_id, current_offset);
+                    
+                    // Broadcast the base pointer and rkey via memcached
+                    // Note: This requires access to the Memory_Node_Keeper instance
+                    // For now, we'll store it and broadcast later in the memory node keeper
+                    
+                    if (group.bytes > 0) {
+                        current_offset += group.bytes;
                     }
                 }
             }
-        } else {
-            // Compute node: legacy behavior (no memory registration needed)
-            // Base pointers will be fetched in Client_Set_Up_Resources()
         }
         preregistered_region = mrpointer;
-        size_t chunk_number = gb_number * define::GB / define::Alloc_Granu;
-        ibv_mr *mrs = new ibv_mr[chunk_number];
-        for (int i = 0; i < chunk_number; ++i) {
-            mrs[i] = *mrpointer;
-            mrs[i].addr = (char *) mrs[i].addr + i * (define::Alloc_Granu);
-            mrs[i].length = define::Alloc_Granu;
-
-            pre_allocated_pool.push_back(&mrs[i]);
+        
+        // Organize pre_allocated_pool by logical region ID (all copies)
+        for (auto& [logical_id, group] : logical_groups) {
+            // Check if this node hosts ANY copy (main or replica) for this logical region
+            bool hosts_this_region = false;
+            for (const auto& phys_reg : group.physical_regions) {
+                if (phys_reg.phys_id == node_id) {
+                    hosts_this_region = true;
+                    break;
+                }
+            }
+            
+            if (hosts_this_region && group.bytes > 0) {
+                // Find the physical region for this node to get the correct base pointer
+                uint64_t region_base_ptr = 0;
+                uint32_t region_rkey = 0;
+                for (const auto& phys_reg : group.physical_regions) {
+                    if (phys_reg.phys_id == node_id) {
+                        region_base_ptr = phys_reg.base_ptr;
+                        region_rkey = phys_reg.rkey;
+                        break;
+                    }
+                }
+                
+                // Calculate number of chunks for this logical region
+                size_t chunks_for_region = group.bytes / define::Alloc_Granu;
+                if (chunks_for_region == 0) chunks_for_region = 1; // At least one chunk
+                if (pre_allocated_pool.find(logical_id) != pre_allocated_pool.end()) {
+                    printf("Error: Logical region %u already exists in pre_allocated_pool. (Maybe you define two replicas for the same logical region in this memory node)\n", logical_id);
+                    assert(false);
+                }
+                // Create chunks for this logical region using the correct base pointer
+                ibv_mr *mrs = new ibv_mr[chunks_for_region];
+                for (size_t i = 0; i < chunks_for_region; ++i) {
+                    mrs[i] = *mrpointer; // Copy the base MR structure
+                    mrs[i].addr = (char *) region_base_ptr + i * (define::Alloc_Granu); // Use region-specific base pointer
+                    mrs[i].length = define::Alloc_Granu;
+                    mrs[i].rkey = region_rkey; // Use region-specific rkey
+                    pre_allocated_pool[logical_id].push_back(&mrs[i]);
+                    assert((uint64_t)mrs[i].addr <= (uint64_t)region_base_ptr + group.bytes);
+                }
+                printf("Memory node %u: Allocated %zu chunks for logical region %u (base_ptr=%lu, rkey=%u)\n", 
+                       node_id, chunks_for_region, logical_id, region_base_ptr, region_rkey);
+            }
         }
-
         return mrpointer;
     }
 
@@ -942,23 +985,21 @@ std::atomic<uint64_t> RDMA_Manager::ReadCount = 0;
         auto parse_size = [&](const std::string& tok) -> uint64_t {
             // Returns bytes; throws on malformed input
             auto s = tok; for (auto& c: s) c = std::tolower(c);
-            auto mul = 1.0L;
-            if      (s.length() >= 3 && s.substr(s.length()-3) == "kib") { mul = 1024.0L; s.erase(s.size()-3); }
-            else if (s.length() >= 3 && s.substr(s.length()-3) == "mib") { mul = 1024.0L*1024; s.erase(s.size()-3); }
-            else if (s.length() >= 3 && s.substr(s.length()-3) == "gib") { mul = 1024.0L*1024*1024; s.erase(s.size()-3); }
-            else if (s.length() >= 3 && s.substr(s.length()-3) == "tib") { mul = 1024.0L*1024*1024*1024; s.erase(s.size()-3); }
-            else if ((s.length() >= 2 && s.substr(s.length()-2) == "kb") || (s.length() >= 1 && s.back() == 'k')) { mul = 1e3L;  s.erase(s.back()=='b'?2:1); }
-            else if ((s.length() >= 2 && s.substr(s.length()-2) == "mb") || (s.length() >= 1 && s.back() == 'm')) { mul = 1e6L;  s.erase(s.back()=='b'?2:1); }
-            else if ((s.length() >= 2 && s.substr(s.length()-2) == "gb") || (s.length() >= 1 && s.back() == 'g')) { mul = 1e9L;  s.erase(s.back()=='b'?2:1); }
-            else if ((s.length() >= 2 && s.substr(s.length()-2) == "tb") || (s.length() >= 1 && s.back() == 't')) { mul = 1e12L; s.erase(s.back()=='b'?2:1); }
+            uint64_t mul = 1ULL;
+            if ((s.length() >= 2 && s.substr(s.length()-2) == "kb") || (s.length() >= 1 && s.back() == 'k')) { mul = 1024ULL;  s.erase(s.back()=='b'?s.length()-2:s.length()-1); }
+            else if ((s.length() >= 2 && s.substr(s.length()-2) == "mb") || (s.length() >= 1 && s.back() == 'm')) { mul = 1024ULL*1024;  s.erase(s.back()=='b'?s.length()-2:s.length()-1); }
+            else if ((s.length() >= 2 && s.substr(s.length()-2) == "gb") || (s.length() >= 1 && s.back() == 'g')) { mul = 1024ULL*1024*1024;  s.erase(s.back()=='b'?s.length()-2:s.length()-1); }
+            else if ((s.length() >= 2 && s.substr(s.length()-2) == "tb") || (s.length() >= 1 && s.back() == 't')) { mul = 1024ULL*1024*1024*1024; s.erase(s.back()=='b'?s.length()-2:s.length()-1); }
             // else: plain bytes
-            long double v = 0;
-            try { v = std::stold(s); } catch (...) { throw std::invalid_argument("bad size: "+tok); }
-            long double bytes = v * mul;
-            if (bytes < 0 || bytes > static_cast<long double>(std::numeric_limits<uint64_t>::max())) {
-                throw std::out_of_range("size too large: "+tok);
+            uint64_t v = 0;
+            try { v = std::stoull(s); } catch (...) { throw std::invalid_argument("bad size: "+tok); }
+            uint64_t bytes = v * mul;
+            assert(bytes != 2147483648);
+            printf("DEBUG parse_size: input='%s', v=%lu, mul=%lu, result=%lu\n", tok.c_str(), v, mul, bytes);
+            if (bytes == 0) {
+                throw std::out_of_range("size is zero: "+tok);
             }
-            return static_cast<uint64_t>(bytes + 0.5L);
+            return bytes;
         };
 
         std::string line;
@@ -986,10 +1027,12 @@ std::atomic<uint64_t> RDMA_Manager::ReadCount = 0;
                 if (!is_size) { iss.seekg(after_id); size_tok.clear(); }
             }
             if (!size_tok.empty()) {
-                try { region_bytes = parse_size(size_tok); } catch (const std::exception& e) {
-                    fprintf(stderr, "config: invalid size for logical %u: %s\n", logical_id, e.what());
-                    continue;
-                }
+                region_bytes = parse_size(size_tok);
+                assert(region_bytes != 2147483648);
+            } else {
+                printf("Config parsing: logical_id=%u, no size specified (region_bytes=%lu)\n", logical_id, region_bytes);
+                assert(false);
+                exit(1);
             }
 
             std::vector<PhysicalRegion> physical_regions;
@@ -1002,25 +1045,17 @@ std::atomic<uint64_t> RDMA_Manager::ReadCount = 0;
                 // Identity fallback if no replica list provided
                 if (memory_nodes.count(logical_id)) physical_regions.push_back({logical_id, 0, 0});
             }
+            assert(physical_regions[0].base_ptr == 0 && physical_regions[0].rkey == 0);
             if (!physical_regions.empty()) {
                 logical_groups[logical_id] = LogicalGroup{std::move(physical_regions), region_bytes};
             }
+            assert(logical_groups[logical_id].physical_regions[0].base_ptr == 0 && logical_groups[logical_id].physical_regions[0].rkey == 0);
         }
 
         // Backward-compat: if no logical groups parsed, build identity groups
         if (logical_groups.empty()) {
             for (const auto& kv : memory_nodes) {
                 logical_groups[kv.first] = LogicalGroup{{{kv.first, 0, 0}}, /*bytes=*/0};
-            }
-        }
-
-        // Compute base offsets per physical node (simple first-fit by declared order)
-        std::map<uint16_t, uint64_t> required_bytes; // phys_id → total bytes
-        for (auto& [lid, grp] : logical_groups) {
-            const uint64_t sz = grp.bytes; // 0 means unspecified
-            for (auto& phys_reg : grp.physical_regions) {
-                phys_reg.base_ptr = required_bytes[phys_reg.phys_id]; // pack next
-                if (sz) required_bytes[phys_reg.phys_id] += sz;       // only grow if size is specified
             }
         }
 
@@ -1983,7 +2018,7 @@ std::atomic<uint64_t> RDMA_Manager::ReadCount = 0;
             qp_init_attr.recv_cq = cq2;
         else
             qp_init_attr.recv_cq = cq1;
-        qp_init_attr.cap.max_send_wr = send_outstanding_num;
+        qp_init_attr.cap.max_send_wr = send_outstanding_num + 10; // try whether the max value should be extended.
         qp_init_attr.cap.max_recv_wr = recv_outstanding_num;
         qp_init_attr.cap.max_send_sge = 2;
         qp_init_attr.cap.max_recv_sge = 2;
@@ -3712,6 +3747,46 @@ End of socket operations
 
     }
 
+    void RDMA_Manager::Prepare_WR_Write_Replication(ibv_send_wr &sr, ibv_sge &sge, GlobalAddress remote_ptr, 
+                                                     ibv_mr *local_mr, size_t msg_size, size_t send_flag, 
+                                                     Chunk_type pool_name, uint16_t target_physical_node_id) {
+        struct ibv_send_wr *bad_wr = NULL;
+        int rc;
+        /* prepare the scatter/gather entry */
+        memset(&sge, 0, sizeof(sge));
+        sge.addr = (uintptr_t) local_mr->addr;
+        sge.length = msg_size;
+        sge.lkey = local_mr->lkey;
+        /* prepare the send work request */
+        memset(&sr, 0, sizeof(sr));
+        sr.next = NULL;
+        sr.wr_id = 0;
+        sr.sg_list = &sge;
+        sr.num_sge = 1;
+        sr.opcode = IBV_WR_RDMA_WRITE;
+        if (send_flag != 0) sr.send_flags = send_flag;
+        switch (pool_name) {
+            case Regular_Page: {
+                // For replication: use specified physical node
+                uint64_t physical_addr = TranslateLogicalToPhysicalAddress(remote_ptr.nodeID, remote_ptr.offset, target_physical_node_id);
+                uint32_t physical_rkey = GetPhysicalRkey(remote_ptr.nodeID, target_physical_node_id);
+                
+                sr.wr.rdma.remote_addr = physical_addr;
+                sr.wr.rdma.rkey = physical_rkey;
+                break;
+            }
+            case LockTable: {
+                sr.wr.rdma.remote_addr = reinterpret_cast<uint64_t>(remote_ptr.offset +
+                                                                    base_addr_map_lock[remote_ptr.nodeID]);
+                sr.wr.rdma.rkey = rkey_map_lock[remote_ptr.nodeID];
+                break;
+            }
+            default:
+                break;
+        }
+
+    }
+
     int
     RDMA_Manager::Batch_Submit_WRs(ibv_send_wr *sr, int poll_num, uint16_t target_node_id, std::string qp_type) {
         int rc;
@@ -3770,7 +3845,6 @@ End of socket operations
         if (rc) {
             assert(false);
             fprintf(stderr, "failed to post SR, return is %d\n", rc);
-            fprintf(stdout, "failed to post SR, return is %d\n", rc);
             fflush(stdout);
             exit(0);
         }
@@ -4573,8 +4647,8 @@ End of socket operations
                 tasks = new Async_Tasks();
                 async_tasks[lock_addr.nodeID]->Reset(tasks);
             }
-            std::string qp_type = "write_local_flush";
-//            std::string qp_type = "default";
+            // std::string qp_type = "write_local_flush";
+            std::string qp_type = "default";
             uint32_t *counter = &tasks->counter;
             if (UNLIKELY(*counter >= ATOMIC_OUTSTANDING_SIZE - 2)) {
                 RDMA_FAA(lock_addr, cas_buffer, substract, IBV_SEND_SIGNALED, 1, Regular_Page, qp_type);
@@ -4584,8 +4658,8 @@ End of socket operations
             } else {
                 ibv_mr *async_cas = tasks->mrs[*counter];
                 RDMA_FAA(lock_addr, async_cas, substract, 0, 0, Regular_Page, qp_type);
+                tasks->work_type[*counter] = (Async_Tasks::read_unlock_async);
                 *counter = *counter + 1;
-                tasks->handles[*counter] = handle;
                 async_succeed = true;
             }
 #else
@@ -5200,22 +5274,13 @@ End of socket operations
     }
 #endif
 
-    bool RDMA_Manager::global_write_page_and_Wunlock(ibv_mr *page_buffer, GlobalAddress page_addr, size_t page_size,
+    bool RDMA_Manager::global_write_page_and_Wunlock_Async(ibv_mr *page_buffer, GlobalAddress page_addr, size_t page_size,
                                                      GlobalAddress remote_lock_addr, Cache_Handle *handle, bool async) {
 
         // Get replicas for the target logical memory region (replicas cannot be empty)
         const auto& replicas = GetReplicaSet(page_addr.nodeID);
         assert(!replicas.empty() && "Replicas cannot be empty");
-        
-        // Check async state only for primary node (for atomic operations)
         uint16_t primary_phys_id = GetPrimaryPhysicalId(page_addr.nodeID);
-        Async_Tasks *primary_tasks = (Async_Tasks *) async_tasks.at(primary_phys_id)->Get();
-        if (UNLIKELY(!primary_tasks)) {
-            primary_tasks = new Async_Tasks();
-            async_tasks[primary_phys_id]->Reset(primary_tasks);
-        }
-        uint32_t *primary_counter = &primary_tasks->counter;
-        bool use_async_for_atomic = (*primary_counter < (ATOMIC_OUTSTANDING_SIZE / 2 - 1));
 
         //TODO: If we want to use async unlock, we need to enlarge the max outstand work request that the queue pair support.
         // Calculate actual operations needed based on REPLICA_TYPE
@@ -5259,34 +5324,41 @@ End of socket operations
 
         assert(remote_lock_addr <= tbFlushed_gaddr - 8);
         bool async_succeed = false;
-        size_t send_flags = page_size <= MAX_INLINE_SIZE ? IBV_SEND_INLINE : 0;
+        // size_t send_flags = page_size <= MAX_INLINE_SIZE ? IBV_SEND_INLINE : 0;
+        size_t send_flags = 0;
         
         // Prepare CAS operations for atomic unlock
-            ibv_mr *local_CAS_mr = Get_local_CAS_mr();
-            *(uint64_t *) local_CAS_mr->addr = 0;
-            volatile uint64_t add = ((uint64_t) RDMA_Manager::node_id / 2 + 100) << 56;
-            volatile uint64_t substract = (~add) + 1;
+        volatile uint64_t add = ((uint64_t) RDMA_Manager::node_id / 2 + 100) << 56;
+        volatile uint64_t substract = (~add) + 1;
 
         // Prepare write operations for all replicas (all async by default)
 #if REPLICA_TYPE == REPLICA_WRITE_PRIMARY_ONLY
+        // Check async state only for primary node (for atomic operations)
+        Async_Tasks *primary_tasks = (Async_Tasks *) async_tasks.at(primary_phys_id)->Get();
+        if (UNLIKELY(!primary_tasks)) {
+            primary_tasks = new Async_Tasks();
+            async_tasks[primary_phys_id]->Reset(primary_tasks);
+        }
+        uint32_t *primary_counter = &primary_tasks->counter;
+        bool use_async_for_atomic = (*primary_counter < (ATOMIC_OUTSTANDING_SIZE - 3));
+        ibv_mr* cas_buf = nullptr;
+        ibv_mr* data_buf = nullptr;
+        if (use_async_for_atomic) {
+            cas_buf = primary_tasks->mrs[*primary_counter];
+            data_buf = primary_tasks->mrs[*primary_counter+1];
+            memcpy(data_buf->addr, tbFlushed_local_mr.addr, page_size);
+        }else{
+            cas_buf = Get_local_CAS_mr();
+            data_buf = &tbFlushed_local_mr;
+        }
+        *(uint64_t *) cas_buf->addr = 0;
         // Write only to primary replica
-        uint64_t physical_addr = TranslateLogicalToPhysicalAddress(page_addr.nodeID, tbFlushed_gaddr.offset, primary_phys_id);
-        uint32_t physical_rkey = GetPhysicalRkey(page_addr.nodeID, primary_phys_id);
-        
-        GlobalAddress physical_tbFlushed_gaddr = tbFlushed_gaddr;
-        physical_tbFlushed_gaddr.offset = physical_addr;
-        
         // All writes are async by default (send_flag = 0)
-        Prepare_WR_Write(sr[0], sge[0], physical_tbFlushed_gaddr, &tbFlushed_local_mr, page_size, send_flags, Regular_Page);
-        
-        // Prepare atomic unlock for primary replica only
-        uint64_t physical_lock_addr = TranslateLogicalToPhysicalAddress(remote_lock_addr.nodeID, remote_lock_addr.offset, primary_phys_id);
-        GlobalAddress physical_lock_addr_obj = remote_lock_addr;
-        physical_lock_addr_obj.offset = physical_lock_addr;
+        Prepare_WR_Write(sr[0], sge[0], tbFlushed_gaddr, data_buf, page_size, send_flags, Regular_Page);
         
         // Atomic operation checks async state
         uint32_t atomic_flags = use_async_for_atomic ? 0 : IBV_SEND_SIGNALED;
-        Prepare_WR_FAA(sr[1], sge[1], physical_lock_addr_obj, local_CAS_mr, substract, atomic_flags, Regular_Page);
+        Prepare_WR_FAA(sr[1], sge[1], remote_lock_addr, cas_buf, substract, atomic_flags, Regular_Page);
                 sr[0].next = &sr[1];
 
         // Submit to primary node
@@ -5295,8 +5367,8 @@ End of socket operations
         
         // Update async state for primary node
         if (use_async_for_atomic) {
-            primary_tasks->counter++;
-            primary_tasks->handles[primary_tasks->counter] = handle;
+            primary_tasks->work_type[primary_tasks->counter] = (Async_Tasks::read_unlock_async);
+            primary_tasks->counter += 2;
             async_succeed = true;
         } else {
             // Reset counter when using sync operations
@@ -5307,44 +5379,60 @@ End of socket operations
         // Write to all replicas - all async by default, only primary gets atomic unlock
         for (size_t i = 0; i < replicas.size(); ++i) {
             uint16_t physical_id = replicas[i].phys_id;
-            uint64_t physical_addr = TranslateLogicalToPhysicalAddress(page_addr.nodeID, tbFlushed_gaddr.offset, physical_id);
-            uint32_t physical_rkey = GetPhysicalRkey(page_addr.nodeID, physical_id);
-            
-            GlobalAddress physical_tbFlushed_gaddr = tbFlushed_gaddr;
-            physical_tbFlushed_gaddr.offset = physical_addr;
-            
-            // All writes are async by default (send_flag = 0)
-            Prepare_WR_Write(sr[i], sge[i], physical_tbFlushed_gaddr, &tbFlushed_local_mr, page_size, send_flags, Regular_Page);
-            
+            bool use_async = false;
+            Async_Tasks *tasks = (Async_Tasks *) async_tasks.at(primary_phys_id)->Get();
+            if (UNLIKELY(!tasks)) {
+                tasks = new Async_Tasks();
+                async_tasks[primary_phys_id]->Reset(tasks);
+            }
+            uint32_t *counter = &tasks->counter;
+            use_async = (*counter < (ATOMIC_OUTSTANDING_SIZE - 2));
+            ibv_mr* cas_buf = nullptr;
+            ibv_mr* data_buf = nullptr;
+            if (use_async) {
+                cas_buf = tasks->mrs[*counter];
+                data_buf = tasks->mrs[*counter+1];
+                memcpy(data_buf->addr, tbFlushed_local_mr.addr, page_size);
+            }else{
+                cas_buf = Get_local_CAS_mr();
+                data_buf = &tbFlushed_local_mr;
+            }
+            *(uint64_t *) cas_buf->addr = 0;
+
+            // Send flags should be determined by the async state.
+            // todo: the singaled flag should be applied to atomic operation if there exist one.
+            int num_wrs = use_async ? 0 : 1; // Async: 0, Sync: 1
             // Only primary replica gets atomic unlock operation
             if (i == 0) { // Primary replica
-                uint64_t physical_lock_addr = TranslateLogicalToPhysicalAddress(remote_lock_addr.nodeID, remote_lock_addr.offset, physical_id);
-                GlobalAddress physical_lock_addr_obj = remote_lock_addr;
-                physical_lock_addr_obj.offset = physical_lock_addr;
-                
+                Prepare_WR_Write_Replication(sr[i], sge[i], tbFlushed_gaddr, data_buf, page_size, send_flags, Regular_Page, physical_id);
                 // Atomic operation checks async state
-                uint32_t atomic_flags = use_async_for_atomic ? 0 : IBV_SEND_SIGNALED;
-                Prepare_WR_FAA(sr[replicas.size() + i], sge[replicas.size() + i], physical_lock_addr_obj, local_CAS_mr, substract, atomic_flags, Regular_Page);
+                uint32_t atomic_flags = use_async ? 0 : IBV_SEND_SIGNALED;
+                Prepare_WR_FAA(sr[replicas.size() + i], sge[replicas.size() + i], remote_lock_addr, cas_buf, substract, atomic_flags, Regular_Page);
                 
                 // Chain write and unlock for primary replica
                 sr[i].next = &sr[replicas.size() + i];
                 
                 // Submit to primary node
-                int num_wrs = use_async_for_atomic ? 0 : 1; // Async: 0, Sync: 1
                 Batch_Submit_WRs(&sr[i], num_wrs, physical_id);
-                
-                // Update async state for primary node
-                if (use_async_for_atomic) {
-                    primary_tasks->counter++;
-                    primary_tasks->handles[primary_tasks->counter] = handle;
-                    async_succeed = true;
-                } else {
-                    // Reset counter when using sync operations
-                    primary_tasks->counter = 0;
-                }
             } else {
+                send_flags = use_async ? send_flags : IBV_SEND_SIGNALED | send_flags;
+                Prepare_WR_Write_Replication(sr[i], sge[i], tbFlushed_gaddr, data_buf, page_size, send_flags, Regular_Page, physical_id);
                 // Replica nodes: only submit write operation (no atomic unlock)
-                Batch_Submit_WRs(&sr[i], 0, physical_id); // 0 work requests for async write
+                Batch_Submit_WRs(&sr[i], num_wrs, physical_id); // 0 work requests for async write
+            }
+
+            // Update async state for primary node
+            if (use_async) {
+                tasks->work_type[tasks->counter] = handle;
+                tasks->counter += 2;
+                printf("Thread %d add 2 to the counter for memory node %d\n", thread_id, physical_id);
+                fflush(stdout);
+                async_succeed = true;
+            } else {
+                // Reset counter when using sync operations
+                tasks->counter = 0;
+                printf("Thread %d finish one round of async to node %d\n", thread_id, physical_id);
+                fflush(stdout);
             }
         }
 #endif
@@ -5353,7 +5441,7 @@ End of socket operations
         return async_succeed;
     }
 
-    bool RDMA_Manager::global_write_page_and_WHandover(ibv_mr *page_buffer, GlobalAddress page_addr, size_t page_size,
+    bool RDMA_Manager::global_write_page_and_WHandover_Async(ibv_mr *page_buffer, GlobalAddress page_addr, size_t page_size,
                                                        uint8_t next_holder_id, GlobalAddress remote_lock_addr,
                                                        Cache_Handle *handle) {
 
@@ -5364,7 +5452,8 @@ End of socket operations
         // Get replicas for the target logical memory region (replicas cannot be empty)
         const auto& replicas = GetReplicaSet(page_addr.nodeID);
         assert(!replicas.empty() && "Replicas cannot be empty");
-        
+        uint16_t primary_phys_id = GetPrimaryPhysicalId(page_addr.nodeID);
+
         // Calculate actual operations needed based on REPLICA_TYPE
         size_t actual_operations;
 #if REPLICA_TYPE == REPLICA_WRITE_PRIMARY_ONLY
@@ -5391,44 +5480,41 @@ End of socket operations
         page_size -= STRUCT_OFFSET(LeafPage, hdr);
         assert(remote_lock_addr <= post_gl_page_addr - 8);
         bool async_succeed = false;
+        // size_t send_flags = page_size <= MAX_INLINE_SIZE ? IBV_SEND_INLINE : 0;
+        size_t send_flags = 0;
+        // Prepare CAS operations for atomic unlock
+            volatile uint64_t add = ((uint64_t) RDMA_Manager::node_id / 2 + 100) << 56;
+            volatile uint64_t substract = (~add) + 1;
+            add = ((uint64_t) next_holder_id / 2 + 100) << 56;
 
+        // Prepare write operations for all replicas (all async by default)
+#if REPLICA_TYPE == REPLICA_WRITE_PRIMARY_ONLY
         // Check async state only for primary node (for atomic operations)
-        uint16_t primary_phys_id = GetPrimaryPhysicalId(page_addr.nodeID);
         Async_Tasks *primary_tasks = (Async_Tasks *) async_tasks.at(primary_phys_id)->Get();
         if (UNLIKELY(!primary_tasks)) {
             primary_tasks = new Async_Tasks();
             async_tasks[primary_phys_id]->Reset(primary_tasks);
         }
         uint32_t *primary_counter = &primary_tasks->counter;
-        bool use_async_for_atomic = (*primary_counter < (ATOMIC_OUTSTANDING_SIZE / 2 - 1)); //todo maybe < (ATOMIC_OUTSTANDING_SIZE - 1) is enough
-
-        // Prepare CAS operations
-        ibv_mr *local_CAS_mr = Get_local_CAS_mr();
-        *(uint64_t *) local_CAS_mr->addr = 0;
-        volatile uint64_t add = ((uint64_t) RDMA_Manager::node_id / 2 + 100) << 56;
-        volatile uint64_t substract = (~add) + 1;
-        add = ((uint64_t) next_holder_id / 2 + 100) << 56;
-
-        // Prepare write operations for all replicas (all async by default)
-#if REPLICA_TYPE == REPLICA_WRITE_PRIMARY_ONLY
+        bool use_async_for_atomic = (*primary_counter < (ATOMIC_OUTSTANDING_SIZE - 2)); //todo maybe < (ATOMIC_OUTSTANDING_SIZE - 1) is enough
+        ibv_mr* cas_buf = nullptr;
+        ibv_mr* data_buf = nullptr;
+        if (use_async_for_atomic) {
+            cas_buf = primary_tasks->mrs[*primary_counter];
+            data_buf = primary_tasks->mrs[*primary_counter+1];
+            memcpy(data_buf->addr, post_gl_page_local_mr.addr, page_size);
+        }else{
+            cas_buf = Get_local_CAS_mr();
+            data_buf = &post_gl_page_local_mr;
+        }
+        *(uint64_t *) cas_buf->addr = 0;
         // Write only to primary replica
-        uint64_t physical_addr = TranslateLogicalToPhysicalAddress(page_addr.nodeID, post_gl_page_addr.offset, primary_phys_id);
-        uint32_t physical_rkey = GetPhysicalRkey(page_addr.nodeID, primary_phys_id);
-        
-        GlobalAddress physical_page_addr = post_gl_page_addr;
-        physical_page_addr.offset = physical_addr;
-        
         // All writes are async by default (send_flag = 0)
-        Prepare_WR_Write(sr[0], sge[0], physical_page_addr, &post_gl_page_local_mr, page_size, 0, Regular_Page);
-        
-        // Prepare atomic unlock for primary replica only
-        uint64_t physical_lock_addr = TranslateLogicalToPhysicalAddress(remote_lock_addr.nodeID, remote_lock_addr.offset, primary_phys_id);
-        GlobalAddress physical_lock_addr_obj = remote_lock_addr;
-        physical_lock_addr_obj.offset = physical_lock_addr;
+        Prepare_WR_Write(sr[0], sge[0], post_gl_page_addr, data_buf, page_size, 0, Regular_Page);
         
         // Atomic operation checks async state
         uint32_t atomic_flags = use_async_for_atomic ? 0 : IBV_SEND_SIGNALED;
-        Prepare_WR_FAA(sr[1], sge[1], physical_lock_addr_obj, local_CAS_mr, substract + add, atomic_flags, Regular_Page);
+        Prepare_WR_FAA(sr[1], sge[1], remote_lock_addr, cas_buf, substract + add, atomic_flags, Regular_Page);
                 sr[0].next = &sr[1];
 
         // Submit to primary node
@@ -5437,53 +5523,64 @@ End of socket operations
         
         // Update async state for primary node
         if (use_async_for_atomic) {
-            primary_tasks->counter++;
-            primary_tasks->handles[primary_tasks->counter] = handle;
+            primary_tasks->work_type[primary_tasks->counter] = (Async_Tasks::write_handover_async);
+            primary_tasks->counter += 2;
             async_succeed = true;
+        }else{
+            primary_tasks->counter = 0;
         }
         
 #else
         // Write to all replicas - all async by default, only primary gets atomic unlock
         for (size_t i = 0; i < replicas.size(); ++i) {
             uint16_t physical_id = replicas[i].phys_id;
-            uint64_t physical_addr = TranslateLogicalToPhysicalAddress(page_addr.nodeID, post_gl_page_addr.offset, physical_id);
-            uint32_t physical_rkey = GetPhysicalRkey(page_addr.nodeID, physical_id);
-            
-            GlobalAddress physical_page_addr = post_gl_page_addr;
-            physical_page_addr.offset = physical_addr;
-            
-            // All writes are async by default (send_flag = 0)
-            Prepare_WR_Write(sr[i], sge[i], physical_page_addr, &post_gl_page_local_mr, page_size, 0, Regular_Page);
-            
+            bool use_async = false;
+            Async_Tasks *tasks = (Async_Tasks *) async_tasks.at(primary_phys_id)->Get();
+            if (UNLIKELY(!tasks)) {
+                tasks = new Async_Tasks();
+                async_tasks[primary_phys_id]->Reset(tasks);
+            }
+            uint32_t *counter = &tasks->counter;
+            use_async = (*counter < (ATOMIC_OUTSTANDING_SIZE - 2));
+            ibv_mr* cas_buf = nullptr;
+            ibv_mr* data_buf = nullptr;
+            if (use_async) {
+                cas_buf = tasks->mrs[*counter];
+                data_buf = tasks->mrs[*counter+1];
+                memcpy(data_buf->addr, post_gl_page_local_mr.addr, page_size);
+            }else{
+                cas_buf = Get_local_CAS_mr();
+                data_buf = &post_gl_page_local_mr;
+            }
+            *(uint64_t *) cas_buf->addr = 0;
+
+            int num_wrs = use_async ? 0 : 1; // Async: 0, Sync: 1
             // Only primary replica gets atomic unlock operation
             if (i == 0) { // Primary replica
-                uint64_t physical_lock_addr = TranslateLogicalToPhysicalAddress(remote_lock_addr.nodeID, remote_lock_addr.offset, physical_id);
-                GlobalAddress physical_lock_addr_obj = remote_lock_addr;
-                physical_lock_addr_obj.offset = physical_lock_addr;
-                
+                Prepare_WR_Write_Replication(sr[i], sge[i], post_gl_page_addr, data_buf, page_size, send_flags, Regular_Page, physical_id);
                 // Atomic operation checks async state
-                uint32_t atomic_flags = use_async_for_atomic ? 0 : IBV_SEND_SIGNALED;
-                Prepare_WR_FAA(sr[replicas.size() + i], sge[replicas.size() + i], physical_lock_addr_obj, local_CAS_mr, substract + add, atomic_flags, Regular_Page);
+                uint32_t atomic_flags = use_async ? 0 : IBV_SEND_SIGNALED;
+                Prepare_WR_FAA(sr[replicas.size() + i], sge[replicas.size() + i], remote_lock_addr, cas_buf, substract + add, atomic_flags, Regular_Page);
                 
                 // Chain write and unlock for primary replica
                 sr[i].next = &sr[replicas.size() + i];
                 
                 // Submit to primary node
-                int num_wrs = use_async_for_atomic ? 0 : 1; // Async: 0, Sync: 1
                 Batch_Submit_WRs(&sr[i], num_wrs, physical_id);
-                
-                // Update async state for primary node
-                if (use_async_for_atomic) {
-                    primary_tasks->counter++;
-                    primary_tasks->handles[primary_tasks->counter] = handle;
-                    async_succeed = true;
-                } else {
-                    // Reset counter when using sync operations
-                    primary_tasks->counter = 0;
-                }
             } else {
+                send_flags = use_async ? send_flags : IBV_SEND_SIGNALED|send_flags;
+                Prepare_WR_Write_Replication(sr[i], sge[i], post_gl_page_addr, data_buf, page_size, send_flags, Regular_Page, physical_id);
                 // Replica nodes: only submit write operation (no atomic unlock)
-                Batch_Submit_WRs(&sr[i], 0, physical_id); // 0 work requests for async write
+                Batch_Submit_WRs(&sr[i], num_wrs, physical_id); // 0 work requests for async write
+            }
+            // Update async state for primary node
+            if (use_async) {
+                tasks->work_type[tasks->counter] = handle;
+                tasks->counter += 2;
+                async_succeed = true;
+            } else {
+                // Reset counter when using sync operations
+                tasks->counter = 0;
             }
         }
 #endif
@@ -5541,8 +5638,9 @@ End of socket operations
                 async_tasks[page_addr.nodeID]->Reset(tasks);
             }
             uint32_t *counter = &tasks->counter;
-            std::string qp_type = "write_local_flush";
-//            std::string qp_type = "default";
+            // why we need a different qp channel here?
+            // std::string qp_type = "write_local_flush";
+            std::string qp_type = "default";
             // Every sync unlock submit 2 requests, and we need to reserve another one work request for the RDMA locking which
             // contains one async lock acquiring.
             if (UNLIKELY(*counter >= ATOMIC_OUTSTANDING_SIZE - 3)) {
@@ -5575,9 +5673,6 @@ End of socket operations
                         }
                         goto retry_check;
                     }
-//                    assert(((*(uint64_t*) local_CAS_mr->addr) >> 56) == (add >> 56));
-
-                    //                goto retry;
                 }
 #endif
                 *counter = 0;
@@ -5588,7 +5683,8 @@ End of socket operations
                 *(uint64_t *) async_cas->addr = 0;
                 assert(page_addr.nodeID == remote_lock_addr.nodeID);
                 Batch_Submit_WRs(sr, 0, page_addr.nodeID, qp_type);
-                *counter = *counter + 1;
+                tasks->work_type[*counter] = (Async_Tasks::handover_async);
+                *counter = *counter + 1; // should be + 1
                 async_succeed = true;
             }
             //TODO: it could be spuriously failed because of the FAA.so we can not have async
@@ -5688,7 +5784,7 @@ End of socket operations
     }
 
 
-    bool RDMA_Manager::global_write_page_and_WdowntoR(ibv_mr *page_buffer, GlobalAddress page_addr, size_t page_size,
+    bool RDMA_Manager::global_write_page_and_WdowntoR_Async(ibv_mr *page_buffer, GlobalAddress page_addr, size_t page_size,
                                                       GlobalAddress remote_lock_addr, uint8_t next_holder_id,
                                                       bool async,
                                                       Cache_Handle *handle) {
@@ -5696,16 +5792,7 @@ End of socket operations
         // Get replicas for the target logical memory region (replicas cannot be empty)
         const auto& replicas = GetReplicaSet(page_addr.nodeID);
         assert(!replicas.empty() && "Replicas cannot be empty");
-        
-        // Check async state only for primary node (for atomic operations)
         uint16_t primary_phys_id = GetPrimaryPhysicalId(page_addr.nodeID);
-        Async_Tasks *primary_tasks = (Async_Tasks *) async_tasks.at(primary_phys_id)->Get();
-        if (UNLIKELY(!primary_tasks)) {
-            primary_tasks = new Async_Tasks();
-            async_tasks[primary_phys_id]->Reset(primary_tasks);
-        }
-        uint32_t *primary_counter = &primary_tasks->counter;
-        bool use_async_for_atomic = (*primary_counter < (ATOMIC_OUTSTANDING_SIZE / 2 - 1));
 
         //TODO: If we want to use async unlock, we need to enlarge the max outstand work request that the queue pair support.
         // Calculate actual operations needed based on REPLICA_TYPE
@@ -5746,95 +5833,116 @@ End of socket operations
             page->hdr.dirty_upper_bound = 0;
         }
 
-        size_t send_flags = (page_size <= MAX_INLINE_SIZE) ? IBV_SEND_INLINE : 0;
+        // size_t send_flags = (page_size <= MAX_INLINE_SIZE) ? IBV_SEND_INLINE : 0;
+        size_t send_flags = 0;
         bool async_succeed = false;
         
         // Prepare CAS operations for atomic unlock
-            ibv_mr *local_CAS_mr = Get_local_CAS_mr();
-            *(uint64_t *) local_CAS_mr->addr = 0;
-            volatile uint64_t this_node_exclusive = ((uint64_t) RDMA_Manager::node_id / 2 + 100) << 56;
-            volatile uint64_t this_node_shared = (1ull << (RDMA_Manager::node_id / 2 + 1));
-            volatile uint64_t inv_sender_shared = (1ull << (next_holder_id / 2 + 1));
-            assert(this_node_shared != inv_sender_shared);
+        volatile uint64_t this_node_exclusive = ((uint64_t) RDMA_Manager::node_id / 2 + 100) << 56;
+        volatile uint64_t this_node_shared = (1ull << (RDMA_Manager::node_id / 2 + 1));
+        volatile uint64_t inv_sender_shared = (1ull << (next_holder_id / 2 + 1));
+        assert(this_node_shared != inv_sender_shared);
 
-            volatile uint64_t substract = (~(this_node_exclusive)) + 1;
-            volatile uint64_t add = this_node_shared + inv_sender_shared;
+        volatile uint64_t substract = (~(this_node_exclusive)) + 1;
+        volatile uint64_t add = this_node_shared + inv_sender_shared;
 
         // Prepare write operations for all replicas (all async by default)
 #if REPLICA_TYPE == REPLICA_WRITE_PRIMARY_ONLY
+        // Check async state only for primary node (for atomic operations)
+        Async_Tasks *primary_tasks = (Async_Tasks *) async_tasks.at(primary_phys_id)->Get();
+        if (UNLIKELY(!primary_tasks)) {
+            primary_tasks = new Async_Tasks();
+            async_tasks[primary_phys_id]->Reset(primary_tasks);
+        }
+        uint32_t *primary_counter = &primary_tasks->counter;
+        bool use_async_for_atomic = (*primary_counter < (ATOMIC_OUTSTANDING_SIZE - 2));
+        ibv_mr* cas_buf = nullptr;
+        ibv_mr* data_buf = nullptr;
+        if (use_async_for_atomic) {
+            cas_buf = primary_tasks->mrs[*primary_counter];
+            data_buf = primary_tasks->mrs[*primary_counter+1];
+            memcpy(data_buf->addr, tbFlushed_local_mr.addr, page_size);
+        }else{
+            cas_buf = Get_local_CAS_mr();
+            data_buf = &tbFlushed_local_mr;
+        }
+        *(uint64_t *) cas_buf->addr = 0;
         // Write only to primary replica
-        uint64_t physical_addr = TranslateLogicalToPhysicalAddress(page_addr.nodeID, tbFlushed_gaddr.offset, primary_phys_id);
-        uint32_t physical_rkey = GetPhysicalRkey(page_addr.nodeID, primary_phys_id);
-        
-        GlobalAddress physical_tbFlushed_gaddr = tbFlushed_gaddr;
-        physical_tbFlushed_gaddr.offset = physical_addr;
-        
         // All writes are async by default (send_flag = 0)
-        Prepare_WR_Write(sr[0], sge[0], physical_tbFlushed_gaddr, &tbFlushed_local_mr, page_size, send_flags, Regular_Page);
-        
-        // Prepare atomic unlock for primary replica only
-        uint64_t physical_lock_addr = TranslateLogicalToPhysicalAddress(remote_lock_addr.nodeID, remote_lock_addr.offset, primary_phys_id);
-        GlobalAddress physical_lock_addr_obj = remote_lock_addr;
-        physical_lock_addr_obj.offset = physical_lock_addr;
+        Prepare_WR_Write(sr[0], sge[0], tbFlushed_gaddr, data_buf, page_size, send_flags, Regular_Page);
         
         // Atomic operation checks async state
         uint32_t atomic_flags = use_async_for_atomic ? 0 : IBV_SEND_SIGNALED;
-        Prepare_WR_FAA(sr[1], sge[1], physical_lock_addr_obj, local_CAS_mr, substract + add, atomic_flags, Regular_Page);
-        sr[0].next = &sr[1];
-        
+        Prepare_WR_FAA(sr[1], sge[1], remote_lock_addr, cas_buf, substract + add, atomic_flags, Regular_Page);
+                sr[0].next = &sr[1];
+
         // Submit to primary node
         int num_wrs = use_async_for_atomic ? 0 : 1; // Async: 0, Sync: 1
         Batch_Submit_WRs(sr.data(), num_wrs, primary_phys_id);
         
         // Update async state for primary node
         if (use_async_for_atomic) {
-            primary_tasks->counter++;
-            primary_tasks->handles[primary_tasks->counter] = handle;
+            primary_tasks->work_type.push_back(Async_Tasks::write_downtoR_async);
+            primary_tasks->counter += 2;
             async_succeed = true;
+        }else{
+            primary_tasks->counter = 0;
         }
         
 #else
         // Write to all replicas - all async by default, only primary gets atomic unlock
         for (size_t i = 0; i < replicas.size(); ++i) {
             uint16_t physical_id = replicas[i].phys_id;
-            uint64_t physical_addr = TranslateLogicalToPhysicalAddress(page_addr.nodeID, tbFlushed_gaddr.offset, physical_id);
-            uint32_t physical_rkey = GetPhysicalRkey(page_addr.nodeID, physical_id);
-            
-            GlobalAddress physical_tbFlushed_gaddr = tbFlushed_gaddr;
-            physical_tbFlushed_gaddr.offset = physical_addr;
-            
-            // All writes are async by default (send_flag = 0)
-            Prepare_WR_Write(sr[i], sge[i], physical_tbFlushed_gaddr, &tbFlushed_local_mr, page_size, send_flags, Regular_Page);
-            
+            bool use_async = false;
+            Async_Tasks *tasks = (Async_Tasks *) async_tasks.at(primary_phys_id)->Get();
+            if (UNLIKELY(!tasks)) {
+                tasks = new Async_Tasks();
+                async_tasks[primary_phys_id]->Reset(tasks);
+            }
+            uint32_t *counter = &tasks->counter;
+            use_async = (*counter < (ATOMIC_OUTSTANDING_SIZE - 2));
+            ibv_mr* cas_buf = nullptr;
+            ibv_mr* data_buf = nullptr;
+            if (use_async) {
+                cas_buf = tasks->mrs[*counter];
+                data_buf = tasks->mrs[*counter+1];
+                memcpy(data_buf->addr, tbFlushed_local_mr.addr, page_size);
+            }else{
+                cas_buf = Get_local_CAS_mr();
+                data_buf = &tbFlushed_local_mr;
+            }
+            *(uint64_t *) cas_buf->addr = 0;
+
+
+
+            int num_wrs = use_async ? 0 : 1; // Async: 0, Sync: 1
+
             // Only primary replica gets atomic unlock operation
             if (i == 0) { // Primary replica
-                uint64_t physical_lock_addr = TranslateLogicalToPhysicalAddress(remote_lock_addr.nodeID, remote_lock_addr.offset, physical_id);
-                GlobalAddress physical_lock_addr_obj = remote_lock_addr;
-                physical_lock_addr_obj.offset = physical_lock_addr;
-                
+                Prepare_WR_Write_Replication(sr[i], sge[i], tbFlushed_gaddr, data_buf, page_size, send_flags, Regular_Page, physical_id);
                 // Atomic operation checks async state
-                uint32_t atomic_flags = use_async_for_atomic ? 0 : IBV_SEND_SIGNALED;
-                Prepare_WR_FAA(sr[replicas.size() + i], sge[replicas.size() + i], physical_lock_addr_obj, local_CAS_mr, substract + add, atomic_flags, Regular_Page);
+                uint32_t atomic_flags = use_async ? 0 : IBV_SEND_SIGNALED;
+                Prepare_WR_FAA(sr[replicas.size() + i], sge[replicas.size() + i], remote_lock_addr, cas_buf, substract + add, atomic_flags, Regular_Page);
                 
                 // Chain write and unlock for primary replica
                 sr[i].next = &sr[replicas.size() + i];
                 
                 // Submit to primary node
-                int num_wrs = use_async_for_atomic ? 0 : 1; // Async: 0, Sync: 1
                 Batch_Submit_WRs(&sr[i], num_wrs, physical_id);
-                
-                // Update async state for primary node
-                if (use_async_for_atomic) {
-                    primary_tasks->counter++;
-                    primary_tasks->handles[primary_tasks->counter] = handle;
-                    async_succeed = true;
-                } else {
-                    // Reset counter when using sync operations
-                    primary_tasks->counter = 0;
-                }
+            } else {// Replica nodes: only submit write operation (no atomic unlock)
+                // Send flags should be determined by the async state.
+                send_flags = use_async ? send_flags : IBV_SEND_SIGNALED | send_flags;
+                Prepare_WR_Write_Replication(sr[i], sge[i], tbFlushed_gaddr, data_buf, page_size, send_flags, Regular_Page, physical_id);
+                Batch_Submit_WRs(&sr[i], num_wrs, physical_id); // 0 work requests for async write
+            }
+            // Update async state for primary node
+            if (use_async) {
+                tasks->work_type[tasks->counter] = handle;
+                tasks->counter += 2;
+                async_succeed = true;
             } else {
-                // Replica nodes: only submit write operation (no atomic unlock)
-                Batch_Submit_WRs(&sr[i], 0, physical_id); // 0 work requests for async write
+                // Reset counter when using sync operations
+                tasks->counter = 0;
             }
         }
 #endif
@@ -5848,6 +5956,7 @@ End of socket operations
                                                       bool async) {
 
         //TODO: If we want to use async unlock, we need to enlarge the max outstand work request that the queue pair support.
+        assert(false); //deprecated function
         struct ibv_send_wr sr[2];
         struct ibv_sge sge[2];
 
@@ -6562,35 +6671,45 @@ End of socket operations
             return false;
         }
 
-        printf("Registering memory for logical region %u with %zu replicas, size: %zu\n", 
-               target_region_id, replicas.size(), size);
+        // printf("Registering memory for logical region %u with %zu replicas, size: %zu\n",
+        //        target_region_id, replicas.size(), size);
 
         // Prepare local RDMA resources
         RDMA_Request *send_pointer;
         ibv_mr send_mr = {};
-        ibv_mr receive_mr = {};
         Allocate_Local_RDMA_Slot(send_mr, Message);
-        Allocate_Local_RDMA_Slot(receive_mr, Message);
         send_pointer = (RDMA_Request *) send_mr.addr;
         send_pointer->command = create_mr_128MB_;
-        send_pointer->content.mem_size = size;
-        send_pointer->buffer = receive_mr.addr;
-        send_pointer->rkey = receive_mr.rkey;
-
-        RDMA_Reply *receive_pointer;
-        receive_pointer = (RDMA_Reply *) receive_mr.addr;
-
+        //todo: the remote server need to return the memory chunk for the target region (main copy) 
+        // The target region main copy may not start from the beggining of the big memory chunk.
+        send_pointer->content.mr_request.mem_size = size;
+        send_pointer->content.mr_request.target_region_id = target_region_id;
+        // Create separate receive buffers for each replica to avoid message mixing
+        std::vector<ibv_mr> receive_mrs(replicas.size());
+        std::vector<RDMA_Reply*> receive_pointers(replicas.size());
+        
+        // Allocate separate receive buffers for each replica using Allocate_Local_RDMA_Slot
+        for (size_t i = 0; i < replicas.size(); ++i) {
+            Allocate_Local_RDMA_Slot(receive_mrs[i], Message);
+            receive_pointers[i] = (RDMA_Reply*)receive_mrs[i].addr;
+            *receive_pointers[i] = {};
+        }
+        
         // Send RPC to all replicas (non-blocking phase)
         bool all_success = true;
         std::vector<ibv_wc> wc_list(replicas.size());
         
-        printf("Sending RPCs to all %zu replicas...\n", replicas.size());
+        // printf("Sending RPCs to all %zu replicas...\n", replicas.size());
         
         for (size_t i = 0; i < replicas.size(); ++i) {
             uint16_t physical_id = replicas[i].phys_id;
             
-            printf("Sending RPC to physical node %u (replica %zu/%zu)\n", 
-                   physical_id, i + 1, replicas.size());
+            // printf("Sending RPC to physical node %u (replica %zu/%zu)\n",
+                   // physical_id, i + 1, replicas.size());
+            
+            // Set the receive buffer for this specific replica
+            send_pointer->buffer = receive_mrs[i].addr;
+            send_pointer->rkey = receive_mrs[i].rkey;
             
             // Send RPC to this physical replica
             post_send<RDMA_Request>(&send_mr, physical_id, std::string("main"));
@@ -6600,30 +6719,28 @@ End of socket operations
                 fprintf(stderr, "failed to poll send for remote memory register to physical node %u\n", physical_id);
                 all_success = false;
             } else {
-                printf("Successfully sent RPC to physical node %u\n", physical_id);
+                // printf("Successfully sent RPC to physical node %u\n", physical_id);
             }
         }
         
         // Now poll all reply buffers (blocking phase)
-        printf("Polling reply buffers from all replicas...\n");
+        // printf("Polling reply buffers from all replicas...\n");
         ibv_mr primary_mr = {};
         
         for (size_t i = 0; i < replicas.size(); ++i) {
             uint16_t physical_id = replicas[i].phys_id;
             
-            printf("Polling reply from physical node %u (replica %zu/%zu)\n", 
-                   physical_id, i + 1, replicas.size());
+            // printf("Polling reply from physical node %u (replica %zu/%zu)\n",
+                   // physical_id, i + 1, replicas.size());
             
-            // Clear the reply buffer for each RPC
-            *receive_pointer = {};
-            
-            poll_reply_buffer(receive_pointer);
-            printf("Received reply from physical node %u\n", physical_id);
+            // Clear the reply buffer for this specific RPC
+            poll_reply_buffer(receive_pointers[i]);
+            // printf("Received reply from physical node %u\n", physical_id);
             
             // Store the primary replica's MR info
             if (i == 0) {
-                primary_mr = receive_pointer->content.mr;
-                printf("Stored primary MR info from physical node %u\n", physical_id);
+                primary_mr = receive_pointers[i]->content.mr;
+                // printf("Stored primary MR info from physical node %u\n", physical_id);
             }
         }
 
@@ -6662,11 +6779,14 @@ End of socket operations
         In_Use_Array *in_use_array = new In_Use_Array(placeholder_num, chunk_size, temp_pointer);
         Bitmap_map->at(target_region_id)->insert({temp_pointer->addr, in_use_array});
         
-        printf("Successfully registered memory for logical region %u (primary from physical node %u)\n", 
-               target_region_id, GetPrimaryPhysicalId(target_region_id));
+        // printf("Successfully registered memory for logical region %u (primary from physical node %u)\n", 
+        //        target_region_id, GetPrimaryPhysicalId(target_region_id));
 
         Deallocate_Local_RDMA_Slot(send_mr.addr, Message);
-        Deallocate_Local_RDMA_Slot(receive_mr.addr, Message);
+        // Deallocate individual receive buffers
+        for (size_t i = 0; i < receive_mrs.size(); ++i) {
+            Deallocate_Local_RDMA_Slot(receive_mrs[i].addr, Message);
+        }
         return true;
     }
 
@@ -7412,11 +7532,11 @@ End of socket operations
                     uint16_t primary_phys_id = GetPrimaryPhysicalId(target_region_id);
                     uint64_t logical_base = TranslateLogicalToPhysicalAddress(target_region_id, 0, primary_phys_id);
                     ret.offset = reinterpret_cast<uint64_t>(remote_mr.addr) - logical_base;
+                    assert(ret.offset < 69055800320ull);
                 } else {
                     // For non-replicated memory: return error (unsupported)
                     throw std::runtime_error("This memory region id is not configured in the configuration file.");
                 }
-                assert(ret.offset < 69055800320ull);
                 return ret;
             } else
                 ptr++;
@@ -7474,14 +7594,15 @@ End of socket operations
                 uint16_t primary_phys_id = GetPrimaryPhysicalId(target_region_id);
                 uint64_t logical_base = TranslateLogicalToPhysicalAddress(target_region_id, 0, primary_phys_id);
                 ret.offset = reinterpret_cast<uint64_t>(remote_mr.addr) - logical_base;
+                assert(ret.offset < 69055800320ull);
             } else {
+                assert(false);
                 // For non-replicated memory: use absolute address (backward compatibility)
                 ret.offset = reinterpret_cast<uint64_t>(remote_mr.addr);
             }
             //    remote_data_mrs->fname = file_name;
             //    remote_data_mrs->map_pointer = mr_last;
             //  DEBUG_arg("Allocate Remote pointer %p",  remote_mr.addr);
-            assert(ret.offset < 69055800320ull);
             return ret;
         }
     }
@@ -7506,7 +7627,7 @@ End of socket operations
                 // the developer can define how much memory cna one time RDMA allocation get.
                 Local_Memory_Register(&buff, &mr,
                                       name_to_allocated_size.at(pool_name) == 0 ?
-                                      1024 * 1024 * 1024 : name_to_allocated_size.at(pool_name), pool_name);
+                                      1024 * 1024 * 1024 : name_to_allocated_size.at(pool_name), pool_name, 0);
                 if (node_id % 2 == 0)
                     printf("Memory used up, Initially, allocate new one, memory pool is %s, total memory this pool is %lu\n",
                            EnumStrings[pool_name], name_to_mem_pool.at(pool_name).size());
@@ -7568,7 +7689,7 @@ End of socket operations
             char *buff = new char[chunk_size];
             Local_Memory_Register(&buff, &mr_to_allocate, name_to_allocated_size.at(pool_name) == 0 ?
                                                           1024 * 1024 * 1024 : name_to_allocated_size.at(pool_name),
-                                  pool_name);
+                                  pool_name, 0);
             if (node_id % 2 == 0)
                 printf("Memory used up, allocate new one, memory pool is %s, total memory is %lu\n",
                        EnumStrings[pool_name], Calculate_size_of_pool(Regular_Page) +
@@ -8904,7 +9025,7 @@ End of socket operations
                 for (auto& phys_reg : group.physical_regions) {
                     bool needs_base_ptr = (phys_reg.base_ptr == 0);
                     bool needs_rkey = (phys_reg.rkey == 0);
-                    
+                    assert(needs_base_ptr && needs_rkey);
                     if (needs_base_ptr || needs_rkey) {
                         // Use combined key format: "metadata_logical_{id}_physical_{id}"
                         char key[100];
@@ -8996,8 +9117,11 @@ End of socket operations
                     return phys_reg.base_ptr + logical_offset;
                 }
             }
+        }else {
+            assert(false); //deprecated function
+            std::runtime_error("invalid physical id for logical id: " + std::to_string(logical_id));
+            return 0; 
         }
-        return logical_offset; // Fallback
     }
 
     uint32_t RDMA_Manager::GetPhysicalRkey(uint16_t logical_id, uint16_t physical_id) const {

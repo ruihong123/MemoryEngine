@@ -54,7 +54,7 @@ namespace DSMEngine {
                 // RDMA write unlock and write back the data. THis shall be a sync write back, because the buffer will
                 // be handover to other cache entry after this function. It is possible that the page content is changed when the
                 // RDMA write back has not been finished. The write unlock for page invalidation can be a sync write back.
-                rdma_mg->global_write_page_and_Wunlock(mr, handle->gptr, kLeafPageSize, lock_gptr, handle);
+                rdma_mg->global_write_page_and_Wunlock_Async(mr, handle->gptr, kLeafPageSize, lock_gptr, handle);
                 handle->remote_lock_status.store(0);
             }else{
                 //An invalidated page, do nothing

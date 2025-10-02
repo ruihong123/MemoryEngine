@@ -1815,7 +1815,7 @@ LocalBuffer::LocalBuffer(const CacheConfig &cache_config) {
                                              buffer_inv_message.next_holder_id, qp_id, true);
 //                auto time_begin = std::chrono::high_resolution_clock::now();
                 //cache downgrade from Modified to Shared rather than release the lock.
-                rdma_mg->global_write_page_and_WdowntoR(mr, page_addr, page_size, lock_addr, buffer_inv_message.next_holder_id.load(),
+                rdma_mg->global_write_page_and_WdowntoR_Async(mr, page_addr, page_size, lock_addr, buffer_inv_message.next_holder_id.load(),
                                                         true);
 //                auto time_end = std::chrono::high_resolution_clock::now();
 
