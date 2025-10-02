@@ -5882,7 +5882,7 @@ End of socket operations
         
         // Update async state for primary node
         if (use_async_for_atomic) {
-            primary_tasks->work_type.push_back(Async_Tasks::write_downtoR_async);
+            primary_tasks->work_type[primary_tasks->counter] = (Async_Tasks::write_downtoR_async);
             primary_tasks->counter += 2;
             async_succeed = true;
         }else{
