@@ -1,0 +1,55 @@
+CompileFlags:
+  Add: 
+    - -std=c++17
+    - -DROCKSDB_SUPPORT_THREAD_LOCAL
+    - -DMVOCC
+    - -DBACKOFF
+    - -DBOOST_ALLOW_DEPRECATED_HEADERS
+    - -I/home/wang4996/CLionProjects/MemoryEngine
+    - -I/home/wang4996/CLionProjects/MemoryEngine/include
+    - -I/home/wang4996/CLionProjects/MemoryEngine/txn
+    - -I/home/wang4996/CLionProjects/MemoryEngine/storage
+    - -I/home/wang4996/CLionProjects/MemoryEngine/tpcc
+    - -I/home/wang4996/CLionProjects/MemoryEngine/bench
+    - -I/home/wang4996/CLionProjects/MemoryEngine/utils
+    - -I/home/wang4996/CLionProjects/MemoryEngine/btr
+  Remove:
+    - -w
+    - -Wall
+    - -Wextra
+    - -Wno-error
+    - -Wno-unused
+    - -Wno-format
+    - -Wno-missing-field-initializers
+    - -Wno-sign-compare
+    - -Wno-type-limits
+    - -Wno-unused-variable
+    - -Wno-unused-value
+    - -Wno-unused-parameter
+
+Index:
+  Background: Build
+  StandardLibrary: Yes
+
+Diagnostics:
+  ClangTidy:
+    Add: 
+      - readability-*
+      - performance-*
+      - modernize-*
+    Remove:
+      - readability-magic-numbers
+      - modernize-use-trailing-return-type
+  UnusedIncludes: Strict
+  MissingIncludes: Strict
+
+InlayHints:
+  Enabled: Yes
+  ParameterNames: Yes
+  DeducedTypes: Yes
+
+Hover:
+  ShowAKA: Yes
+
+Completion:
+  AllScopes: Yes

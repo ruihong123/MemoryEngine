@@ -10,24 +10,30 @@
                 "build",
                 "-S",
                 ".",
-                "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
+                "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
+                "-DCMAKE_BUILD_TYPE=Debug"
             ],
             "group": "build",
             "presentation": {
                 "echo": true,
                 "reveal": "always",
                 "focus": false,
-                "panel": "shared"
+                "panel": "shared",
+                "showReuseMessage": true,
+                "clear": false
             },
-            "problemMatcher": []
+            "problemMatcher": [],
+            "detail": "Configure CMake build system"
         },
         {
-            "label": "Build",
+            "label": "Build All",
             "type": "shell",
             "command": "cmake",
             "args": [
                 "--build",
-                "build"
+                "build",
+                "--parallel",
+                "${input:parallelJobs}"
             ],
             "group": {
                 "kind": "build",
@@ -37,12 +43,113 @@
                 "echo": true,
                 "reveal": "always",
                 "focus": false,
+                "panel": "shared",
+                "showReuseMessage": true,
+                "clear": false
+            },
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "dependsOn": "Configure CMake",
+            "detail": "Build all targets"
+        },
+        {
+            "label": "Build (Single Thread)",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "--build",
+                "build"
+            ],
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared",
+                "showReuseMessage": true,
+                "clear": false
+            },
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "dependsOn": "Configure CMake",
+            "detail": "Build all targets (single thread)"
+        },
+        {
+            "label": "Build memory_server",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "--build",
+                "build",
+                "--target",
+                "memory_server",
+                "--parallel",
+                "${input:parallelJobs}"
+            ],
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
                 "panel": "shared"
             },
             "problemMatcher": [
                 "$gcc"
             ],
-            "dependsOn": "Configure CMake"
+            "dependsOn": "Configure CMake",
+            "detail": "Build memory_server executable"
+        },
+        {
+            "label": "Build btree_bench",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "--build",
+                "build",
+                "--target",
+                "btree_bench",
+                "--parallel",
+                "${input:parallelJobs}"
+            ],
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared"
+            },
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "dependsOn": "Configure CMake",
+            "detail": "Build btree_bench executable"
+        },
+        {
+            "label": "Build tpcc",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "--build",
+                "build",
+                "--target",
+                "tpcc",
+                "--parallel",
+                "${input:parallelJobs}"
+            ],
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared"
+            },
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "dependsOn": "Configure CMake",
+            "detail": "Build tpcc executable"
         },
         {
             "label": "Clean",
@@ -61,7 +168,43 @@
                 "focus": false,
                 "panel": "shared"
             },
-            "problemMatcher": []
+            "problemMatcher": [],
+            "detail": "Clean build artifacts"
+        },
+        {
+            "label": "Clean All",
+            "type": "shell",
+            "command": "rm",
+            "args": [
+                "-rf",
+                "build",
+                "compile_commands.json"
+            ],
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared"
+            },
+            "problemMatcher": [],
+            "detail": "Clean all build files and regenerate compile_commands.json"
+        }
+    ],
+    "inputs": [
+        {
+            "id": "parallelJobs",
+            "description": "Number of parallel jobs",
+            "default": "8",
+            "type": "pickString",
+            "options": [
+                "1",
+                "2",
+                "4",
+                "8",
+                "12",
+                "16"
+            ]
         }
     ]
 }

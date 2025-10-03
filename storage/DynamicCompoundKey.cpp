@@ -6,6 +6,7 @@
 //
 
 #include "DynamicCompoundKey.h"
+#include <mutex>
 // ------------------------- Public zero-arg API -------------------------
 namespace DSMEngine {
     DynamicCompoundKey DynamicCompoundKey::MinValue(RecordSchema* schema) {

@@ -1,11 +1,11 @@
 {
-    "C_Cpp.intelliSenseEngine": "default",
-    "C_Cpp.errorSquiggles": "enabled",
-    "C_Cpp.autocomplete": "default",
-    "C_Cpp.suggestSnippets": true,
-    "C_Cpp.enhancedColorization": "enabled",
-    "C_Cpp.intelliSenseEngineFailureRecovery": "enabled",
-    "C_Cpp.workspaceSymbols": "all",
+    "C_Cpp.intelliSenseEngine": "disabled",
+    "C_Cpp.errorSquiggles": "disabled",
+    "C_Cpp.autocomplete": "disabled",
+    "C_Cpp.suggestSnippets": false,
+    "C_Cpp.enhancedColorization": "disabled",
+    "C_Cpp.intelliSenseEngineFailureRecovery": "disabled",
+    "C_Cpp.workspaceSymbols": "disabled",
     "C_Cpp.includePath": [
         "${workspaceFolder}/**",
         "${workspaceFolder}/include",
@@ -35,8 +35,30 @@
         "*.cc": "cpp",
         "*.cpp": "cpp"
     },
-    "cmake.buildArgs": ["-j", "8"],
+    "cmake.buildArgs": [
+        "-j",
+        "8"
+    ],
     "cmake.buildParallelJobs": 8,
-    "cmake.generator": "Ninja"
+    "cmake.generator": "Unix Makefiles",
+    "cmake.configureArgs": [
+        "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
+        "-DCMAKE_BUILD_TYPE=Debug"
+    ],
+    "cmake.buildDirectory": "${workspaceFolder}/build",
+    "cmake.sourceDirectory": "${workspaceFolder}",
+    "terminal.integrated.defaultProfile.linux": "bash",
+    "terminal.integrated.cwd": "${workspaceFolder}",
+    "files.autoSave": "afterDelay",
+    "files.autoSaveDelay": 1000,
+    "editor.formatOnSave": true,
+    "C_Cpp.formatting": "clangFormat",
+    "C_Cpp.clang_format_fallbackStyle": "{ BasedOnStyle: LLVM, IndentWidth: 4, ColumnLimit: 120 }",
+    "clangd.arguments": [
+        "--header-insertion=never",
+        "--completion-style=detailed",
+        "--function-arg-placeholders=false"
+    ],
+    "clangd.path": "clangd",
+    "clangd.checkUpdates": true
 }
-

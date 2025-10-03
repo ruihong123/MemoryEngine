@@ -1,0 +1,116 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        
+        {
+            "name": "Debug memory_server",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/memory_server",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ],
+            "preLaunchTask": "Build memory_server",
+            "miDebuggerPath": "/usr/bin/gdb",
+            "miDebuggerArgs": "--tty=${command:pickProcess}"
+        },
+        {
+            "name": "Debug btree_bench",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/btree_bench",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ],
+            "preLaunchTask": "Build btree_bench",
+            "miDebuggerPath": "/usr/bin/gdb",
+            "miDebuggerArgs": "--tty=${command:pickProcess}"
+        },
+        {
+            "name": "Debug tpcc",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/tpcc",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ],
+            "preLaunchTask": "Build tpcc",
+            "miDebuggerPath": "/usr/bin/gdb",
+            "miDebuggerArgs": "--tty=${command:pickProcess}"
+        },
+        {
+            "name": "Debug micro_bench",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/micro_bench",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ],
+            "preLaunchTask": "Build All",
+            "miDebuggerPath": "/usr/bin/gdb",
+            "miDebuggerArgs": "--tty=${command:pickProcess}"
+        },
+        {
+            "name": "Debug cpu_scale_test",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/cpu_scale_test",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ],
+            "preLaunchTask": "Build All",
+            "miDebuggerPath": "/usr/bin/gdb",
+            "miDebuggerArgs": "--tty=${command:pickProcess}"
+        }
+    ]
+}
