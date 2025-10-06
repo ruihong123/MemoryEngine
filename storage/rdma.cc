@@ -219,7 +219,7 @@ namespace DSMEngine {
                     delete iter;
                 }
                 delete p.second; // remote buffer is not registered on this machine so
-                // just delete the structure
+                                 // just delete the structure
             }
             remote_mem_leaf_pool.clear();
         }
@@ -229,7 +229,7 @@ namespace DSMEngine {
                     delete iter;
                 }
                 delete p.second; // remote buffer is not registered on this machine so
-                // just delete the structure
+                                 // just delete the structure
             }
             remote_mem_delta_pool.clear();
         }
@@ -2079,7 +2079,7 @@ namespace DSMEngine {
         } else {
             qp_init_attr.recv_cq = cq1;
         }
-        qp_init_attr.cap.max_send_wr     = send_outstanding_num + 10; // try whether the max value should be extended.
+        qp_init_attr.cap.max_send_wr     = send_outstanding_num * 3; // try whether the max value should be extended.
         qp_init_attr.cap.max_recv_wr     = recv_outstanding_num;
         qp_init_attr.cap.max_send_sge    = 2;
         qp_init_attr.cap.max_recv_sge    = 2;
@@ -4869,26 +4869,29 @@ namespace DSMEngine {
         bool async_succeed = false;
         if (async) {
 #if ASYNC_PLAN == 1
-            Async_Tasks* tasks = (Async_Tasks*) async_tasks.at(lock_addr.nodeID)->Get();
+            uint16_t primary_physical_id = GetPrimaryPhysicalId(lock_addr.nodeID);
+            Async_Tasks* tasks           = (Async_Tasks*) async_tasks.at(primary_physical_id)->Get();
             if (UNLIKELY(!tasks)) {
                 tasks = new Async_Tasks();
-                async_tasks[lock_addr.nodeID]->Reset(tasks);
+                async_tasks[primary_physical_id]->Reset(tasks);
             }
             // std::string qp_type = "write_local_flush";
             std::string qp_type = "default";
             uint32_t* counter   = &tasks->counter;
-            if (UNLIKELY(*counter >= ATOMIC_OUTSTANDING_SIZE - 2)) {
+            if (LIKELY(*counter < ATOMIC_OUTSTANDING_SIZE - 3)) {
+                ibv_mr* async_cas = tasks->mrs[*counter];
+                RDMA_FAA(lock_addr, async_cas, substract, 0, 0, Regular_Page, qp_type);
+                // tasks->work_type[*counter] = (Async_Tasks::read_unlock_async);
+                //   tasks->work_type.push_back(Async_Tasks::read_unlock_async);
+                *counter      = *counter + 1;
+                async_succeed = true;
+            } else {
                 RDMA_FAA(lock_addr, cas_buffer, substract, IBV_SEND_SIGNALED, 1, Regular_Page, qp_type);
                 // TODO: clear all the async tasks. for the handle. We need to release the
                 // local latch and release the handle.
-
+                // tasks->work_type[*counter] = (Async_Tasks::read_unlock_async);
+                //   tasks->work_type.push_back(Async_Tasks::read_unlock_async);
                 *counter = 0;
-            } else {
-                ibv_mr* async_cas = tasks->mrs[*counter];
-                RDMA_FAA(lock_addr, async_cas, substract, 0, 0, Regular_Page, qp_type);
-                tasks->work_type[*counter] = (Async_Tasks::read_unlock_async);
-                *counter                   = *counter + 1;
-                async_succeed              = true;
             }
 #else
             Async_Tasks* tasks = (Async_Tasks*) async_tasks.at(lock_addr.nodeID)->Get();
@@ -5421,7 +5424,7 @@ namespace DSMEngine {
         // We need a + 1 for the id, because id 0 conflict with the unlock bit
         uint64_t swap             = ((uint64_t) RDMA_Manager::node_id / 2 + 100) << 56;
         int invalidation_RPC_type = 0; // 0 no need for invalidaton message, 1 read invalidation message, 2
-        // write invalidation message.
+                                       // write invalidation message.
 #ifdef INVALIDATION_STATISTICS
         bool invalidation_counted = false;
 #endif
@@ -5527,7 +5530,7 @@ namespace DSMEngine {
         // empty)
         const auto& replicas = GetReplicaSet(page_addr.nodeID);
         assert(!replicas.empty() && "Replicas cannot be empty");
-        uint16_t primary_phys_id = GetPrimaryPhysicalId(page_addr.nodeID);
+        // uint16_t primary_phys_id = GetPrimaryPhysicalId(page_addr.nodeID);
 
         // TODO: If we want to use async unlock, we need to enlarge the max outstand
         // work request that the queue pair support.
@@ -5538,7 +5541,7 @@ namespace DSMEngine {
 #else
         actual_operations = replicas.size() * 2; // All replicas: write + unlock each
 #endif
-
+        assert(((DataPage*) page_buffer->addr)->hdr.this_page_g_ptr == page_addr);
         // Create SR matrix based on actual operations needed
         std::vector<struct ibv_send_wr> sr(actual_operations);
         std::vector<struct ibv_sge> sge(actual_operations);
@@ -5583,6 +5586,7 @@ namespace DSMEngine {
         // Prepare write operations for all replicas (all async by default)
 #if REPLICA_TYPE == REPLICA_WRITE_PRIMARY_ONLY
         // Check async state only for primary node (for atomic operations)
+        uint16_t primary_phys_id   = GetPrimaryPhysicalId(page_addr.nodeID);
         Async_Tasks* primary_tasks = (Async_Tasks*) async_tasks.at(primary_phys_id)->Get();
         if (UNLIKELY(!primary_tasks)) {
             primary_tasks = new Async_Tasks();
@@ -5616,7 +5620,8 @@ namespace DSMEngine {
 
         // Update async state for primary node
         if (use_async_for_atomic) {
-            primary_tasks->work_type[primary_tasks->counter] = (Async_Tasks::read_unlock_async);
+            // primary_tasks->work_type[primary_tasks->counter] =
+            //     (Async_Tasks::write_replica_async);
             primary_tasks->counter += 2;
             async_succeed = true;
         } else {
@@ -5627,16 +5632,17 @@ namespace DSMEngine {
 #else
         // Write to all replicas - all async by default, only primary gets atomic
         // unlock
-        for (size_t i = 0; i < replicas.size(); ++i) {
+        assert(replicas.size() >= 1);
+        for (size_t i = replicas.size() - 1; i > 1; i--) {
             uint16_t physical_id = replicas[i].phys_id;
             bool use_async       = false;
-            Async_Tasks* tasks   = (Async_Tasks*) async_tasks.at(primary_phys_id)->Get();
+            Async_Tasks* tasks   = (Async_Tasks*) async_tasks.at(physical_id)->Get();
             if (UNLIKELY(!tasks)) {
                 tasks = new Async_Tasks();
-                async_tasks[primary_phys_id]->Reset(tasks);
+                async_tasks[physical_id]->Reset(tasks);
             }
             uint32_t* counter = &tasks->counter;
-            use_async         = (*counter < (ATOMIC_OUTSTANDING_SIZE - 2));
+            use_async         = (*counter < (ATOMIC_OUTSTANDING_SIZE - 3));
             ibv_mr* cas_buf   = nullptr;
             ibv_mr* data_buf  = nullptr;
             if (use_async) {
@@ -5644,6 +5650,7 @@ namespace DSMEngine {
                 data_buf = tasks->mrs[*counter + 1];
                 memcpy(data_buf->addr, tbFlushed_local_mr.addr, page_size);
             } else {
+                assert(*counter + 2 <= ATOMIC_OUTSTANDING_SIZE);
                 cas_buf  = Get_local_CAS_mr();
                 data_buf = &tbFlushed_local_mr;
             }
@@ -5668,27 +5675,33 @@ namespace DSMEngine {
 
                 // Submit to primary node
                 Batch_Submit_WRs(&sr[i], num_wrs, physical_id);
+                // printf("Submit write operation (Primary) logical %p, physical%p to
+                // replica node %d\n", page_addr, sr[i].sg_list->addr, physical_id);
+                // fflush(stdout);
             } else {
                 send_flags = use_async ? send_flags : IBV_SEND_SIGNALED | send_flags;
+                // send_flags = send_flags | IBV_SEND_SIGNALED;
                 Prepare_WR_Write_Replication(
                     sr[i], sge[i], tbFlushed_gaddr, data_buf, page_size, send_flags, Regular_Page, physical_id);
                 // Replica nodes: only submit write operation (no atomic unlock)
                 Batch_Submit_WRs(&sr[i], num_wrs,
                     physical_id); // 0 work requests for async write
+                // printf("Submit write operation (Replica) logical %p, physical%p to
+                // replica node %d\n", page_addr, sr[i].sg_list->addr, physical_id);
+                // fflush(stdout);
             }
 
             // Update async state for primary node
             if (use_async) {
-                tasks->work_type[tasks->counter] = Async_Tasks::write_replica_async;
+                // tasks->work_type[tasks->counter] = Async_Tasks::write_replica_async;
+                tasks->work_type.push_back(Async_Tasks::write_replica_async);
                 tasks->counter += 2;
-                printf("Thread %d add 2 to the counter for memory node %d\n", thread_id, physical_id);
-                fflush(stdout);
                 async_succeed = true;
             } else {
+                // tasks->work_type[tasks->counter] = Async_Tasks::write_replica_async;
+                tasks->work_type.push_back(Async_Tasks::write_replica_async);
                 // Reset counter when using sync operations
                 tasks->counter = 0;
-                printf("Thread %d finish one round of async to node %d\n", thread_id, physical_id);
-                fflush(stdout);
             }
         }
 #endif
@@ -5707,7 +5720,7 @@ namespace DSMEngine {
         // empty)
         const auto& replicas = GetReplicaSet(page_addr.nodeID);
         assert(!replicas.empty() && "Replicas cannot be empty");
-        uint16_t primary_phys_id = GetPrimaryPhysicalId(page_addr.nodeID);
+        //   uint16_t primary_phys_id = GetPrimaryPhysicalId(page_addr.nodeID);
 
         // Calculate actual operations needed based on REPLICA_TYPE
         size_t actual_operations;
@@ -5745,6 +5758,7 @@ namespace DSMEngine {
         // Prepare write operations for all replicas (all async by default)
 #if REPLICA_TYPE == REPLICA_WRITE_PRIMARY_ONLY
         // Check async state only for primary node (for atomic operations)
+        uint16_t primary_phys_id   = GetPrimaryPhysicalId(page_addr.nodeID);
         Async_Tasks* primary_tasks = (Async_Tasks*) async_tasks.at(primary_phys_id)->Get();
         if (UNLIKELY(!primary_tasks)) {
             primary_tasks = new Async_Tasks();
@@ -5779,7 +5793,8 @@ namespace DSMEngine {
 
         // Update async state for primary node
         if (use_async_for_atomic) {
-            primary_tasks->work_type[primary_tasks->counter] = (Async_Tasks::write_handover_async);
+            // primary_tasks->work_type[primary_tasks->counter] =
+            //     (Async_Tasks::write_handover_async);
             primary_tasks->counter += 2;
             async_succeed = true;
         } else {
@@ -5787,18 +5802,20 @@ namespace DSMEngine {
         }
 
 #else
-        // Write to all replicas - all async by default, only primary gets atomic
-        // unlock
+        // TODO: Current replicaiton logic is not correct. THe replica should be
+        // guaranteed to be finihsed before the primary flushing back. other wise the
+        // replica flush could be interleave with the following replica flush from
+        // other compute ndoes.
         for (size_t i = 0; i < replicas.size(); ++i) {
             uint16_t physical_id = replicas[i].phys_id;
             bool use_async       = false;
-            Async_Tasks* tasks   = (Async_Tasks*) async_tasks.at(primary_phys_id)->Get();
+            Async_Tasks* tasks   = (Async_Tasks*) async_tasks.at(physical_id)->Get();
             if (UNLIKELY(!tasks)) {
                 tasks = new Async_Tasks();
-                async_tasks[primary_phys_id]->Reset(tasks);
+                async_tasks[physical_id]->Reset(tasks);
             }
             uint32_t* counter = &tasks->counter;
-            use_async         = (*counter < (ATOMIC_OUTSTANDING_SIZE - 2));
+            use_async         = (*counter < (ATOMIC_OUTSTANDING_SIZE - 3));
             ibv_mr* cas_buf   = nullptr;
             ibv_mr* data_buf  = nullptr;
             if (use_async) {
@@ -5837,11 +5854,14 @@ namespace DSMEngine {
             }
             // Update async state for primary node
             if (use_async) {
-                tasks->work_type[tasks->counter] = Async_Tasks::write_handover_async;
+                // tasks->work_type[tasks->counter] = Async_Tasks::write_handover_async;
+                tasks->work_type.push_back(Async_Tasks::write_handover_async);
                 tasks->counter += 2;
                 async_succeed = true;
             } else {
                 // Reset counter when using sync operations
+                // tasks->work_type[tasks->counter] = Async_Tasks::write_handover_async;
+                tasks->work_type.push_back(Async_Tasks::write_handover_async);
                 tasks->counter = 0;
             }
         }
@@ -5901,10 +5921,11 @@ namespace DSMEngine {
 #if ASYNC_PLAN == 1
             // The code below is to prevent a work request overflow in the send queue,
             // since we enable async lock releasing.
-            Async_Tasks* tasks = (Async_Tasks*) async_tasks.at(page_addr.nodeID)->Get();
+            uint16_t primary_physical_id = GetPrimaryPhysicalId(page_addr.nodeID);
+            Async_Tasks* tasks           = (Async_Tasks*) async_tasks.at(primary_physical_id)->Get();
             if (UNLIKELY(!tasks)) {
                 tasks = new Async_Tasks();
-                async_tasks[page_addr.nodeID]->Reset(tasks);
+                async_tasks[primary_physical_id]->Reset(tasks);
             }
             uint32_t* counter = &tasks->counter;
             // why we need a different qp channel here?
@@ -5913,7 +5934,19 @@ namespace DSMEngine {
             // Every sync unlock submit 2 requests, and we need to reserve another one
             // work request for the RDMA locking which contains one async lock
             // acquiring.
-            if (UNLIKELY(*counter >= ATOMIC_OUTSTANDING_SIZE - 3)) {
+            if (LIKELY(*counter < ATOMIC_OUTSTANDING_SIZE - 3)) {
+                ibv_mr* async_cas = tasks->mrs[*counter];
+                Prepare_WR_FAA(sr[0], sge[0], remote_lock_addr, async_cas, substract + add, 0, Regular_Page);
+                //                sr[0].next = &sr[1];
+                *(uint64_t*) async_cas->addr = 0;
+                assert(page_addr.nodeID == remote_lock_addr.nodeID);
+                Batch_Submit_WRs(sr, 0, page_addr.nodeID, qp_type);
+
+                // tasks->work_type[*counter] = (Async_Tasks::handover_async);
+                //   tasks->work_type.push_back(Async_Tasks::handover_async);
+                *counter      = *counter + 1; // should be + 1
+                async_succeed = true;
+            } else {
                 Prepare_WR_FAA(
                     sr[0], sge[0], remote_lock_addr, local_CAS_mr, substract + add, IBV_SEND_SIGNALED, Regular_Page);
                 //                sr[0].next = &sr[1];
@@ -5924,7 +5957,6 @@ namespace DSMEngine {
                 //                assert(((*(uint64_t*) local_CAS_mr->addr) >> 56) == (add
                 //                >> 56));
 #ifndef NDEBUG
-
                 uint64_t initial_old_cas = (*(uint64_t*) local_CAS_mr->addr);
                 if (((*(uint64_t*) local_CAS_mr->addr) >> 56) != (compare >> 56)) {
                     size_t count = 0;
@@ -5948,16 +5980,6 @@ namespace DSMEngine {
                 }
 #endif
                 *counter = 0;
-            } else {
-                ibv_mr* async_cas = tasks->mrs[*counter];
-                Prepare_WR_FAA(sr[0], sge[0], remote_lock_addr, async_cas, substract + add, 0, Regular_Page);
-                //                sr[0].next = &sr[1];
-                *(uint64_t*) async_cas->addr = 0;
-                assert(page_addr.nodeID == remote_lock_addr.nodeID);
-                Batch_Submit_WRs(sr, 0, page_addr.nodeID, qp_type);
-                tasks->work_type[*counter] = (Async_Tasks::handover_async);
-                *counter                   = *counter + 1; // should be + 1
-                async_succeed              = true;
             }
             // TODO: it could be spuriously failed because of the FAA.so we can not have
             // async
@@ -6071,7 +6093,7 @@ namespace DSMEngine {
         // empty)
         const auto& replicas = GetReplicaSet(page_addr.nodeID);
         assert(!replicas.empty() && "Replicas cannot be empty");
-        uint16_t primary_phys_id = GetPrimaryPhysicalId(page_addr.nodeID);
+        // uint16_t primary_phys_id = GetPrimaryPhysicalId(page_addr.nodeID);
 
         // TODO: If we want to use async unlock, we need to enlarge the max outstand
         // work request that the queue pair support.
@@ -6082,6 +6104,7 @@ namespace DSMEngine {
 #else
         actual_operations = replicas.size() * 2; // All replicas: write + unlock each
 #endif
+        assert(((DataPage*) page_buffer->addr)->hdr.this_page_g_ptr == page_addr);
 
         // Create SR matrix based on actual operations needed
         std::vector<struct ibv_send_wr> sr(actual_operations);
@@ -6129,6 +6152,7 @@ namespace DSMEngine {
         // Prepare write operations for all replicas (all async by default)
 #if REPLICA_TYPE == REPLICA_WRITE_PRIMARY_ONLY
         // Check async state only for primary node (for atomic operations)
+        uint16_t primary_phys_id   = GetPrimaryPhysicalId(page_addr.nodeID);
         Async_Tasks* primary_tasks = (Async_Tasks*) async_tasks.at(primary_phys_id)->Get();
         if (UNLIKELY(!primary_tasks)) {
             primary_tasks = new Async_Tasks();
@@ -6162,7 +6186,8 @@ namespace DSMEngine {
 
         // Update async state for primary node
         if (use_async_for_atomic) {
-            primary_tasks->work_type[primary_tasks->counter] = (Async_Tasks::write_downtoR_async);
+            // primary_tasks->work_type[primary_tasks->counter] =
+            //     (Async_Tasks::write_downtoR_async);
             primary_tasks->counter += 2;
             async_succeed = true;
         } else {
@@ -6175,13 +6200,13 @@ namespace DSMEngine {
         for (size_t i = 0; i < replicas.size(); ++i) {
             uint16_t physical_id = replicas[i].phys_id;
             bool use_async       = false;
-            Async_Tasks* tasks   = (Async_Tasks*) async_tasks.at(primary_phys_id)->Get();
+            Async_Tasks* tasks   = (Async_Tasks*) async_tasks.at(physical_id)->Get();
             if (UNLIKELY(!tasks)) {
                 tasks = new Async_Tasks();
-                async_tasks[primary_phys_id]->Reset(tasks);
+                async_tasks[physical_id]->Reset(tasks);
             }
             uint32_t* counter = &tasks->counter;
-            use_async         = (*counter < (ATOMIC_OUTSTANDING_SIZE - 2));
+            use_async         = (*counter < (ATOMIC_OUTSTANDING_SIZE - 3));
             ibv_mr* cas_buf   = nullptr;
             ibv_mr* data_buf  = nullptr;
             if (use_async) {
@@ -6189,6 +6214,7 @@ namespace DSMEngine {
                 data_buf = tasks->mrs[*counter + 1];
                 memcpy(data_buf->addr, tbFlushed_local_mr.addr, page_size);
             } else {
+                assert(*counter + 2 <= ATOMIC_OUTSTANDING_SIZE);
                 cas_buf  = Get_local_CAS_mr();
                 data_buf = &tbFlushed_local_mr;
             }
@@ -6222,10 +6248,14 @@ namespace DSMEngine {
             }
             // Update async state for primary node
             if (use_async) {
-                tasks->work_type[tasks->counter] = Async_Tasks::write_downtoR_async;
+                // tasks->work_type[tasks->counter] = Async_Tasks::write_downtoR_async;
+                tasks->work_type.push_back(Async_Tasks::write_downtoR_async);
                 tasks->counter += 2;
                 async_succeed = true;
+
             } else {
+                // tasks->work_type[tasks->counter] = Async_Tasks::write_downtoR_async;
+                tasks->work_type.push_back(Async_Tasks::write_downtoR_async);
                 // Reset counter when using sync operations
                 tasks->counter = 0;
             }
@@ -9480,7 +9510,7 @@ namespace DSMEngine {
     bool RDMA_Manager::connectMemcached() {
         memcached_server_st* servers = NULL;
         memcached_return rc;
-        std::ifstream conf("../memcached_db_servers.conf");
+        std::ifstream conf("../memcached_ip.conf");
         if (!conf) {
             fprintf(stderr, "can't open memcached_db_servers.conf\n");
             return false;

@@ -571,15 +571,16 @@ namespace DSMEngine
         public:
             enum task_type
             {
-                read_unlock_async,
-                write_handover_async,
-                handover_async,
-                write_downtoR_async,
-                write_replica_async,
+                unoccupied = 0,
+                read_unlock_async = 1,
+                write_handover_async = 2,
+                handover_async = 3,
+                write_downtoR_async = 4,
+                write_replica_async = 5
             };
 
-            task_type work_type[ATOMIC_OUTSTANDING_SIZE] = {};
-            // std::vector<task_type> work_type = {};
+            // task_type work_type[ATOMIC_OUTSTANDING_SIZE] = {};
+            std::vector<task_type> work_type = {};
             ibv_mr* mrs[ATOMIC_OUTSTANDING_SIZE] = {nullptr};
 #if ASYNC_PLAN == 1
             uint32_t counter = 0;

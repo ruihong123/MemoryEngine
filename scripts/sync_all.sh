@@ -1,9 +1,10 @@
 #!/bin/bash
 home_dir="/users/Ruihong/MemoryEngine/"
-nmemory="17"
-ncompute="17"
-nmachines="34"
-nshard="17"
+side_dir="/users/Ruihong/motor/"
+nmemory="9"
+ncompute="9"
+nmachines="18"
+nshard="9"
 numa_node=("0" "1")
 port=$((10000+RANDOM%1000))
 bin=`dirname "$0"`
@@ -85,7 +86,9 @@ function run_bench() {
 #    ssh -o StrictHostKeyChecking=no $node "sudo apt-get install -y libnuma-dev numactl htop libmemcached-dev libboost-all-dev" &
 
 #    ssh -o StrictHostKeyChecking=no $node  "sudo umount /mnt/core_dump & rm /mnt/core_dump/core*"
+    ssh -o StrictHostKeyChecking=no $node  "rm /mnt/core_dump/core*"
     rsync -a $home_dir $node:$home_dir
+    rsync -a $side_dir $node:$side_dir
 #    ssh -o StrictHostKeyChecking=no $node "killall micro_bench memory_server_term > /dev/null 2>&1"
 #    ssh -o StrictHostKeyChecking=no $node "sudo apt install libtbb-dev -y" &
     ssh -o StrictHostKeyChecking=no $node "pkill -f micro_bench" &
@@ -112,8 +115,9 @@ function run_bench() {
     echo "Rsync the $node rsync -a $home_dir $node:$home_dir"
 #    ssh -o StrictHostKeyChecking=no $node "sudo apt-get install -y libnuma-dev numactl htop libmemcached-dev libboost-all-dev" &
 #    ssh -o StrictHostKeyChecking=no $node  "sudo umount /mnt/core_dump & rm /mnt/core_dump/core*"
+    ssh -o StrictHostKeyChecking=no $node  "rm /mnt/core_dump/core*"
     rsync -a $home_dir $node:$home_dir
-
+    rsync -a $side_dir $node:$side_dir
 #    ssh -o StrictHostKeyChecking=no $node "killall micro_bench memory_server_term > /dev/null 2>&1"
     ssh -o StrictHostKeyChecking=no $node "pkill -f micro_bench" &
     ssh -o StrictHostKeyChecking=no $node "pkill -f memory_server_term" &

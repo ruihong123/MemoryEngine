@@ -51,7 +51,7 @@ DSMEngine::Memory_Node_Keeper::Memory_Node_Keeper(bool use_sub_compaction, uint3
       i++;
     }
     rdma_mg->compute_nodes.insert({2*i, connection_conf});
-    assert((rdma_mg->node_id - 1)/2 <  rdma_mg->compute_nodes.size());
+    assert((rdma_mg->node_id - 1)/2 <  rdma_mg->GetComputeNodeNum());
     i = 0;
     std::getline(myfile,connection_conf );
     while ((pos = connection_conf.find(space_delimiter)) != std::string::npos) {
@@ -212,7 +212,7 @@ DSMEngine::Memory_Node_Keeper::Memory_Node_Keeper(bool use_sub_compaction, uint3
         }
     }
       ibv_mr* mr_data = rdma_mg->preregistered_region;
-      assert(mr_data->length == (uint64_t)pr_size*1024ull*1024*1024);
+      assert(mr_data->length >= (uint64_t)pr_size*1024ull*1024*1024);
       memcpy(temp_send, mr_data, sizeof(ibv_mr));
 
       rdma_mg->global_lock_table = rdma_mg->create_lock_table();
