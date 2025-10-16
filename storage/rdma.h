@@ -58,7 +58,7 @@ static inline uint64_t ntohll(uint64_t x) { return x; }
 #define REPLICA_WRITE_ALL 1             // Write to all replicas (default)
 #define REPLICA_WRITE_PRIMARY_ASYNC 2   // Write to primary + async replication
 #define REPLICA_WRITE_MAJORITY 3        // Write to majority
-#define REPLICA_TYPE REPLICA_WRITE_ALL  // Current replication strategy
+#define REPLICA_TYPE REPLICA_WRITE_PRIMARY_ONLY  // Current replication strategy
 
 namespace DSMEngine
 {

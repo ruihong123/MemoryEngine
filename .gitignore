@@ -16,4 +16,4 @@ out/
 /cmake-build-debug/
 scripts/data/*
 scripts/data/0_tpcc.log
-scripts/*.txt
+scripts/*.txt.clangd-index/

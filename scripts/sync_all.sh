@@ -80,6 +80,7 @@ function run_bench() {
 #    n=$((n+1))
 #    sleep 1
 #  done
+  rsync_pids=()
   for node in ${memory_shard[@]}
   do
     echo "Rsync the $node rsync -a $home_dir $node:$home_dir"
@@ -87,11 +88,14 @@ function run_bench() {
 
 #    ssh -o StrictHostKeyChecking=no $node  "sudo umount /mnt/core_dump & rm /mnt/core_dump/core*"
     ssh -o StrictHostKeyChecking=no $node  "rm /mnt/core_dump/core*"
-    rsync -a $home_dir $node:$home_dir
-    rsync -a $side_dir $node:$side_dir
+    rsync -a $home_dir $node:$home_dir &
+    rsync_pids+=($!)
+    rsync -a $side_dir $node:$side_dir &
+    rsync_pids+=($!)
 #    ssh -o StrictHostKeyChecking=no $node "killall micro_bench memory_server_term > /dev/null 2>&1"
 #    ssh -o StrictHostKeyChecking=no $node "sudo apt install libtbb-dev -y" &
     ssh -o StrictHostKeyChecking=no $node "pkill -f micro_bench" &
+    ssh -o StrictHostKeyChecking=no $node "sudo pkill -f motor_mempool" &
     ssh -o StrictHostKeyChecking=no $node "pkill -f memory_server_term" &
     ssh -o StrictHostKeyChecking=no $node "pkill -f tpcc" &
     ssh -o StrictHostKeyChecking=no $node "pkill -f memory_server_tpcc" &
@@ -116,9 +120,12 @@ function run_bench() {
 #    ssh -o StrictHostKeyChecking=no $node "sudo apt-get install -y libnuma-dev numactl htop libmemcached-dev libboost-all-dev" &
 #    ssh -o StrictHostKeyChecking=no $node  "sudo umount /mnt/core_dump & rm /mnt/core_dump/core*"
     ssh -o StrictHostKeyChecking=no $node  "rm /mnt/core_dump/core*"
-    rsync -a $home_dir $node:$home_dir
-    rsync -a $side_dir $node:$side_dir
+    rsync -a $home_dir $node:$home_dir &
+    rsync_pids+=($!)
+    rsync -a $side_dir $node:$side_dir &
+    rsync_pids+=($!)
 #    ssh -o StrictHostKeyChecking=no $node "killall micro_bench memory_server_term > /dev/null 2>&1"
+    ssh -o StrictHostKeyChecking=no $node "pkill -f motor_mempool" &
     ssh -o StrictHostKeyChecking=no $node "pkill -f micro_bench" &
     ssh -o StrictHostKeyChecking=no $node "pkill -f memory_server_term" &
     ssh -o StrictHostKeyChecking=no $node "pkill -f tpcc" &
@@ -141,6 +148,14 @@ function run_bench() {
 
 
   done
+  
+  # Wait for all background rsync jobs to complete
+  echo "Waiting for all rsync operations to complete..."
+  for pid in ${rsync_pids[@]}; do
+    wait $pid
+  done
+  echo "All rsync operations completed."
+  
   read -r -a memcached_node <<< $(head -n 1 $SRC_HOME/memcached_ip.conf)
   echo "restart memcached on ${memcached_node[0]}"
   ssh -o StrictHostKeyChecking=no ${memcached_node[0]} "sudo service memcached restart"

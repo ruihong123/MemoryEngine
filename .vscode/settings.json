@@ -57,8 +57,14 @@
     "clangd.arguments": [
         "--header-insertion=never",
         "--completion-style=detailed",
-        "--function-arg-placeholders=false"
+        "--function-arg-placeholders=false",
+        "--background-index=false",
+        "--clang-tidy=false",
+        "--all-scopes-completion=true",
+        "--pch-storage=memory",
+        "--log=error",
+        "-j=2"
     ],
     "clangd.path": "clangd",
-    "clangd.checkUpdates": true
+    "clangd.checkUpdates": false
 }

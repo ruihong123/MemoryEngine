@@ -29,7 +29,7 @@ namespace DSMEngine{
                 // this optimization can reduce unnecessary RDMA read over the network.
                 uint64_t to_ret = 0;
                 if (!time_stamp_mtx.try_lock()){
-                    latest_snapshot = rdma_mg->GetTimestamp();
+                    // latest_snapshot = rdma_mg->GetTimestamp();
                     time_stamp_mtx.lock();
                     to_ret = latest_snapshot;
                     time_stamp_mtx.unlock();

@@ -9,7 +9,7 @@ namespace DSMEngine {
     int dist_ratio = 1;
     int num_txn = -1;
     int num_core = -1;  // number of cores utilized in a single numa node.
-    bool tpcc_zipf = true;
+    bool tpcc_zipf = false;
     double tpcc_zipf_theta = 0.99;
 
     size_t cache_size = 8 * 1024LLU * 1024LLU* 1024LLU;

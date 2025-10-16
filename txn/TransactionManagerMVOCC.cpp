@@ -157,7 +157,7 @@ namespace DSMEngine{
         // todo: for serializable isolation level, a larger tuple timestamps means that we need to abort this txn.
 #ifdef EARLYABORT
         if (isolation_level ==SERIALIZABLE){
-            if (!pure_read_txn && (have_rolled_back) ){
+            if (!pure_read_txn && (have_rolled_back) && (ts > snapshot_ts)){
                 if (access_type == READ_ONLY) {
 //                uint64_t wts = record->GetWTS();
                     default_gallocator->SELCC_Shared_UnLock(page_gaddr, handle);
@@ -170,7 +170,6 @@ namespace DSMEngine{
                 AbortTransaction();
                 return false;
             }
-            // this is problematic because  the snapshot ts is used for the snapshot release later, simply replace with maxim number is not correct.
             if (!pure_read_txn && ((ts > snapshot_ts) && !have_rolled_back) ){
                 // IF we have not roll back and we find the snapshot is too small for current operation, we can simply fall back to the traditional OCC algorithm.
                 plain_occ = true;
@@ -179,11 +178,16 @@ namespace DSMEngine{
 
         }
         if (isolation_level ==SNAPSHOT_ISOLATION){
-            if (!pure_read_txn && ts > snapshot_ts && access_type == READ_WRITE){
-                //Read_Write, Delete_Only, Insert_Only
-                default_gallocator->SELCC_Exclusive_UnLock(page_gaddr, handle);
-                AbortTransaction();
-                return false;
+            if ( ts > snapshot_ts && access_type == READ_WRITE){
+                // if (have_rolled_back) {
+                    //Read_Write, Delete_Only, Insert_Only
+                    default_gallocator->SELCC_Exclusive_UnLock(page_gaddr, handle);
+                    AbortTransaction();
+                    return false;
+                // }else {
+                //     // you can not update the snapshot number because you need to make sure the previous
+                //     plain_occ = true;
+                // }
             }
         }
 

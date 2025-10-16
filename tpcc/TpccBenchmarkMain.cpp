@@ -60,7 +60,7 @@ int main(int argc, char* argv[]) {
     std::cout << "storage_addr=" << storage_addr << std::endl;
     TableDirectory storage_manager;
   storage_manager.Deserialize(storage_addr);
-
+  default_gallocator->rdma_mg->sync_with_computes_Cside();
   // populate database
   INIT_PROFILE_TIME(gThreadCount);
   TpccPopulator populator(&storage_manager, &tpcc_scale_params);

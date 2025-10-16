@@ -358,6 +358,7 @@ uint64_t RDMA_Manager::GetTimestamp() {
   ibv_mr *local_cas_buffer = Get_local_CAS_mr();
   // THis RDMA read may have some lag with the RDMA faa, BUT this should be
   // fine.
+  // todo: maybe we can increase the lag to reduce the overhead on the snapshot oracle?
   RDMA_Read(timestamp_oracle, local_cas_buffer, 8, IBV_SEND_SIGNALED, 1, 1);
   assert(*(uint64_t *)local_cas_buffer->addr < 0x700d2c00cbe9);
   return *(uint64_t *)local_cas_buffer->addr;
@@ -5158,32 +5159,32 @@ bool RDMA_Manager::global_RUnlock(GlobalAddress lock_addr, ibv_mr *cas_buffer,
 #endif
 
 #ifndef NDEBUG
-    if ((*(uint64_t *)cas_buffer->addr &
-         (1ull << (RDMA_Manager::node_id / 2 + 1))) == 0) {
-      size_t count = 0;
-
-    retry_check:
-      count++;
-      uint64_t old_cas = *(uint64_t *)cas_buffer->addr;
-      spin_wait_us(100);
-      // RDMA read the latch word again and see if it is the same as the compare
-      // value.
-      RDMA_Read(lock_addr, cas_buffer, 8, IBV_SEND_SIGNALED, 1, Regular_Page);
-      if ((*(uint64_t *)cas_buffer->addr &
-           (1ull << (RDMA_Manager::node_id / 2 + 1))) != 0) {
-        printf("NodeID %u RDMA write to reader handover over data %p move too "
-               "fast, resulting in spurious latch word mismatch, latch word is "
-               "%p\n",
-               node_id, lock_addr, old_cas);
-        //                    fflush(stdout);
-        if (count > 100) {
-          assert(false);
-        }
-        goto retry_check;
-      }
-      printf("Have retry %lu times\n", count);
-      //                goto retry;
-    }
+    // if ((*(uint64_t *)cas_buffer->addr &
+    //      (1ull << (RDMA_Manager::node_id / 2 + 1))) == 0) {
+    //   size_t count = 0;
+    //
+    // retry_check:
+    //   count++;
+    //   uint64_t old_cas = *(uint64_t *)cas_buffer->addr;
+    //   spin_wait_us(100);
+    //   // RDMA read the latch word again and see if it is the same as the compare
+    //   // value.
+    //   RDMA_Read(lock_addr, cas_buffer, 8, IBV_SEND_SIGNALED, 1, Regular_Page);
+    //   if ((*(uint64_t *)cas_buffer->addr &
+    //        (1ull << (RDMA_Manager::node_id / 2 + 1))) != 0) {
+    //     printf("NodeID %u RDMA write to reader handover over data %p move too "
+    //            "fast, resulting in spurious latch word mismatch, latch word is "
+    //            "%p\n",
+    //            node_id, lock_addr, old_cas);
+    //     //                    fflush(stdout);
+    //     if (count > 100) {
+    //       assert(false);
+    //     }
+    //     goto retry_check;
+    //   }
+    //   printf("Have retry %lu times\n", count);
+    //   //                goto retry;
+    // }
 #endif
     //            assert((*(uint64_t*)cas_buffer->addr & (1ull <<
     //            (RDMA_Manager::node_id/2 + 1))) != 0);
@@ -6192,28 +6193,28 @@ bool RDMA_Manager::global_WHandover(ibv_mr *page_buffer,
       //                assert(((*(uint64_t*) local_CAS_mr->addr) >> 56) == (add
       //                >> 56));
 #ifndef NDEBUG
-      uint64_t initial_old_cas = (*(uint64_t *)local_CAS_mr->addr);
-      if (((*(uint64_t *)local_CAS_mr->addr) >> 56) != (compare >> 56)) {
-        size_t count = 0;
-
-      retry_check:
-        count++;
-        spin_wait_us(100);
-        // RDMA read the latch word again and see if it is the same as the
-        // compare value.
-        RDMA_Read(remote_lock_addr, local_CAS_mr, 8, IBV_SEND_SIGNALED, 1,
-                  Regular_Page);
-        if (((*(uint64_t *)local_CAS_mr->addr) >> 56) == (compare >> 56)) {
-          printf("Nodeid %u RDMA write handover move too fast, resulting in "
-                 "spurious latch word mismatch\n",
-                 node_id);
-          fflush(stdout);
-          if (count > 100) {
-            assert(false);
-          }
-          goto retry_check;
-        }
-      }
+      // uint64_t initial_old_cas = (*(uint64_t *)local_CAS_mr->addr);
+      // if (((*(uint64_t *)local_CAS_mr->addr) >> 56) != (compare >> 56)) {
+      //   size_t count = 0;
+      //
+      // retry_check:
+      //   count++;
+      //   spin_wait_us(100);
+      //   // RDMA read the latch word again and see if it is the same as the
+      //   // compare value.
+      //   RDMA_Read(remote_lock_addr, local_CAS_mr, 8, IBV_SEND_SIGNALED, 1,
+      //             Regular_Page);
+      //   if (((*(uint64_t *)local_CAS_mr->addr) >> 56) == (compare >> 56)) {
+      //     printf("Nodeid %u RDMA write handover move too fast, resulting in "
+      //            "spurious latch word mismatch\n",
+      //            node_id);
+      //     fflush(stdout);
+      //     if (count > 100) {
+      //       assert(false);
+      //     }
+      //     goto retry_check;
+      //   }
+      // }
 #endif
       *counter = 0;
     }
@@ -9345,7 +9346,9 @@ message_reply:
 
 void RDMA_Manager::Writer_Inv_Modified_handler(RDMA_Request *receive_msg_buf,
                                                uint8_t target_node_id) {
-  //        printf("Writer_Inv_Modified_handler\n");
+  // todo: For try lock, the function should let the remote side know that the his funciton
+  // does not require long wait, it will try several times and then return. the remote side should
+  // remove the pending work request from the local buffer when receiving the last urging RPC request.
   GlobalAddress g_ptr = receive_msg_buf->content.inv_message.page_addr;
   uint8_t starv_level = receive_msg_buf->content.inv_message.starvation_level;
   bool pending_reminder = receive_msg_buf->content.inv_message.pending_reminder;
