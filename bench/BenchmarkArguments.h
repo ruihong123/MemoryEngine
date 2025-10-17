@@ -37,6 +37,8 @@ extern uint64_t cache_size;
 extern std::string my_host_name;
 extern unsigned int conn_port;
 extern std::string config_filename;
+extern bool
+    enable_latency_recording; // Enable/disable per-transaction latency tracking
 // To modify tpcc workload
 extern size_t gReadRatio;
 extern size_t gTimeLocality;
@@ -61,9 +63,14 @@ static void PrintUsage() {
             << std::endl;
   std::cout << "\t-rINT: READ_RATIO(optional, [0,100])" << std::endl;
   std::cout << "\t-lINT: TIME_LOCALITY(optional, [0,100])" << std::endl;
+  std::cout << "\t-lat: ENABLE_LATENCY_RECORDING (optional, default=false)"
+            << std::endl;
   std::cout << "===========================" << std::endl;
   std::cout << "==========[EXAMPLES]==========" << std::endl;
   std::cout << "Benchmark -p11111 -c4 -sf10 -sf100 -t100000" << std::endl;
+  std::cout << "Benchmark -p11111 -c4 -sf10 -sf100 -t100000 -lat (with latency "
+               "tracking)"
+            << std::endl;
   std::cout << "==============================" << std::endl;
 }
 
@@ -142,6 +149,8 @@ static void ArgumentsParser(int argc, char *argv[]) {
     } else if (argv[i][1] == 'r') {
       gReadRatio = atoi(&argv[i][2]);
       gStandard = false;
+    } else if (argv[i][1] == 'l' && argv[i][2] == 'a' && argv[i][3] == 't') {
+      enable_latency_recording = true;
     } else if (argv[i][1] == 'l') {
       gTimeLocality = atoi(&argv[i][2]);
       gStandard = false;

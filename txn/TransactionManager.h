@@ -181,9 +181,9 @@ namespace DSMEngine {
                 assert(buffer_is_not_all_zero(record->data_ptr_, record->GetRecordSize()));
                 return ret;
             } else {
-                //      printf("table_id=%d cannot find the record with  key=%lx\n",
-                //          table_id, primary_key);
-                //        fflush(stdout);
+                printf("table_id=%d cannot find the record with  key=%s\n",
+                    table_id, primary_key.start);
+                fflush(stdout);
                 // Not found return true, and let the caller to handle check whetehr record is still null to figure out
                 // whether the tuple is found or not.
                 return true;

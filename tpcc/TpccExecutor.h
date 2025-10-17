@@ -12,9 +12,10 @@ namespace TpccBenchmark {
 class TpccExecutor : public TransactionExecutor {
 public:
   TpccExecutor(IORedirector *const redirector, TableDirectory *storage_manager,
-               size_t thread_count_, bool log_enabled)
+               size_t thread_count_, bool log_enabled,
+               bool enable_latency_recording = false)
       : TransactionExecutor(redirector, storage_manager, thread_count_,
-                            log_enabled) {}
+                            log_enabled, enable_latency_recording) {}
   ~TpccExecutor() {}
 
   virtual int GetPartitionStart() const override {

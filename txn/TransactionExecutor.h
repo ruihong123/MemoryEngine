@@ -4,6 +4,7 @@
 
 #include "BenchmarkArguments.h"
 #include "IORedirector.h"
+#include "LatencyTracker.h"
 #include "Meta.h"
 #include "PerfStatistics.h"
 #include "Profiler.h"
@@ -13,6 +14,7 @@
 #include "TxnParam.h"
 #include <atomic>
 #include <boost/thread.hpp>
+#include <chrono>
 #include <iostream>
 #include <unordered_map>
 #include <xmmintrin.h>
@@ -22,9 +24,10 @@ class TransactionExecutor {
 public:
   TransactionExecutor(IORedirector *const redirector,
                       TableDirectory *storage_manager, size_t thread_count,
-                      bool log_enabled)
+                      bool log_enabled, bool enable_latency_recording = false)
       : thread_count_(thread_count), storage_manager_(storage_manager),
-        redirector_ptr_(redirector), log_enabled_(log_enabled) {
+        redirector_ptr_(redirector), log_enabled_(log_enabled),
+        enable_latency_recording_(enable_latency_recording) {
     is_begin_ = false;
     is_finish_ = false;
     total_count_ = 0;
@@ -40,16 +43,32 @@ public:
     static_partition_end_ = GetPartitionEnd();
     static_num_items_per_partition_ = GetNumItemsPerPartition();
     static_partition_key_bits_ = GetPartitionKeyBits();
+
+    // Initialize per-thread latency trackers only if enabled
+    if (enable_latency_recording_) {
+      per_thread_latency_trackers_ =
+          new PerThreadLatencyTracker<16>[thread_count_];
+    } else {
+      per_thread_latency_trackers_ = nullptr;
+    }
   }
 
   ~TransactionExecutor() {
     delete[] is_ready_;
     is_ready_ = NULL;
+    if (per_thread_latency_trackers_ != nullptr) {
+      delete[] per_thread_latency_trackers_;
+    }
   }
 
   virtual void Start() {
     PrepareProcedures();
     ProcessQuery();
+  }
+
+  // Set transaction type names for latency reporting
+  void SetTxnTypeNames(const std::map<size_t, std::string> &names) {
+    perf_statistics_.SetTxnTypeNames(names);
   }
 
   // Virtual methods to provide partition parameters for TransactionManager
@@ -198,6 +217,25 @@ public:
 private:
   virtual void PrepareProcedures() = 0;
 
+  // Aggregate latency data from all threads
+  void AggregateLatencyData() {
+    if (!enable_latency_recording_ || per_thread_latency_trackers_ == nullptr) {
+      return;
+    }
+    // Merge all per-thread latency trackers into the performance statistics
+    for (size_t thread_id = 0; thread_id < thread_count_; ++thread_id) {
+      for (size_t txn_type = 0; txn_type < 16; ++txn_type) {
+        const auto &tracker =
+            per_thread_latency_trackers_[thread_id].GetTracker(txn_type);
+        if (tracker.GetCount() > 0) {
+          perf_statistics_.MergeLatencyData(txn_type, tracker);
+        }
+      }
+    }
+    // Calculate percentiles after merging all data
+    perf_statistics_.CalculateLatencyPercentiles();
+  }
+
   virtual void ProcessQuery() {
     std::cout << "start process query" << std::endl;
     boost::thread_group thread_group;
@@ -244,6 +282,9 @@ private:
     perf_statistics_.thread_count_ = thread_count_;
     perf_statistics_.elapsed_time_ = elapsed_time;
     perf_statistics_.throughput_ = throughput;
+
+    // Aggregate latency data from all threads
+    AggregateLatencyData();
   }
 
   virtual void ProcessQueryThread(const size_t &thread_id) {
@@ -284,6 +325,10 @@ private:
         TxnParam *tuple = tuples->get(idx);
         // begin txn
         PROFILE_TIME_START(thread_id, TXN_EXECUTE);
+        std::chrono::high_resolution_clock::time_point txn_start_time;
+        if (enable_latency_recording_) {
+          txn_start_time = std::chrono::high_resolution_clock::now();
+        }
         ret.size_ = 0;
         if (procedures[tuple->type_]->Execute(tuple, ret) == false) {
           //            assert(false);
@@ -338,6 +383,18 @@ private:
 #endif
         }
         ++count;
+
+        // Record latency for this transaction (only if enabled)
+        if (enable_latency_recording_) {
+          auto txn_end_time = std::chrono::high_resolution_clock::now();
+          auto latency_ns =
+              std::chrono::duration_cast<std::chrono::nanoseconds>(
+                  txn_end_time - txn_start_time)
+                  .count();
+          per_thread_latency_trackers_[thread_id].RecordLatency(tuple->type_,
+                                                                latency_ns);
+        }
+
         PROFILE_TIME_END(thread_id, TXN_EXECUTE);
         if (count % 100000 == 0) {
           printf("Node %u Thread %zu finished %d\n",
@@ -388,6 +445,10 @@ private:
 
   PerfStatistics perf_statistics_;
   bool log_enabled_;
+  bool enable_latency_recording_;
+
+  // Latency tracking
+  PerThreadLatencyTracker<16> *per_thread_latency_trackers_;
 
   // Static partition parameters for use in static methods (e.g., 2PC
   // participant)

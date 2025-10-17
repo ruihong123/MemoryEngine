@@ -3,9 +3,12 @@
 #define __DATABASE_UTILS_PERFORMANCE_STATISTICS_H__
 
 #include "BenchmarkArguments.h"
+#include "LatencyTracker.h"
 #include "TransactionManager.h"
 #include <cstdio>
 #include <iostream>
+#include <map>
+#include <string>
 extern uint64_t cache_invalidation[MAX_APP_THREAD];
 extern uint64_t cache_hit_valid[MAX_APP_THREAD][8];
 extern uint64_t cache_miss[MAX_APP_THREAD][8];
@@ -28,6 +31,44 @@ struct PerfStatistics {
     agg_node_num_ = 0;
     longest_elapsed_time_ = 0;
     agg_throughput_ = 0.0;
+  }
+
+  // Set transaction type names for latency reporting
+  void SetTxnTypeNames(const std::map<size_t, std::string> &names) {
+    txn_type_names_ = names;
+  }
+
+  // Merge latency data from per-thread tracker
+  void MergeLatencyData(size_t txn_type, const LatencyTracker &tracker) {
+    latency_trackers_[txn_type].Merge(tracker);
+  }
+
+  // Calculate all percentiles (call after all data is merged)
+  void CalculateLatencyPercentiles() {
+    for (auto &entry : latency_trackers_) {
+      entry.second.CalculatePercentiles();
+    }
+  }
+
+  // Print latency statistics
+  void PrintLatencyStats() {
+    if (latency_trackers_.empty()) {
+      return;
+    }
+
+    std::cout
+        << "\n==================== Latency Statistics ===================="
+        << std::endl;
+    for (auto &entry : latency_trackers_) {
+      size_t txn_type = entry.first;
+      auto it = txn_type_names_.find(txn_type);
+      const char *txn_name =
+          it != txn_type_names_.end() ? it->second.c_str() : "Unknown";
+      entry.second.Print(txn_name);
+    }
+    std::cout
+        << "============================================================\n"
+        << std::endl;
   }
   void PrintAgg() {
     std::cout
@@ -84,6 +125,9 @@ struct PerfStatistics {
    agg_throughput_ / agg_thread_count_ << std::endl;*/
     std::cout << "==================== end ====================" << std::endl;
     fflush(stdout);
+
+    // Print latency statistics
+    PrintLatencyStats();
   }
   void Print() {
     std::cout << "total_count=" << total_count_
@@ -114,6 +158,12 @@ struct PerfStatistics {
   long long agg_elapsed_time_;
   long long agg_node_num_;
   long long longest_elapsed_time_;
+
+  // Latency tracking: recorded locally on each node, but only printed on master
+  // Note: Not aggregated across nodes (complex containers cannot be serialized
+  // by MasterCollect/MasterBroadcast)
+  std::map<size_t, std::string> txn_type_names_;
+  std::map<size_t, LatencyTracker> latency_trackers_;
 };
 } // namespace DSMEngine
 

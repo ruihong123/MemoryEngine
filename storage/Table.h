@@ -111,7 +111,8 @@ namespace DSMEngine {
         bool InsertPriIndex(const DynamicCompoundKey key, size_t key_num, GlobalAddress tuple_gaddr) {
             assert(TOPAGE(tuple_gaddr).offset != tuple_gaddr.offset);
             assert(key_num == 1);
-            size_t primary_key_length = schema_ptr_->GetPrimaryKeyLength();
+            size_t primary_key_length = primary_index_->index_scheme_ptr->GetPrimaryKeyLength();
+            assert(primary_key_length+ 8 == primary_index_->index_scheme_ptr->GetRecordTotalSize());
             char* key_value_pair      = new char[primary_key_length + 8];
             Slice inserted_slice(key_value_pair, primary_key_length + 8);
             memcpy(key_value_pair, key.start, primary_key_length);

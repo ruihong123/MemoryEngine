@@ -87,7 +87,7 @@ target_sources(DSMEngine
         "txn/TransactionExecutor.cpp"
         "txn/DeltaSection.cpp"
         "txn/DeltaRecord.cpp"
-        "txn/DeltaRecord.cpp"
+        "txn/GlobalTimestamp.cpp"
 
 
         # Only CMake 3.3+ supports PUBLIC sources in targets exported by "install".
@@ -153,6 +153,7 @@ add_executable(cpu_scale_test "CPU_cache_scalability.cpp")
 add_executable(btree_bench test/benchmark_btree.cpp)
 add_executable(second_btree_bench test/benchmark_btree_secondary.cpp)
 add_executable(micro_bench test/benchmark_micro.cpp)
+add_executable(mvcc_storage_bench test/benchmark_mvcc_storage.cpp)
 
 file(GLOB TPCC_DEPENDENCY
         "${PROJECT_SOURCE_DIR}/storage/*.h"
@@ -210,6 +211,7 @@ target_link_libraries(memory_server_tpcc DSMEngine)
 target_link_libraries(btree_bench DSMEngine)
 target_link_libraries(second_btree_bench DSMEngine)
 target_link_libraries(micro_bench DSMEngine)
+target_link_libraries(mvcc_storage_bench DSMEngine)
 target_link_libraries(cpu_scale_test -lnuma)
 
 add_subdirectory(Rtree)
