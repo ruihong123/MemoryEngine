@@ -554,8 +554,7 @@ namespace DSMEngine {
                 p = get_root_ptr_protected(page_hint);
                 isroot = true;
                 level = -1;
-                printf("Fall back to root\n");
-                fflush(stdout);
+                std::cerr << "Fall back to root" << std::endl;
 
 
             }

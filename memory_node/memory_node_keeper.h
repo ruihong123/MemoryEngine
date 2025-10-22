@@ -37,7 +37,15 @@ class Memory_Node_Keeper {
   void SetBackgroundThreads(int num,  ThreadPoolType type);
   void ExitAllThreads(){
       exit_all_threads_ = true;
+      if (rdma_mg) {
+          rdma_mg->exit_flag = true;
+      }
+      // Give detached worker threads time to notice exit_flag and terminate
+      // The threads check exit_flag in their polling loops and will exit
+      std::cout << "Waiting for worker threads to exit..." << std::endl;
+      sleep(2);  // Wait 2 seconds for threads to exit
       JoinAllThreads(false);
+      std::cout << "All threads exited" << std::endl;
   }
 //  void MaybeScheduleCompaction(std::string& client_ip);
 //  static void BGWork_Compaction(void* thread_args);

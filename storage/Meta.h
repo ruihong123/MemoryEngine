@@ -11,7 +11,7 @@
 // When defined, all benchmarks use compressed uint64_t keys instead of
 // multi-field keys This affects both Table.h index schema creation and all
 // KeyGenerator implementations
-#define COMPRESSED_TPCC_KEY
+// #define COMPRESSED_TPCC_KEY
 
 namespace DSMEngine {
 typedef uint32_t HashcodeType;

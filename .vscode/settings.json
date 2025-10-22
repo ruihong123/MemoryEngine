@@ -51,7 +51,7 @@
     "terminal.integrated.cwd": "${workspaceFolder}",
     "files.autoSave": "afterDelay",
     "files.autoSaveDelay": 1000,
-    "editor.formatOnSave": true,
+    "editor.formatOnSave": false,
     "C_Cpp.formatting": "clangFormat",
     "C_Cpp.clang_format_fallbackStyle": "{ BasedOnStyle: LLVM, IndentWidth: 4, ColumnLimit: 120 }",
     "clangd.arguments": [

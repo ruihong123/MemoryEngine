@@ -33,15 +33,19 @@ namespace DSMEngine {
 
         private:
             void PopulateSubscriber() {
-                std::cout << "Populating Subscriber table..." << std::endl;
+                int start = tatp_scale_params.starting_subscriber_;
+                int end   = tatp_scale_params.ending_subscriber_;
+                int total = end - start + 1;
+                std::cout << "Populating Subscriber table: " << total << " records (S" 
+                          << start << "-S" << end << ")..." << std::endl;
 
                 Table* subscriber_table = table_directory_->tables_[SUBSCRIBER_TABLE_ID];
                 RecordSchema* schema    = subscriber_table->GetSchema();
 
-                int start = tatp_scale_params.starting_subscriber_;
-                int end   = tatp_scale_params.ending_subscriber_;
-
                 for (int64_t s_id = start; s_id <= end; ++s_id) {
+                    if ((s_id - start) % 100000 == 0 && s_id > start) {
+                        std::cout << "  Subscribers: " << (s_id - start) << "/" << total << std::endl;
+                    }
                     SubscriberRecord record;
                     record.s_id_ = s_id;
                     random_gen_.GenerateNumberString(record.sub_nbr_, SUB_NBR_PADDING_SIZE);
@@ -76,13 +80,15 @@ namespace DSMEngine {
             }
 
             void PopulateAccessInfo() {
-                std::cout << "Populating AccessInfo table..." << std::endl;
+                int start = tatp_scale_params.starting_subscriber_;
+                int end   = tatp_scale_params.ending_subscriber_;
+                int total_subscribers = end - start + 1;
+                int total_records = total_subscribers * ACCESS_TYPES_PER_SUBSCRIBER;
+                std::cout << "Populating AccessInfo table: ~" << total_records << " records..." << std::endl;
 
                 Table* access_info_table = table_directory_->tables_[ACCESS_INFO_TABLE_ID];
                 RecordSchema* schema     = access_info_table->GetSchema();
 
-                int start = tatp_scale_params.starting_subscriber_;
-                int end   = tatp_scale_params.ending_subscriber_;
                 int count = 0;
 
                 for (int64_t s_id = start; s_id <= end; ++s_id) {
@@ -119,13 +125,15 @@ namespace DSMEngine {
             }
 
             void PopulateSpecialFacility() {
-                std::cout << "Populating SpecialFacility table..." << std::endl;
+                int start = tatp_scale_params.starting_subscriber_;
+                int end   = tatp_scale_params.ending_subscriber_;
+                int total_subscribers = end - start + 1;
+                int total_records = total_subscribers * SF_TYPES_PER_SUBSCRIBER;
+                std::cout << "Populating SpecialFacility table: ~" << total_records << " records..." << std::endl;
 
                 Table* sf_table      = table_directory_->tables_[SPECIAL_FACILITY_TABLE_ID];
                 RecordSchema* schema = sf_table->GetSchema();
 
-                int start = tatp_scale_params.starting_subscriber_;
-                int end   = tatp_scale_params.ending_subscriber_;
                 int count = 0;
 
                 for (int64_t s_id = start; s_id <= end; ++s_id) {
@@ -161,13 +169,15 @@ namespace DSMEngine {
             }
 
             void PopulateCallForwarding() {
-                std::cout << "Populating CallForwarding table..." << std::endl;
+                int start = tatp_scale_params.starting_subscriber_;
+                int end   = tatp_scale_params.ending_subscriber_;
+                int total_subscribers = end - start + 1;
+                int total_records = total_subscribers * SF_TYPES_PER_SUBSCRIBER * (START_TIME_MAX - START_TIME_MIN + 1);
+                std::cout << "Populating CallForwarding table: ~" << total_records << " records..." << std::endl;
 
                 Table* cf_table      = table_directory_->tables_[CALL_FORWARDING_TABLE_ID];
                 RecordSchema* schema = cf_table->GetSchema();
 
-                int start = tatp_scale_params.starting_subscriber_;
-                int end   = tatp_scale_params.ending_subscriber_;
                 int count = 0;
 
                 for (int64_t s_id = start; s_id <= end; ++s_id) {

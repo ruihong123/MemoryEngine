@@ -72,16 +72,21 @@ namespace DSMEngine {
 #ifndef NDEBUG
             size_t old_epoch = inner_section->epoch;
 #endif
-            prev_offset = inner_section->tail_allocated;
+            
             // we append new delta record to the tail.
             while (!inner_section->is_empty_ && (old_head + seg_real_size_ - inner_section->tail_allocated) % seg_real_size_ <= delta_size) {
                 // wait until there is enough space for the new delta record.
                 // if full then we clear the whole delta section. (will be changed later)
-                old_head = inner_section->head_;
-                //todo: wait for the signal of garbage collection.
-                cv.wait(lck, [this, old_head, delta_size]{return ((old_head + seg_real_size_ - inner_section->tail_allocated) % seg_real_size_ > delta_size);});
-            }
 
+                //todo: wait for the signal of garbage collection.
+                cv.wait(lck, [this, delta_size] {
+                    uint64_t current_head = inner_section->head_;
+                    return (inner_section->is_empty_ || (current_head + seg_real_size_ - inner_section->tail_allocated) % seg_real_size_ > delta_size);
+                });
+                old_head = inner_section->head_;
+            }
+            
+            prev_offset = inner_section->tail_allocated;
             if (seg_real_size_ - inner_section->tail_allocated < delta_size)
             {
                 if (inner_section->tail_allocated < seg_real_size_){
@@ -121,7 +126,7 @@ namespace DSMEngine {
                 inner_section->max_ts = meta_col.Wts_;
             }
             DeltaRecord *delta_record = new(inner_section->local_seg_addr_ + offset_to_write) DeltaRecord(
-                    meta_col.Wts_, delta_size, meta_col.prev_delta_, commit_ts,
+                    meta_col.Wts_, delta_size, meta_col.prev_version_, commit_ts,
                     meta_col.prev_delta_epoch_, meta_col.prev_delta_data_size_);
             old_record->dirty_col_ids = std::move(new_record->dirty_col_ids);
             old_record->serialize_to_delta(delta_record);
@@ -196,7 +201,7 @@ namespace DSMEngine {
                 inner_section->max_ts = meta_col.Wts_;
             }
             DeltaRecord * delta_record = new(inner_section->local_seg_addr_ + inner_section->tail_) DeltaRecord(
-                    meta_col.Wts_, delta_size, meta_col.prev_delta_, commit_ts,
+                    meta_col.Wts_, delta_size, meta_col.prev_version_, commit_ts,
                     meta_col.prev_delta_epoch_, meta_col.prev_delta_data_size_ );
             old_record->dirty_col_ids = std::move(new_record->dirty_col_ids);
             old_record->serialize_to_delta(delta_record);

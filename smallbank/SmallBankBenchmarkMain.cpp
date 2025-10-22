@@ -138,14 +138,30 @@ int main(int argc, char *argv[]) {
 
 void ExchPerfStatistics(ClusterConfig *config, ClusterSync *synchronizer,
                         PerfStatistics *s) {
+  // Save local latency data before collecting stats across nodes
+  // (latency_trackers_ cannot be serialized via memcpy)
+  auto local_latency_trackers = s->latency_trackers_;
+  auto local_txn_type_names = s->txn_type_names_;
+  
   PerfStatistics *stats = new PerfStatistics[config->GetPartitionNum()];
   synchronizer->MasterCollect<PerfStatistics>(s, stats);
   synchronizer->MasterBroadcast<PerfStatistics>(stats);
+  
+  // Reconstruct corrupted map objects from memcpy using placement new
+  // This overwrites the corrupted maps without trying to traverse/delete them
+  for (size_t i = 0; i < config->GetPartitionNum(); ++i) {
+    new (&stats[i].latency_trackers_) std::map<size_t, LatencyTracker>();
+    new (&stats[i].txn_type_names_) std::map<size_t, std::string>();
+  }
+  
   for (size_t i = 0; i < config->GetPartitionNum(); ++i) {
     stats[i].Print();
     stats[0].Aggregate(stats[i]);
   }
   if (config->IsMaster()) {
+    // Move (not copy) latency data from master node's local data
+    stats[0].latency_trackers_ = std::move(local_latency_trackers);
+    stats[0].txn_type_names_ = std::move(local_txn_type_names);
     stats[0].PrintAgg();
   }
   delete[] stats;

@@ -239,18 +239,12 @@ namespace DSMEngine {
         }
         record->is_visible_ = false;
         PROFILE_TIME_START(thread_id_, INDEX_INSERT);
+        // todo: move the index insertion to the commit phase.
         bool ret = storage_manager_->tables_[table_id]->InsertPriIndex(keys, key_num, tuple_gaddr);
         PROFILE_TIME_END(thread_id_, INDEX_INSERT);
         PROFILE_TIME_END(thread_id_, CC_INSERT);
-        //            gallocators[thread_id_]->SELCC_Exclusive_UnLock(TOPAGE(handle->gptr), handle);
         ReleaseLatchForGCL(handle->gptr, handle);
         return true;
-        //}
-        // else{
-        //	// if the record has already existed, then we need to lock the original record.
-        //	END_PHASE_MEASURE(thread_id_, INSERT_PHASE);
-        //	return true;
-        //}
     }
 
     // Assert that there is no latch still hold in the before the transaction abort. makesure that txn release the last

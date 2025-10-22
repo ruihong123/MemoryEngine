@@ -94,14 +94,20 @@ namespace DSMEngine {
 
         //        default_gallocator->SELCC_Exclusive_Lock_noread(page_buffer, gcl_addr, handle);
     }
-    bool TransactionManager::InsertRecord(size_t table_id, const DynamicCompoundKey keys, size_t key_num,
+    bool TransactionManager::InsertRecord(size_t table_id, const DynamicCompoundKey key, size_t key_num,
         Record* record, Cache::Handle* handle, const GlobalAddress tuple_gaddr) {
 
         record->is_visible_ = false;
         PROFILE_TIME_START(thread_id_, INDEX_INSERT);
         // for OCC, we need to insert to primary index during the commit, otherwise there would be zombie primary
         // pointer, pointing to a roll backed record.
-        //            bool ret = storage_manager_->tables_[table_id]->InsertPriIndex(keys, key_num, tuple_gaddr);
+        //            bool ret = storage_manager_->tables_[table_id]->InsertPriIndex(key, key_num, tuple_gaddr);
+        
+        // Copy primary key directly from the key parameter to the record buffer
+        record->primary_key_length_ = key.schema_ptr->GetPrimaryKeyLength();
+        assert(record->primary_key_length_ <= 64); // Ensure key fits in fixed buffer
+        memcpy(record->primary_key_buffer_, key.start, record->primary_key_length_);
+        
         PROFILE_TIME_END(thread_id_, INDEX_INSERT);
         PROFILE_TIME_END(thread_id_, CC_INSERT);
         //            gallocators[thread_id_]->SELCC_Exclusive_UnLock(TOPAGE(handle->gptr), handle);
@@ -271,12 +277,10 @@ namespace DSMEngine {
             }
             // insert the primary index.
             if (access_type == INSERT_ONLY) {
-                //                IndexKey keys[1];
-                //                access->txn_local_tuple_->GetPrimaryKey(&keys[0]);
+                // Primary key should have been extracted in InsertRecord and stored in local tuple
+                assert(access->txn_local_tuple_->primary_key_length_ > 0); // Ensure primary key was stored
                 RecordSchema *index_schema_ptr = storage_manager_->tables_[access->access_global_record_->GetTableId()]->GetPrimaryIndexSchema();
-                char* primaryk_buff = new char[access->txn_local_tuple_->schema_ptr_->GetPrimaryKeyLength()];
-                access->txn_local_tuple_->GetPrimaryKey(primaryk_buff);
-                DynamicCompoundKey primary_key(primaryk_buff, index_schema_ptr);
+                DynamicCompoundKey primary_key(access->txn_local_tuple_->primary_key_buffer_, index_schema_ptr);
                 storage_manager_->tables_[access->txn_local_tuple_->schema_ptr_->GetTableId()]->InsertPriIndex(
                     primary_key, 1, access->access_addr_);
             }

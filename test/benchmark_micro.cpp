@@ -1102,22 +1102,27 @@ int main(int argc, char* argv[]) {
     res[2] = a_lat;  //avg latency for the current node
     res[3] = invalidation_num;  //avg invalidated message number
     res[4] = hit_valid_num;  //avg latency for the current node
-    int temp = SYNC_KEY + Memcache_offset + node_id;
-    DEBUG_PRINT_arg("memset temp key %d\n", temp);
-    ddsm.memSet((char*)&temp, sizeof(int), (char*)res, sizeof(long) * 5);
+    
+    // Use string-based key with node ID
+    char benchmark_end_key[64];
+    snprintf(benchmark_end_key, sizeof(benchmark_end_key), "benchmark_end_node_%d", node_id);
+    DEBUG_PRINT_arg("memset key %s\n", benchmark_end_key);
+    ddsm.memSet(benchmark_end_key, strlen(benchmark_end_key), (char*)res, sizeof(long) * 5);
+    
     t_thr = a_thr = a_lat = invalidation_num = hit_valid_num = 0;
     for (int i = 0; i < compute_num; i++) {
         memset(res, 0, sizeof(long) * 5);
-        temp = SYNC_KEY + Memcache_offset + i * 2;
+        snprintf(benchmark_end_key, sizeof(benchmark_end_key), "benchmark_end_node_%d", i * 2);
         size_t len;
-        DEBUG_PRINT_arg("memGet temp key %d\n", temp);
-        long* ret = (long*)ddsm.memGet((char*)&temp , sizeof(int), &len);
+        DEBUG_PRINT_arg("memGet key %s\n", benchmark_end_key);
+        long* ret = (long*)ddsm.memGet(benchmark_end_key, strlen(benchmark_end_key), &len);
         assert(len == sizeof(long) * 5);
         t_thr += ret[0];
         a_thr += ret[1];
         a_lat += ret[2];
         invalidation_num += ret[3];
         hit_valid_num += ret[4];
+        free(ret);
     }
     a_thr /= compute_num;
     a_lat /= compute_num;

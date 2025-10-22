@@ -98,12 +98,18 @@ namespace DSMEngine{
                                               const DynamicCompoundKey keys,
                                               size_t key_num, Record *record,
                                               Cache::Handle *handle,
-                                              const GlobalAddress tuple_gaddr) const {
+                                              const GlobalAddress tuple_gaddr) {
 
 //			record->is_visible_ = false;
             PROFILE_TIME_START(thread_id_, INDEX_INSERT);
 //            bool ret = storage_manager_->tables_[table_id]->InsertPriIndex(keys, key_num, tuple_gaddr);
 //            record->primary_key = keys[0];
+            
+            // Copy primary key directly from the key parameter to the record buffer
+            record->primary_key_length_ = keys.schema_ptr->GetPrimaryKeyLength();
+            assert(record->primary_key_length_ <= 64); // Ensure key fits in fixed buffer
+            memcpy(record->primary_key_buffer_, keys.start, record->primary_key_length_);
+            
             PROFILE_TIME_END(thread_id_, INDEX_INSERT);
             PROFILE_TIME_END(thread_id_, CC_INSERT);
 //            gallocators[thread_id_]->SELCC_Exclusive_UnLock(TOPAGE(handle->gptr), handle);
@@ -203,7 +209,7 @@ namespace DSMEngine{
                 lc++;
                 // TODO: ROll back old version of the data.
                 MetaColumn meta = record->GetMeta();
-                GlobalAddress prev_delta = meta.prev_delta_;
+                GlobalAddress prev_delta = meta.prev_version_;
                 // todo: if this record is new inserted by an ongoing tranaction, the prev_delta is null, we can simply abort this transaction.
                 // actually, this should never happen in TPC-C benchmark.
                 if (prev_delta == GlobalAddress::Null()) {
@@ -462,7 +468,7 @@ namespace DSMEngine{
 //                fflush(stdout);
                 MetaColumn meta = access->txn_local_tuple_->GetMeta();
                 assert(delta_gadd.offset - ds_for_write->seg_addr_.offset < ds_for_write->seg_real_size_ + STRUCT_OFFSET(DeltaSection, local_seg_addr_));
-                meta.prev_delta_ = delta_gadd;
+                meta.prev_version_ = delta_gadd;
                 meta.prev_delta_epoch_ = ds_for_write->GetEpoch();
                 meta.prev_delta_data_size_ = delta_size;
 //                meta.next_delta_wts_ = meta.Wts_;
@@ -478,14 +484,11 @@ namespace DSMEngine{
                 access->txn_local_tuple_->PutWTS(commit_ts);
                 assert(commit_ts < 0x100d2c00cbe9);
                 access->access_global_record_->CopyFrom(access->txn_local_tuple_);
-//                IndexKey keys[1];
-//                access->txn_local_tuple_->GetPrimaryKey(&keys[0]);
+                // Primary key should have been extracted in InsertRecord and stored in local tuple
+                assert(access->txn_local_tuple_->primary_key_length_ > 0); // Ensure primary key was stored
                 RecordSchema *index_schema_ptr = storage_manager_->tables_[access->access_global_record_->GetTableId()]->GetPrimaryIndexSchema();
-                char* primaryk_buff = new char[access->txn_local_tuple_->schema_ptr_->GetPrimaryKeyLength()];
-                access->txn_local_tuple_->GetPrimaryKey(primaryk_buff);
-                DynamicCompoundKey primary_key(primaryk_buff, index_schema_ptr);
+                DynamicCompoundKey primary_key(access->txn_local_tuple_->primary_key_buffer_, index_schema_ptr);
                 storage_manager_->tables_[access->txn_local_tuple_->schema_ptr_->GetTableId()]->InsertPriIndex(primary_key, 1, access->access_addr_);
-                delete[] primaryk_buff;
             }
             delete access->access_global_record_;
             access->access_global_record_ = nullptr;

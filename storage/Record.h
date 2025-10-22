@@ -8,6 +8,8 @@
 #include "RecordSchema.h"
 #include "DeltaRecord.h"
 #include <set>
+
+#include "DynamicCompoundKey.h"
 //#include "Cache.h"
 
 namespace DSMEngine {
@@ -272,7 +274,7 @@ public:
             MetaColumn meta = GetMeta();
             meta.Wts_ = delta_record->Wts_;
             assert(meta.Wts_ <0x100d2c00cbe9 );
-            meta.prev_delta_ = delta_record->prev_delta_gaddr;
+            meta.prev_version_ = delta_record->prev_delta_gaddr;
             meta.prev_delta_epoch_ = delta_record->prev_delta_epoch_;
 //            meta.next_delta_wts_ = delta_record->next_delta_wts_; // this operation is useless.
             meta.prev_delta_data_size_ = delta_record->prev_delta_data_size_;
@@ -323,8 +325,12 @@ public:
   size_t data_size_;
     bool is_visible_;
     void * handle_ = nullptr;
-//    IndexKey primary_key;
+    // DynamicCompoundKey primary_key;
     std::set<uint64_t> dirty_col_ids;
+    // Store full copy of primary key for both compressed and uncompressed keys
+    // Fixed-length buffer (max 64 bytes) to avoid dynamic allocation
+    char primary_key_buffer_[64];
+    size_t primary_key_length_ = 0;
 };
 
 

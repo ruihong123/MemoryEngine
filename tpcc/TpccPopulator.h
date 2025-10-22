@@ -68,6 +68,9 @@ namespace DSMEngine {
                     }
 //                    }
                 }
+                if (scale_params_->partition_id_ == 0) {
+                    std::cout << "Items population complete: " << scale_params_->num_items_ << " items" << std::endl;
+                }
                 // load warehouses
                 for (int w_id = scale_params_->starting_warehouse_;
                      w_id <= scale_params_->ending_warehouse_; ++w_id) {
@@ -141,7 +144,9 @@ namespace DSMEngine {
                         GenerateStockRecord(w_id, i_id, original, stock_record);
                         InsertStockRecord(stock_record, stock_record_buf, 0);
                     }
+                    std::cout << "  Warehouse " << w_id << " complete" << std::endl;
                 }
+                std::cout << "All warehouses populated successfully!" << std::endl;
                 delete item_record;
                 item_record = NULL;
                 delete warehouse_record;
@@ -391,7 +396,7 @@ namespace DSMEngine {
                 meta.Wts_ = 0;
 #endif
 #if defined(MVOCC)
-                meta.prev_delta_ = GlobalAddress::Null();
+                meta.prev_version_ = GlobalAddress::Null();
 //      meta.next_delta_wts_ = 0;
                 meta.prev_delta_epoch_ = 0;
                 meta.prev_delta_data_size_ = 0;
@@ -442,7 +447,7 @@ namespace DSMEngine {
                 meta.Wts_ = 0;
 #endif
 #if defined(MVOCC)
-                meta.prev_delta_ = GlobalAddress::Null();
+                meta.prev_version_ = GlobalAddress::Null();
 //      meta.next_delta_wts_ = 0;
                 meta.prev_delta_epoch_ = 0;
                 meta.prev_delta_data_size_ = 0;
@@ -490,7 +495,7 @@ namespace DSMEngine {
                 meta.Wts_ = 0;
 #endif
 #if defined(MVOCC)
-                meta.prev_delta_ = GlobalAddress::Null();
+                meta.prev_version_ = GlobalAddress::Null();
 //      meta.next_delta_wts_ = 0;
                 meta.prev_delta_epoch_ = 0;
                 meta.prev_delta_data_size_ = 0;
@@ -551,7 +556,7 @@ namespace DSMEngine {
                 meta.Wts_ = 0;
 #endif
 #if defined(MVOCC)
-                meta.prev_delta_ = GlobalAddress::Null();
+                meta.prev_version_ = GlobalAddress::Null();
 //      meta.next_delta_wts_ = 0;
                 meta.prev_delta_epoch_ = 0;
                 meta.prev_delta_data_size_ = 0;
@@ -600,7 +605,7 @@ namespace DSMEngine {
                 meta.Wts_ = 0;
 #endif
 #if defined(MVOCC)
-                meta.prev_delta_ = GlobalAddress::Null();
+                meta.prev_version_ = GlobalAddress::Null();
 //      meta.next_delta_wts_ = 0;
                 meta.prev_delta_epoch_ = 0;
                 meta.prev_delta_data_size_ = 0;
@@ -646,7 +651,7 @@ namespace DSMEngine {
                 meta.Wts_ = 0;
 #endif
 #if defined(MVOCC)
-                meta.prev_delta_ = GlobalAddress::Null();
+                meta.prev_version_ = GlobalAddress::Null();
 //      meta.next_delta_wts_ = 0;
                 meta.prev_delta_epoch_ = 0;
                 meta.prev_delta_data_size_ = 0;
@@ -684,7 +689,7 @@ namespace DSMEngine {
                 meta.Wts_ = 0;
 #endif
 #if defined(MVOCC)
-                meta.prev_delta_ = GlobalAddress::Null();
+                meta.prev_version_ = GlobalAddress::Null();
 //      meta.next_delta_wts_ = 0;
                 meta.prev_delta_epoch_ = 0;
                 meta.prev_delta_data_size_ = 0;
@@ -728,7 +733,7 @@ namespace DSMEngine {
                 meta.Wts_ = 0;
 #endif
 #if defined(MVOCC)
-                meta.prev_delta_ = GlobalAddress::Null();
+                meta.prev_version_ = GlobalAddress::Null();
 //      meta.next_delta_wts_ = 0;
                 meta.prev_delta_epoch_ = 0;
                 meta.prev_delta_data_size_ = 0;
@@ -772,7 +777,7 @@ namespace DSMEngine {
                 meta.Wts_ = 0;
 #endif
 #if defined(MVOCC)
-                meta.prev_delta_ = GlobalAddress::Null();
+                meta.prev_version_ = GlobalAddress::Null();
 //      meta.next_delta_wts_ = 0;
                 meta.prev_delta_epoch_ = 0;
                 meta.prev_delta_data_size_ = 0;
@@ -811,7 +816,7 @@ namespace DSMEngine {
                 meta.Wts_ = 0;
 #endif
 #if defined(MVOCC)
-                meta.prev_delta_ = GlobalAddress::Null();
+                meta.prev_version_ = GlobalAddress::Null();
 //      meta.next_delta_wts_ = 0;
                 meta.prev_delta_epoch_ = 0;
                 meta.prev_delta_data_size_ = 0;

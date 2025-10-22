@@ -396,7 +396,7 @@ private:
         }
 
         PROFILE_TIME_END(thread_id, TXN_EXECUTE);
-        if (count % 100000 == 0) {
+        if (count % 10000 == 0) {
           printf("Node %u Thread %zu finished %d\n",
                  default_gallocator->rdma_mg->node_id, thread_id, count);
           fflush(stdout);
