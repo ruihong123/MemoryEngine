@@ -292,11 +292,11 @@ run_mvcc_benchmark() {
   # Set defaults for any unset parameters (using := syntax)
   : ${result_file:=$bin/results/mvcc_storage}
   : ${node_range:="8"}
-  : ${threads_range:="8"}
+  : ${threads_range:="1 4 8"}
   
   # Workload mode configuration
   : ${mixed_workload:=1}           # 1=mixed read/write, 0=separate writers/readers
-  : ${read_ratio_range:="50"}      # For mixed_workload=1: read percentage
+  : ${read_ratio_range:="0"}      # For mixed_workload=1: read percentage
   : ${writers:=1}                  # For mixed_workload=0: number of writer threads
   : ${readers:=7}                  # For mixed_workload=0: number of reader threads
   

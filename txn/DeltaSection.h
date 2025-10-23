@@ -11,6 +11,7 @@
 #include "Common.h"
 #include "Record.h"
 #include "rdma.h"
+#include "port/port_posix.h"
 #define SINGLE_DELTA_PER_NODE
 
 namespace DSMEngine {
@@ -85,7 +86,7 @@ namespace DSMEngine {
                 });
                 old_head = inner_section->head_;
             }
-            
+
             prev_offset = inner_section->tail_allocated;
             if (seg_real_size_ - inner_section->tail_allocated < delta_size)
             {
@@ -371,6 +372,39 @@ namespace DSMEngine {
 
 
         }
+        // Helper function to split boundaries that exceed BIGPAGESIZE
+        void SplitBoundariesByBigPage(std::vector<std::pair<size_t, size_t>> & boundaries) {
+            std::vector<std::pair<size_t, size_t>> new_boundaries;
+            
+            for (auto& boundary : boundaries) {
+                size_t start = boundary.first;
+                size_t end = boundary.second;
+                size_t size = end - start;
+                
+                if (size <= BIGPAGESIZE) {
+                    // Boundary is within BigPage size, keep as is
+                    new_boundaries.push_back(boundary);
+                } else {
+                    // Split boundary into multiple BigPage-sized chunks
+                    printf("[BIGPAGE_SPLIT] Splitting boundary [%zu, %zu] (size: %zu) into BigPage chunks (max: %d)\n", 
+                           start, end, size, BIGPAGESIZE);
+                    fflush(stdout);
+                    
+                    size_t current_start = start;
+                    while (current_start < end) {
+                        size_t current_end = std::min(current_start + BIGPAGESIZE, end);
+                        new_boundaries.push_back(std::make_pair(current_start, current_end));
+                        printf("[BIGPAGE_SPLIT] Created chunk [%zu, %zu] (size: %zu)\n", 
+                               current_start, current_end, current_end - current_start);
+                        fflush(stdout);
+                        current_start = current_end;
+                    }
+                }
+            }
+            
+            boundaries = std::move(new_boundaries);
+        }
+
         void CalculateWriteBoundaries(std::vector<std::pair<size_t, size_t>> & boundaries, uint64_t old_h, uint64_t old_t, uint64_t old_epoch){
             //todo: the logic need carefully proofread.
 #ifdef SINGLE_DELTA_PER_NODE
@@ -411,49 +445,9 @@ namespace DSMEngine {
                         boundaries[0].second = boundaries[1].second;
                         boundaries.erase(boundaries.begin() + 1);
                     }
+                    // Split boundaries by BigPage size
+                    SplitBoundariesByBigPage(boundaries);
                     return;
-
-//                    if (inner_section->head_ <= merge_thre && seg_real_size_ - inner_section->tail_ <= merge_thre) {
-//                        // transfer the whole delta section.
-//                        end = STRUCT_OFFSET(DeltaSection, local_seg_addr_) + seg_real_size_;
-//                        assert(end - start == rdma_mg_->delta_section_size);
-//                        return;
-//                    }
-//                    if (inner_section->head_ > merge_thre && seg_real_size_ - inner_section->tail_ > merge_thre){
-//                        // transfer by three parts.
-//                        end = STRUCT_OFFSET(DeltaSection, local_seg_addr_);
-//                        boundaries.push_back(std::make_pair(start, end));
-//
-//                        start = STRUCT_OFFSET(DeltaSection, local_seg_addr_) + inner_section->head_;
-//                        end = STRUCT_OFFSET(DeltaSection, local_seg_addr_) + inner_section->tail_;
-//                        boundaries.push_back(std::make_pair(start, end));
-//
-//                        start = STRUCT_OFFSET(DeltaSection, local_seg_addr_) + seg_real_size_ - 1;
-//                        end = STRUCT_OFFSET(DeltaSection, local_seg_addr_) + seg_real_size_;
-//                        boundaries.push_back(std::make_pair(start, end));
-//                        return;
-//                    }
-//                    if(inner_section->head_ > merge_thre){
-//                        assert(seg_real_size_ - inner_section->tail_ <= merge_thre);
-//                        end = STRUCT_OFFSET(DeltaSection, local_seg_addr_) + inner_section->head_;
-//                        end = STRUCT_OFFSET(DeltaSection, local_seg_addr_) + inner_section->tail_;
-//                        boundaries.push_back(std::make_pair(start, end));
-//
-//                        start = STRUCT_OFFSET(DeltaSection, local_seg_addr_) + inner_section->tail_;
-//                        end = STRUCT_OFFSET(DeltaSection, local_seg_addr_) + seg_real_size_;
-//                        boundaries.push_back(std::make_pair(start, end));
-//                        return;
-//                    }
-//                    if (seg_real_size_ - inner_section->tail_ > merge_thre){
-//                        assert(inner_section->head_ <= merge_thre);
-//                        end = STRUCT_OFFSET(DeltaSection, local_seg_addr_) + inner_section->tail_;
-//                        boundaries.push_back(std::make_pair(start, end));
-//
-//                        start = STRUCT_OFFSET(DeltaSection, local_seg_addr_) + seg_real_size_ - 1;
-//                        end = STRUCT_OFFSET(DeltaSection, local_seg_addr_) + seg_real_size_;
-//                        boundaries.push_back(std::make_pair(start, end));
-//                        return;
-//                    }
                 }else{
                     // write the header and first half.
                     end = STRUCT_OFFSET(DeltaSection, local_seg_addr_) + inner_section->tail_;
@@ -473,6 +467,8 @@ namespace DSMEngine {
                         boundaries.pop_back();
                         assert(boundaries[0].second == STRUCT_OFFSET(DeltaSection, local_seg_addr_) + seg_real_size_ + 1);
                     }
+                    // Split boundaries by BigPage size
+                    SplitBoundariesByBigPage(boundaries);
                     return;
                 }
 
@@ -505,6 +501,8 @@ namespace DSMEngine {
                         boundaries[0].second = boundaries[1].second;
                         boundaries.erase(boundaries.begin() + 1);
                     }
+                    // Split boundaries by BigPage size
+                    SplitBoundariesByBigPage(boundaries);
                     return;
                 }else{
                     assert(old_h <= inner_section->head_);
@@ -537,6 +535,8 @@ namespace DSMEngine {
                         boundaries[0].second = boundaries[1].second;
                         boundaries.erase(boundaries.begin() + 1);
                     }
+                    // Split boundaries by BigPage size
+                    SplitBoundariesByBigPage(boundaries);
                     return;
                 }
             }

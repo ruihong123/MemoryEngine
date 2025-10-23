@@ -75,6 +75,8 @@ std::atomic<uint64_t> write_latency_sum{0};
 std::atomic<uint64_t> read_latency_sum{0};
 std::atomic<uint64_t> version_chain_traversals{0};
 std::atomic<uint64_t> delta_applications{0};
+std::atomic<uint64_t> delta_pull_count{0};
+std::atomic<uint64_t> delta_pull_time_sum{0};
 std::atomic<bool> benchmark_running{true};
 std::atomic<bool> benchmark_ready{false};
 std::atomic<bool> warmup_phase{true};
@@ -117,6 +119,7 @@ void ProcessDeltaCreate(void* args) {
 }
 
 void ProcessDeltaPull(void* args) {
+  auto start_time = std::chrono::high_resolution_clock::now();
   auto* rdma_mg = RDMA_Manager::Get_Instance();
   auto *receive_msg_buf = (RDMA_Request*)args;
   assert(receive_msg_buf->command == pull_delta_section);
@@ -173,6 +176,13 @@ void ProcessDeltaPull(void* args) {
       rdma_mg->RDMA_Write_xcompute(&local_mr, remote_addr, receive_msg_buf->rkey,
                                     write_size, requester_node_id, qp_id, async);
     }
+    
+    auto end_time = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
+    
+    printf("[DELTA_PULL_COMPLETE] Node %d completed delta pull processing for node %d in %lu μs\n",
+           rdma_mg->node_id, requester_node_id, duration.count());
+    fflush(stdout);
   }
   
   delete receive_msg_buf;
@@ -456,10 +466,6 @@ public:
 
       // Get commit timestamp using fuzzy local timestamp (increment locally)
       uint64_t commit_ts = local_snapshot_ts_.fetch_add(1, std::memory_order_relaxed) + 1;
-      
-      printf("[DATA_ACCESS] WRITE: Node %d Thread %d - Key %lu committing at timestamp %lu\n", 
-             ThisNodeID, thread_id, key, commit_ts);
-      fflush(stdout);
 
       if (strategy_ == VERSION_CHAIN) {
         WriteWithVersionChain(key, commit_ts, thread_id);
@@ -497,9 +503,6 @@ public:
       uint64_t random_lag = (lag_range > 0) ? (thread_randoms_[thread_id]->Next() % lag_range) : 0;
       uint64_t snapshot_ts = current_ts - random_lag;
       
-      printf("[DATA_ACCESS] READ: Node %d Thread %d accessing key %lu at snapshot_ts %lu (current_ts %lu, lag %lu)\n", 
-             ThisNodeID, thread_id, key, snapshot_ts, current_ts, random_lag);
-      fflush(stdout);
 
       if (strategy_ == VERSION_CHAIN) {
         ReadWithVersionChain(key, snapshot_ts, thread_id);
@@ -807,11 +810,20 @@ private:
             
             // Pull updates from remote node
             if (delta_section->owner_compute_node_id_ != RDMA_Manager::Get_Instance()->node_id) {
-              printf("[DEBUG] Issuing DeltaPull: Node %d requesting delta updates from owner node %d, ds_gaddr=%p, key=%lu\n",
-                     RDMA_Manager::Get_Instance()->node_id, delta_section->owner_compute_node_id_,
-                     delta_section->seg_addr_.val, key);
-              fflush(stdout);
+              auto pull_start_time = std::chrono::high_resolution_clock::now();
               delta_section->PullUpdates();
+              auto pull_end_time = std::chrono::high_resolution_clock::now();
+              auto pull_duration = std::chrono::duration_cast<std::chrono::microseconds>(pull_end_time - pull_start_time);
+              uint64_t duration_us = pull_duration.count();
+              
+              // Update global statistics
+              delta_pull_count.fetch_add(1);
+              delta_pull_time_sum.fetch_add(duration_us);
+              
+              printf("[DELTA_PULL_WAIT] Node %d waited %lu μs for delta pull from node %d (key=%lu)\n",
+                     RDMA_Manager::Get_Instance()->node_id, duration_us, 
+                     delta_section->owner_compute_node_id_, key);
+              fflush(stdout);
             }
           }
         }
@@ -1358,9 +1370,16 @@ int main(int argc, char *argv[]) {
     total_cache_hits += cache_hit_valid[i][0];
   }
   
-  // Print data access summary
-  printf("[DATA_ACCESS_SUMMARY] Node %d: Write operations: %lu, Read operations: %lu, Delta applications: %lu\n", 
-         RDMA_Manager::Get_Instance()->node_id, write_count.load(), read_count.load(), delta_applications.load());
+  // Print delta pull timing summary
+  uint64_t total_pulls = delta_pull_count.load();
+  uint64_t total_pull_time = delta_pull_time_sum.load();
+  if (total_pulls > 0) {
+    double avg_pull_time = (double)total_pull_time / total_pulls;
+    printf("[DELTA_PULL_SUMMARY] Node %d: %lu delta pulls, total time: %lu μs, average: %.2f μs\n",
+           RDMA_Manager::Get_Instance()->node_id, total_pulls, total_pull_time, avg_pull_time);
+  } else {
+    printf("[DELTA_PULL_SUMMARY] Node %d: No delta pulls performed\n", RDMA_Manager::Get_Instance()->node_id);
+  }
 
   // Print results
   printf("\n========================================\n");
