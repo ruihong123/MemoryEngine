@@ -18,22 +18,37 @@ cache_mem_size=8 # 8 GB Local cache size
 mem_region_size=40 # 40 GB Remote memory size per memory server
 port=$((10000+RANDOM%1000))
 
-# MVCC Benchmark Parameters (with defaults)
-threads=8
-read_ratio=50
-mixed_workload=1
-writers=4
-readers=4
-storage_type=1  # 1=DeltaSection, 2=VersionChain, 3=DeltaInGCL
-workload_type=0  # 0=uniform, 1=zipfian
-zipfian_theta=0.99
-num_tuples=100000
-snapshot_lag=10000
-warmup_duration=10
-duration=30
+# MVCC Benchmark Parameters (defaults will be set in run_mvcc_benchmark function)
+# These are commented out so loop variables can override them
+# threads=8
+# read_ratio=50
+# mixed_workload=1
+# writers=4
+# readers=4
+# storage_type=1  # 1=DeltaSection, 2=VersionChain, 3=DeltaInGCL
+# workload_type=0  # 0=uniform, 1=zipfian
+# zipfian_theta=0.99
+# num_tuples=100000
+# snapshot_lag=10000
+# warmup_duration=10
+# duration=30
 result_file=$bin/results/mvcc_storage
 
 run() {
+    # Set defaults for any variables not set by the loops
+    : ${threads:=8}
+    : ${read_ratio:=50}
+    : ${mixed_workload:=1}
+    : ${writers:=4}
+    : ${readers:=4}
+    : ${storage_type:=1}
+    : ${workload_type:=0}
+    : ${zipfian_theta:=0.99}
+    : ${num_tuples:=100000}
+    : ${snapshot_lag:=10000}
+    : ${warmup_duration:=10}
+    : ${duration:=30}
+    
     echo "========================================="
     echo "Running MVCC Storage Benchmark"
     echo "result_file=$result_file"
@@ -41,6 +56,7 @@ run() {
     echo "storage_type=$storage_type, workload_type=$workload_type"
     echo "num_tuples=$num_tuples, snapshot_lag=$snapshot_lag"
     echo "mixed_workload=$mixed_workload, zipfian_theta=$zipfian_theta"
+    echo "duration=$duration"
     echo "========================================="
 
     # Get compute and memory nodes from config
@@ -284,9 +300,9 @@ run_mvcc_benchmark() {
   : ${writers:=1}                  # For mixed_workload=0: number of writer threads
   : ${readers:=7}                  # For mixed_workload=0: number of reader threads
   
-  : ${storage_type_range:="1 2"}
-  : ${workload_type_range:="1"}
-  : ${zipfian_theta_range:="0.1 0.99"}
+  : ${storage_type_range:="1"}
+  : ${workload_type_range:="0"}
+  : ${zipfian_theta_range:="0.1"}
   : ${num_tuples:=100000}
   : ${snapshot_lag_range:="10000"}
   : ${warmup_duration:=10}

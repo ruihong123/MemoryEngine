@@ -66,7 +66,7 @@ int kWorkloadType = 0; // 0=uniform, 1=zipfian
 double kZipfianTheta = 0.99; // Zipfian skew parameter (0.0 = uniform, 0.99 = highly skewed)
 uint16_t ThisNodeID = 0;
 uint16_t tcp_port = 19843;
-uint64_t kCacheSize = 2; // GB
+uint64_t kCacheSize = 8; // GB
 
 // Statistics
 std::atomic<uint64_t> write_count{0};
@@ -127,6 +127,10 @@ void ProcessDeltaPull(void* args) {
   uint64_t old_max_ts = receive_msg_buf->content.pull_ds.old_max_ts;
   uint64_t old_epoch = receive_msg_buf->content.pull_ds.old_epoch;
   uint8_t requester_node_id = receive_msg_buf->content.pull_ds.requester_node_id;
+  
+  printf("[DEBUG] ProcessDeltaPull: Node %d received delta pull request from node %d, ds_gaddr=%p, old_head=%lu, old_tail=%lu, old_max_ts=%lu, old_epoch=%lu\n", 
+         rdma_mg->node_id, requester_node_id, ds_gaddr.val, old_head_, old_tail_, old_max_ts, old_epoch);
+  fflush(stdout);
   
   {
     std::shared_lock<std::shared_mutex> map_lck(g_delta_map_mtx);
@@ -231,6 +235,9 @@ public:
   // Zipfian distribution generator (shared across threads)
   struct zipf_gen_state zipf_gen_state_;
   bool use_zipfian_;
+  
+  // Thread-local random number generators (one per thread)
+  std::vector<std::unique_ptr<Random64>> thread_randoms_;
 
   // For VERSION_CHAIN strategy: we use the primary index to find the latest version
   // No additional data structures needed - all metadata stored in MetaColumn
@@ -317,6 +324,14 @@ public:
       mehcached_zipf_init(&zipf_gen_state_, kNumTuples, kZipfianTheta, rand_seed);
       use_zipfian_ = true;
       printf("Initialized Zipfian generator with theta=%.2f, n=%lu\n", kZipfianTheta, kNumTuples);
+    }
+    
+    // Initialize thread-local random number generators
+    thread_randoms_.resize(kNumThreads);
+    for (int i = 0; i < kNumThreads; i++) {
+      uint64_t seed = i * 12345 + ThisNodeID * 67890;
+      thread_randoms_[i] = std::make_unique<Random64>(seed);
+      printf("Node %d Thread %d: Initialized random generator with seed %lu\n", ThisNodeID, i, seed);
     }
 
     const char *strategy_name =
@@ -420,27 +435,31 @@ private:
   
 public:
   // Select key based on workload type (uniform or zipfian)
-  uint64_t SelectKey(Random64& rand) {
+  uint64_t SelectKey(int thread_id) {
     if (use_zipfian_) {
       // Zipfian distribution (thread-safe as each call modifies local state)
       return mehcached_zipf_next(&zipf_gen_state_);
     } else {
-      // Uniform distribution
-      return rand.Next() % kNumTuples;
+      // Uniform distribution using thread-local random generator
+      uint64_t key = thread_randoms_[thread_id]->Next() % kNumTuples;
+      return key;
     }
   }
 
   // Write operation - creates new version
   void WriteOperation(int thread_id) {
-    Random64 rand(thread_id * 12345 + ThisNodeID * 67890);
     auto start = std::chrono::high_resolution_clock::now();
 
     try {
       // Select tuple key based on workload type
-      uint64_t key = SelectKey(rand);
+      uint64_t key = SelectKey(thread_id);
 
       // Get commit timestamp using fuzzy local timestamp (increment locally)
       uint64_t commit_ts = local_snapshot_ts_.fetch_add(1, std::memory_order_relaxed) + 1;
+      
+      printf("[DATA_ACCESS] WRITE: Node %d Thread %d - Key %lu committing at timestamp %lu\n", 
+             ThisNodeID, thread_id, key, commit_ts);
+      fflush(stdout);
 
       if (strategy_ == VERSION_CHAIN) {
         WriteWithVersionChain(key, commit_ts, thread_id);
@@ -449,6 +468,8 @@ public:
       } else if (strategy_ == DELTA_IN_GCL) {
         WriteWithDeltaInGCL(key, commit_ts, thread_id);
       }
+
+
 
       auto end = std::chrono::high_resolution_clock::now();
       auto duration =
@@ -464,18 +485,21 @@ public:
 
   // Read operation - accesses old snapshot
   void ReadOperation(int thread_id) {
-    Random64 rand(thread_id * 54321 + ThisNodeID * 98765);
     auto start = std::chrono::high_resolution_clock::now();
 
     try {
       // Select tuple key based on workload type
-      uint64_t key = SelectKey(rand);
+      uint64_t key = SelectKey(thread_id);
 
       // Get snapshot timestamp randomly distributed in [current_ts - kSnapshotLag, current_ts]
       uint64_t current_ts = local_snapshot_ts_.load(std::memory_order_relaxed);
       uint64_t lag_range = (current_ts > kSnapshotLag) ? kSnapshotLag : current_ts;
-      uint64_t random_lag = (lag_range > 0) ? (rand.Next() % lag_range) : 0;
+      uint64_t random_lag = (lag_range > 0) ? (thread_randoms_[thread_id]->Next() % lag_range) : 0;
       uint64_t snapshot_ts = current_ts - random_lag;
+      
+      printf("[DATA_ACCESS] READ: Node %d Thread %d accessing key %lu at snapshot_ts %lu (current_ts %lu, lag %lu)\n", 
+             ThisNodeID, thread_id, key, snapshot_ts, current_ts, random_lag);
+      fflush(stdout);
 
       if (strategy_ == VERSION_CHAIN) {
         ReadWithVersionChain(key, snapshot_ts, thread_id);
@@ -547,12 +571,31 @@ private:
       return;
     }
 
-    // Step 4: Copy updated data from local buffer to new tuple
-    memcpy(new_tuple_buffer, local_buffer.data(), schema_->GetRecordTotalSize());
 
     // Step 5: Set metadata in new version
     Record new_record(schema_, new_tuple_buffer);
     MetaColumn meta = new_record.GetMeta();
+
+
+    // Fuzzy snapshot: update local snapshot if we see a higher timestamp from SELCC layer
+    // Use CAS to avoid over-incrementing when multiple threads see the same high timestamp
+    uint64_t record_ts = meta.Wts_;
+    if (record_ts > commit_ts) {
+      commit_ts = record_ts + 1;
+    }
+    uint64_t expected = local_snapshot_ts_.load(std::memory_order_relaxed);
+    while (expected < record_ts) {
+      if (local_snapshot_ts_.compare_exchange_weak(expected, record_ts,
+                                                     std::memory_order_relaxed,
+                                                     std::memory_order_relaxed)) {
+        break;  // Successfully updated
+                                                     }
+      // expected was updated by compare_exchange_weak, retry if still needed
+      expected = local_snapshot_ts_.load(std::memory_order_relaxed);
+    }
+
+    // Step 4: Copy updated data from local buffer to new tuple
+    memcpy(new_tuple_buffer, local_buffer.data(), schema_->GetRecordTotalSize());
     meta.Wts_ = commit_ts;
     meta.prev_version_ = old_tuple_gaddr;  // Link to previous version
     meta.prev_delta_epoch_ = 0;
@@ -671,7 +714,7 @@ private:
     
     g_ds_for_write->fill_in_delta_record_single(&new_record, &global_record,
                                                   delta_gaddr, delta_size, commit_ts);
-    
+
     // Update metadata with delta pointer
     MetaColumn meta = new_record.GetMeta();
     meta.prev_version_ = delta_gaddr;
@@ -764,6 +807,10 @@ private:
             
             // Pull updates from remote node
             if (delta_section->owner_compute_node_id_ != RDMA_Manager::Get_Instance()->node_id) {
+              printf("[DEBUG] Issuing DeltaPull: Node %d requesting delta updates from owner node %d, ds_gaddr=%p, key=%lu\n",
+                     RDMA_Manager::Get_Instance()->node_id, delta_section->owner_compute_node_id_,
+                     delta_section->seg_addr_.val, key);
+              fflush(stdout);
               delta_section->PullUpdates();
             }
           }
@@ -1310,6 +1357,10 @@ int main(int argc, char *argv[]) {
     total_invalidations += cache_invalidation[i];
     total_cache_hits += cache_hit_valid[i][0];
   }
+  
+  // Print data access summary
+  printf("[DATA_ACCESS_SUMMARY] Node %d: Write operations: %lu, Read operations: %lu, Delta applications: %lu\n", 
+         RDMA_Manager::Get_Instance()->node_id, write_count.load(), read_count.load(), delta_applications.load());
 
   // Print results
   printf("\n========================================\n");

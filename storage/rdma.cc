@@ -3288,7 +3288,7 @@ namespace DSMEngine {
                 std::cout << "q id is" << qp_type << std::endl;
                 fprintf(stdout, "QP number=0x%x\n", res->qp_map[target_node_id]->qp_num);
             } else {
-                DEBUG_PRINT("RDMA write successfully\n");
+                // DEBUG_PRINT("RDMA write successfully\n");
             }
             delete[] wc;
         }
@@ -7653,6 +7653,9 @@ namespace DSMEngine {
 
         int qp_id = qp_inc_ticket++ % NUM_QP_ACCROSS_COMPUTE;
 
+        printf("[DEBUG] Writer_Invalidate_Shared_RPC: Sending writer_invalidate_shared message from node %u to node %u, page_addr: %lx\n",
+               node_id, target_node_id, g_ptr.val);
+        fflush(stdout);
         post_send_xcompute(send_mr, target_node_id, qp_id, sizeof(RDMA_Request));
         ibv_wc wc[2] = {};
         assert(send_pointer->command != create_qp_);
