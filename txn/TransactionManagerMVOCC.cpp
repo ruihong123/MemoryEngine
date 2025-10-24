@@ -643,7 +643,7 @@ namespace DSMEngine{
             // the local copy is up to date.
             //todo: develop reply mechanism according to the old epoch, old head and old tail and also try to make the delta
             // write an async operation to minumize the latency.
-             int qp_id = rdma_mg->qp_inc_ticket++ % NUM_QP_ACCROSS_COMPUTE;
+             int qp_id = rdma_mg->GetQPForDeltaPull();
              uint8_t* polling_byte = (uint8_t*)((uint8_t*)local_mr.addr + rdma_mg->delta_section_size - 1);
              assert(ds_w->inner_section->tail_ != ds_w->inner_section->head_ || ds_w->inner_section->is_empty_);
              *polling_byte = 5;
@@ -655,7 +655,7 @@ namespace DSMEngine{
              for(auto pair : boundaries){
                  assert(boundaries.size() <= 3);
                  assert(boundaries.size() > 0);
-                 qp_id = rdma_mg->qp_inc_ticket++ % NUM_QP_ACCROSS_COMPUTE;
+                 qp_id = rdma_mg->GetQPForDeltaPull();
 
                 local_mr = *ds_w->seg_local_mr_;
                 remote_addr = (char*)receive_msg_buf->buffer;
@@ -740,7 +740,7 @@ namespace DSMEngine{
         for (uint8_t i = 0; i < rdma_mg->GetComputeNodeNum(); i++){
             uint8_t target_node_id = 2*i;
             if (target_node_id != rdma_mg->node_id){
-                int qp_id = rdma_mg->qp_inc_ticket++ % NUM_QP_ACCROSS_COMPUTE;
+                int qp_id = rdma_mg->GetQPForDeltaPull();
                 rdma_mg->post_send_xcompute(send_mr, target_node_id, qp_id, sizeof(RDMA_Request));
             }
         }

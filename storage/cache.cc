@@ -1808,7 +1808,7 @@ LocalBuffer::LocalBuffer(const CacheConfig &cache_config) {
             if (remote_urging_type == 1 && buffer_inv_message.next_inv_message_type == reader_invalidate_modified){
                 ibv_mr* local_mr = mr;
                 assert(local_mr->length == kLeafPageSize);
-                int qp_id = rdma_mg->qp_inc_ticket++ % NUM_QP_ACCROSS_COMPUTE;
+                int qp_id = rdma_mg->GetQPForCacheInvalidation();
                 *(Page_Forward_Reply_Type* ) ((char*)local_mr->addr + kLeafPageSize - sizeof(Page_Forward_Reply_Type)) = processed;
                 rdma_mg->RDMA_Write_xcompute(local_mr, buffer_inv_message.next_receive_page_buf,
                                              buffer_inv_message.next_receive_rkey, kLeafPageSize,
@@ -1833,7 +1833,7 @@ LocalBuffer::LocalBuffer(const CacheConfig &cache_config) {
 //                memccpy(local_mr->addr, mr->addr, kLeafPageSize);
 //                ibv_mr* local_mr = mr;
                 assert(local_mr->length == kLeafPageSize);
-                int qp_id = rdma_mg->qp_inc_ticket++ % NUM_QP_ACCROSS_COMPUTE;
+                int qp_id = rdma_mg->GetQPForCacheInvalidation();
                 *(Page_Forward_Reply_Type* ) ((char*)local_mr->addr + kLeafPageSize - sizeof(Page_Forward_Reply_Type)) = processed;
                 // TODO: need to use a local buffer to support the asynchronous RDMA page forward.
                 rdma_mg->global_WHandover(mr, page_addr, page_size, buffer_inv_message.next_holder_id.load(), lock_addr,
@@ -1884,7 +1884,7 @@ LocalBuffer::LocalBuffer(const CacheConfig &cache_config) {
 
         *((Page_Forward_Reply_Type*)local_mr->addr) = dropped;
 
-        int qp_id = rdma_mg->qp_inc_ticket++ % NUM_QP_ACCROSS_COMPUTE;
+        int qp_id = rdma_mg->GetQPForCacheInvalidation();
 //        printf("Node %u Drop the buffered invalidation message over data %p, target %u, buffer addr %p, rkey %u\n",
 //               RDMA_Manager::node_id, gptr, buffer_inv_message.next_holder_id.load(),
 //               buffer_inv_message.next_receive_page_buf.load(), buffer_inv_message.next_receive_rkey.load());

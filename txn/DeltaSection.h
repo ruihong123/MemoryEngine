@@ -347,7 +347,7 @@ namespace DSMEngine {
 //            memset((void*)recv_mr->addr, 0, rdma_mg->delta_section_size);
 //        *receive_pointer = {};
 
-            int qp_id = rdma_mg->qp_inc_ticket++ % NUM_QP_ACCROSS_COMPUTE;
+            int qp_id = rdma_mg->GetQPForDeltaPull();
             assert(owner_compute_node_id_ != rdma_mg->node_id);
             rdma_mg->post_send_xcompute(send_mr, owner_compute_node_id_, qp_id, sizeof(RDMA_Request));
             ibv_wc wc[2] = {};
@@ -385,18 +385,11 @@ namespace DSMEngine {
                     // Boundary is within BigPage size, keep as is
                     new_boundaries.push_back(boundary);
                 } else {
-                    // Split boundary into multiple BigPage-sized chunks
-                    printf("[BIGPAGE_SPLIT] Splitting boundary [%zu, %zu] (size: %zu) into BigPage chunks (max: %d)\n", 
-                           start, end, size, BIGPAGESIZE);
-                    fflush(stdout);
                     
                     size_t current_start = start;
                     while (current_start < end) {
                         size_t current_end = std::min(current_start + BIGPAGESIZE, end);
                         new_boundaries.push_back(std::make_pair(current_start, current_end));
-                        printf("[BIGPAGE_SPLIT] Created chunk [%zu, %zu] (size: %zu)\n", 
-                               current_start, current_end, current_end - current_start);
-                        fflush(stdout);
                         current_start = current_end;
                     }
                 }

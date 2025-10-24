@@ -53,7 +53,7 @@ const int kMaxThreads = 32;
 uint64_t kNumTuples = 100000; // Number of tuples to work with
 uint64_t kSnapshotLag = 10000; // Max snapshot lag (read snapshot in [current_ts - kSnapshotLag, current_ts])
 int kBenchmarkDurationSec = 30;
-int kWarmupDurationSec = 10;  // Warmup duration (pure reads)
+int kWarmupDurationSec = 10;  // Warmup duration (same as normal run)
 
 // Benchmark Parameters (set via command line)
 int kNumThreads = 8;  // Total number of worker threads
@@ -76,10 +76,9 @@ std::atomic<uint64_t> read_latency_sum{0};
 std::atomic<uint64_t> version_chain_traversals{0};
 std::atomic<uint64_t> delta_applications{0};
 std::atomic<uint64_t> delta_pull_count{0};
-std::atomic<uint64_t> delta_pull_time_sum{0};
 std::atomic<bool> benchmark_running{true};
 std::atomic<bool> benchmark_ready{false};
-std::atomic<bool> warmup_phase{true};
+// warmup_phase variable removed - warmup now behaves exactly like normal run
 
 // Delta Section Management (similar to TransactionManager)
 std::shared_mutex g_delta_map_mtx;
@@ -119,7 +118,6 @@ void ProcessDeltaCreate(void* args) {
 }
 
 void ProcessDeltaPull(void* args) {
-  auto start_time = std::chrono::high_resolution_clock::now();
   auto* rdma_mg = RDMA_Manager::Get_Instance();
   auto *receive_msg_buf = (RDMA_Request*)args;
   assert(receive_msg_buf->command == pull_delta_section);
@@ -130,10 +128,6 @@ void ProcessDeltaPull(void* args) {
   uint64_t old_max_ts = receive_msg_buf->content.pull_ds.old_max_ts;
   uint64_t old_epoch = receive_msg_buf->content.pull_ds.old_epoch;
   uint8_t requester_node_id = receive_msg_buf->content.pull_ds.requester_node_id;
-  
-  printf("[DEBUG] ProcessDeltaPull: Node %d received delta pull request from node %d, ds_gaddr=%p, old_head=%lu, old_tail=%lu, old_max_ts=%lu, old_epoch=%lu\n", 
-         rdma_mg->node_id, requester_node_id, ds_gaddr.val, old_head_, old_tail_, old_max_ts, old_epoch);
-  fflush(stdout);
   
   {
     std::shared_lock<std::shared_mutex> map_lck(g_delta_map_mtx);
@@ -152,7 +146,7 @@ void ProcessDeltaPull(void* args) {
     ibv_mr local_mr = *ds_w->seg_local_mr_;
     char* remote_addr = (char*)receive_msg_buf->buffer;
     
-    int qp_id = rdma_mg->qp_inc_ticket++ % NUM_QP_ACCROSS_COMPUTE;
+    int qp_id = rdma_mg->GetQPForDeltaPull();
     uint8_t* polling_byte = (uint8_t*)((uint8_t*)local_mr.addr + rdma_mg->delta_section_size - 1);
     assert(ds_w->inner_section->tail_ != ds_w->inner_section->head_ || ds_w->inner_section->is_empty_);
     *polling_byte = 5;
@@ -161,7 +155,7 @@ void ProcessDeltaPull(void* args) {
     ds_w->CalculateWriteBoundaries(boundaries, old_head_, old_tail_, old_epoch);
     
     for(auto pair : boundaries){
-      qp_id = rdma_mg->qp_inc_ticket++ % NUM_QP_ACCROSS_COMPUTE;
+      qp_id = rdma_mg->GetQPForDeltaPull();
       local_mr = *ds_w->seg_local_mr_;
       remote_addr = (char*)receive_msg_buf->buffer;
       
@@ -177,12 +171,6 @@ void ProcessDeltaPull(void* args) {
                                     write_size, requester_node_id, qp_id, async);
     }
     
-    auto end_time = std::chrono::high_resolution_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
-    
-    printf("[DELTA_PULL_COMPLETE] Node %d completed delta pull processing for node %d in %lu μs\n",
-           rdma_mg->node_id, requester_node_id, duration.count());
-    fflush(stdout);
   }
   
   delete receive_msg_buf;
@@ -531,6 +519,8 @@ private:
   // - Primary index always points to the latest version
   // - Old versions linked via prev_version_ in MetaColumn
   // - Reads start from latest version, follow chain backwards if needed
+  // - CRITICAL: Every write must exclusively lock the old tuple and update
+  //   next_version_ts_ before creating the new version to maintain chain integrity
   // - No garbage collection in this benchmark (simplified)
 
   void WriteWithVersionChain(uint64_t key, uint64_t commit_ts, int thread_id) {
@@ -544,20 +534,26 @@ private:
       return;
     }
 
-    // Step 1: Read old version into local buffer (with shared lock)
+    // Step 1: Read old version into local buffer (with EXCLUSIVE lock for VERSION_CHAIN)
     // Use std::vector for portability (VLAs are not standard C++)
     std::vector<char> local_buffer(schema_->GetRecordTotalSize());
     
     Cache::Handle *old_handle;
     void *old_page_buffer;
-    ddsm_->SELCC_Shared_Lock(old_page_buffer, TOPAGE(old_tuple_gaddr), old_handle);
+    ddsm_->SELCC_Exclusive_Lock(old_page_buffer, TOPAGE(old_tuple_gaddr), old_handle);
     char *old_tuple_ptr = (char *)old_page_buffer + 
                           (old_tuple_gaddr.offset - TOPAGE(old_tuple_gaddr).offset);
     
     // Copy old tuple to local buffer
     memcpy(local_buffer.data(), old_tuple_ptr, schema_->GetRecordTotalSize());
     
-    ddsm_->SELCC_Shared_UnLock(TOPAGE(old_tuple_gaddr), old_handle);
+    // Update the next_version_ts_ in the old tuple before releasing the lock
+    Record old_record(schema_, old_tuple_ptr);
+    MetaColumn old_meta = old_record.GetMeta();
+    old_meta.next_version_ts_ = commit_ts;  // Set timestamp for the next version
+    old_record.PutMeta(old_meta);
+    
+    ddsm_->SELCC_Exclusive_UnLock(TOPAGE(old_tuple_gaddr), old_handle);
 
     // Step 2: Modify value in local buffer (increment value)
     *(uint64_t *)(local_buffer.data() + 8) += 1;
@@ -588,7 +584,7 @@ private:
     }
     uint64_t expected = local_snapshot_ts_.load(std::memory_order_relaxed);
     while (expected < record_ts) {
-      if (local_snapshot_ts_.compare_exchange_weak(expected, record_ts,
+      if (local_snapshot_ts_.compare_exchange_weak(expected, record_ts + 1,
                                                      std::memory_order_relaxed,
                                                      std::memory_order_relaxed)) {
         break;  // Successfully updated
@@ -603,6 +599,7 @@ private:
     meta.prev_version_ = old_tuple_gaddr;  // Link to previous version
     meta.prev_delta_epoch_ = 0;
     meta.prev_delta_data_size_ = 0;
+    meta.next_version_ts_ = 0;  // Initialize next version timestamp (no next version yet)
     meta.is_visible_ = true;
     new_record.PutMeta(meta);
 
@@ -640,7 +637,18 @@ private:
       MetaColumn meta = record.GetMeta();
       uint64_t version_ts = meta.Wts_;
       GlobalAddress prev_version = meta.prev_version_;
-
+      // Fuzzy snapshot: update local snapshot if we see a higher timestamp from SELCC layer
+      // Use CAS to avoid over-incrementing when multiple threads see the same high timestamp
+      uint64_t expected = local_snapshot_ts_.load(std::memory_order_relaxed);
+      while (expected < version_ts) {
+        if (local_snapshot_ts_.compare_exchange_weak(expected, version_ts,
+                                                      std::memory_order_relaxed,
+                                                      std::memory_order_relaxed)) {
+          break;  // Successfully updated
+        }
+        // expected was updated by compare_exchange_weak, retry if still needed
+        expected = local_snapshot_ts_.load(std::memory_order_relaxed);
+      }
       if (version_ts <= snapshot_ts) {
         // Found visible version - read the value
         uint64_t value = *(uint64_t *)(tuple_ptr + 8);
@@ -692,8 +700,6 @@ private:
         if (local_snapshot_ts_.compare_exchange_weak(expected, tuple_ts + 1,
                                                        std::memory_order_relaxed,
                                                        std::memory_order_relaxed)) {
-          printf("Node %d thread %d has updated local snapshot ts from %lu to %lu\n", RDMA_Manager::node_id, RDMA_Manager::thread_id, expected, tuple_ts + 1);
-          fflush(stdout);
           break;  // Successfully updated
         }
         expected = local_snapshot_ts_.load(std::memory_order_relaxed);
@@ -810,20 +816,10 @@ private:
             
             // Pull updates from remote node
             if (delta_section->owner_compute_node_id_ != RDMA_Manager::Get_Instance()->node_id) {
-              auto pull_start_time = std::chrono::high_resolution_clock::now();
               delta_section->PullUpdates();
-              auto pull_end_time = std::chrono::high_resolution_clock::now();
-              auto pull_duration = std::chrono::duration_cast<std::chrono::microseconds>(pull_end_time - pull_start_time);
-              uint64_t duration_us = pull_duration.count();
               
               // Update global statistics
               delta_pull_count.fetch_add(1);
-              delta_pull_time_sum.fetch_add(duration_us);
-              
-              printf("[DELTA_PULL_WAIT] Node %d waited %lu μs for delta pull from node %d (key=%lu)\n",
-                     RDMA_Manager::Get_Instance()->node_id, duration_us, 
-                     delta_section->owner_compute_node_id_, key);
-              fflush(stdout);
             }
           }
         }
@@ -1025,17 +1021,12 @@ void MixedWorkloadThread(MVCCBenchmark *benchmark, int thread_id) {
   printf("Mixed workload thread %d started (read_ratio=%d%%)\n", thread_id, kReadRatio);
 
   while (benchmark_running.load()) {
-    if (warmup_phase.load()) {
-      // During warmup, only do reads to warm up cache
+    // Both warmup and normal operation use the same logic
+    int random_val = rand.Next() % 100;
+    if (random_val < kReadRatio) {
       benchmark->ReadOperation(thread_id);
     } else {
-      // Normal operation: decide read or write based on read ratio
-      int random_val = rand.Next() % 100;
-      if (random_val < kReadRatio) {
-        benchmark->ReadOperation(thread_id);
-      } else {
-        benchmark->WriteOperation(thread_id);
-      }
+      benchmark->WriteOperation(thread_id);
     }
   }
 
@@ -1053,13 +1044,8 @@ void WriterThread(MVCCBenchmark *benchmark, int thread_id) {
   printf("Writer thread %d started\n", thread_id);
 
   while (benchmark_running.load()) {
-    if (warmup_phase.load()) {
-      // During warmup, writers also do reads to warm up cache
-      benchmark->ReadOperation(thread_id);
-    } else {
-      // Normal operation: only writes
-      benchmark->WriteOperation(thread_id);
-    }
+    // Both warmup and normal operation: only writes
+    benchmark->WriteOperation(thread_id);
   }
 
   printf("Writer thread %d finished\n", thread_id);
@@ -1135,7 +1121,7 @@ void ParseArgs(int argc, char *argv[]) {
               "Benchmark Configuration:\n"
               "  --num_tuples N             Number of tuples (default: 100000)\n"
               "  --snapshot_lag N           Max snapshot lag (default: 10000)\n"
-              "  --warmup_duration N        Warmup duration in seconds (default: 10)\n"
+              "  --warmup_duration N        Warmup duration in seconds (same as normal run, default: 10)\n"
               "  --duration N               Benchmark duration in seconds (default: 30)\n"
               "  --cache_size N             Cache size in GB (default: 2)\n\n"
               "System Configuration:\n"
@@ -1280,19 +1266,18 @@ int main(int argc, char *argv[]) {
     printf("\n========================================\n");
     printf("Starting warmup phase (pure reads for %d seconds)...\n", kWarmupDurationSec);
     printf("========================================\n");
-    warmup_phase.store(true);
     benchmark_ready.store(true);
     
     std::this_thread::sleep_for(std::chrono::seconds(kWarmupDurationSec));
     
     // End warmup, reset statistics
-    warmup_phase.store(false);
     write_count.store(0);
     read_count.store(0);
     write_latency_sum.store(0);
     read_latency_sum.store(0);
     version_chain_traversals.store(0);
     delta_applications.store(0);
+    delta_pull_count.store(0);
     
     for (int i = 0; i < MAX_APP_THREAD; i++) {
       cache_invalidation[i] = 0;
@@ -1370,16 +1355,10 @@ int main(int argc, char *argv[]) {
     total_cache_hits += cache_hit_valid[i][0];
   }
   
-  // Print delta pull timing summary
+  // Print delta pull count summary
   uint64_t total_pulls = delta_pull_count.load();
-  uint64_t total_pull_time = delta_pull_time_sum.load();
-  if (total_pulls > 0) {
-    double avg_pull_time = (double)total_pull_time / total_pulls;
-    printf("[DELTA_PULL_SUMMARY] Node %d: %lu delta pulls, total time: %lu μs, average: %.2f μs\n",
-           RDMA_Manager::Get_Instance()->node_id, total_pulls, total_pull_time, avg_pull_time);
-  } else {
-    printf("[DELTA_PULL_SUMMARY] Node %d: No delta pulls performed\n", RDMA_Manager::Get_Instance()->node_id);
-  }
+  printf("[DELTA_PULL_SUMMARY] Node %d: %lu delta pulls performed\n",
+         RDMA_Manager::Get_Instance()->node_id, total_pulls);
 
   // Print results
   printf("\n========================================\n");
@@ -1416,6 +1395,13 @@ int main(int argc, char *argv[]) {
     }
   } else if (kStorageType == DELTA_SECTION || kStorageType == DELTA_IN_GCL) {
     printf("  Delta Applications: %lu\n", delta_applications.load());
+    printf("  Delta Pulls: %lu\n", delta_pull_count.load());
+    if (delta_applications.load() > 0) {
+      uint64_t local_delta_hits = delta_applications.load() - delta_pull_count.load();
+      double delta_hit_rate = (double)local_delta_hits / delta_applications.load() * 100.0;
+      printf("  Local Delta Hits: %lu\n", local_delta_hits);
+      printf("  Delta Hit Rate: %.2f%%\n", delta_hit_rate);
+    }
   }
 
   printf("\nCache Statistics:\n");
@@ -1439,6 +1425,7 @@ int main(int argc, char *argv[]) {
     uint64_t total_invalidations;
     uint64_t total_cache_hits;
     uint64_t delta_apps;
+    uint64_t delta_pulls;
     uint64_t version_chain_traversals;
   } local_results;
   
@@ -1450,6 +1437,7 @@ int main(int argc, char *argv[]) {
   local_results.total_invalidations = total_invalidations;
   local_results.total_cache_hits = total_cache_hits;
   local_results.delta_apps = delta_applications.load();
+  local_results.delta_pulls = delta_pull_count.load();
   local_results.version_chain_traversals = version_chain_traversals.load();
   
   // Store local results to memcached
@@ -1475,6 +1463,7 @@ int main(int argc, char *argv[]) {
   uint64_t total_invalidations_all = 0;
   uint64_t total_cache_hits_all = 0;
   uint64_t total_delta_apps = 0;
+  uint64_t total_delta_pulls = 0;
   uint64_t total_version_traversals = 0;
   
   printf("\nFetching results from all %d compute nodes...\n", compute_num);
@@ -1487,10 +1476,10 @@ int main(int argc, char *argv[]) {
                                                                      strlen(benchmark_end_key), &len);
     
     if (node_results != nullptr && len == sizeof(BenchmarkResults)) {
-      printf("  Node %lu: writes=%lu, reads=%lu, invalidations=%lu, cache_hits=%lu, deltas=%lu\n",
+      printf("  Node %lu: writes=%lu, reads=%lu, invalidations=%lu, cache_hits=%lu, deltas=%lu, pulls=%lu\n",
              node_results->node_id, node_results->write_count, node_results->read_count,
              node_results->total_invalidations, node_results->total_cache_hits, 
-             node_results->delta_apps);
+             node_results->delta_apps, node_results->delta_pulls);
       
       total_writes += node_results->write_count;
       total_reads += node_results->read_count;
@@ -1499,6 +1488,7 @@ int main(int argc, char *argv[]) {
       total_invalidations_all += node_results->total_invalidations;
       total_cache_hits_all += node_results->total_cache_hits;
       total_delta_apps += node_results->delta_apps;
+      total_delta_pulls += node_results->delta_pulls;
       total_version_traversals += node_results->version_chain_traversals;
       
       free(node_results);
@@ -1563,6 +1553,13 @@ int main(int argc, char *argv[]) {
     }
   } else if (kStorageType == DELTA_SECTION || kStorageType == DELTA_IN_GCL) {
     printf("  Total Delta Applications: %lu\n", total_delta_apps);
+    printf("  Total Delta Pulls: %lu\n", total_delta_pulls);
+    if (total_delta_apps > 0) {
+      uint64_t local_delta_hits = total_delta_apps - total_delta_pulls;
+      double delta_hit_rate = (double)local_delta_hits / total_delta_apps * 100.0;
+      printf("  Local Delta Hits: %lu\n", local_delta_hits);
+      printf("  Delta Hit Rate: %.2f%%\n", delta_hit_rate);
+    }
     if (total_reads > 0) {
       printf("  Avg Delta Applications: %.2f per read\n", total_delta_apps / (double)total_reads);
     }

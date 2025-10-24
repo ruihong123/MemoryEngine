@@ -186,7 +186,7 @@ public:
         //                the return type is %d\n", rdma_mg->node_id,
         //                target_node_id, send_request_ptr->toPC_reply_type);
         //                fflush(stdout);
-        int qp_id = rdma_mg->qp_inc_ticket++ % NUM_QP_ACCROSS_COMPUTE;
+        int qp_id = rdma_mg->GetQPForCacheInvalidation();
         rdma_mg->RDMA_Write_xcompute(local_mr, received_rdma_request.buffer,
                                      received_rdma_request.rkey,
                                      sizeof(RDMA_ReplyXCompute) + tuple_size,
@@ -200,7 +200,7 @@ public:
         //                target_node_id, send_request_ptr->toPC_reply_type);
         //                fflush(stdout);
         send_request_ptr->toPC_reply_type = success ? 1 : 2;
-        int qp_id = rdma_mg->qp_inc_ticket++ % NUM_QP_ACCROSS_COMPUTE;
+        int qp_id = rdma_mg->GetQPForCacheInvalidation();
         rdma_mg->RDMA_Write_xcompute(
             local_mr, received_rdma_request.buffer, received_rdma_request.rkey,
             sizeof(RDMA_ReplyXCompute), target_node_id, qp_id, false);

@@ -33,8 +33,9 @@ struct MetaColumn {
 #if defined(MVOCC)
     GlobalAddress prev_version_;
 //    uint64_t next_delta_wts_;
-    uint64_t prev_delta_epoch_;
+    uint64_t prev_delta_epoch_; // Epoch for the previous delta (DELTA_IN_GCL strategy)
     uint32_t prev_delta_data_size_;
+    uint64_t next_version_ts_;  // Timestamp for the next version (VERSION_CHAIN strategy)
 #endif
     bool is_visible_;
 } __attribute__((packed));

@@ -5,7 +5,7 @@
 bin=`dirname "$0"`
 bin=`cd "$bin"; pwd`
 SRC_HOME=$bin/..
-BIN_HOME=$bin/../debug
+BIN_HOME=$bin/../release
 home_dir="/users/Ruihong/MemoryEngine"
 
 conf_file_all=$bin/../connection_cloudlab_replica.conf
@@ -296,13 +296,13 @@ run_mvcc_benchmark() {
   
   # Workload mode configuration
   : ${mixed_workload:=1}           # 1=mixed read/write, 0=separate writers/readers
-  : ${read_ratio_range:="0"}      # For mixed_workload=1: read percentage
+  : ${read_ratio_range:="50"}      # For mixed_workload=1: read percentage
   : ${writers:=1}                  # For mixed_workload=0: number of writer threads
   : ${readers:=7}                  # For mixed_workload=0: number of reader threads
   
-  : ${storage_type_range:="1"}
-  : ${workload_type_range:="0"}
-  : ${zipfian_theta_range:="0.1"}
+  : ${storage_type_range:="2"}
+  : ${workload_type_range:="0 1"}
+  : ${zipfian_theta_range:="0.99"}
   : ${num_tuples:=100000}
   : ${snapshot_lag_range:="10000"}
   : ${warmup_duration:=10}

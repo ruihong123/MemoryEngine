@@ -767,6 +767,12 @@ namespace DSMEngine
 
         void cross_compute_message_handling_worker(uint16_t target_node_id, int qp_num, ibv_mr* recv_mr);
 
+        void cross_compute_message_handling_worker_consolidated(uint16_t target_node_id, void* recv_mr_ptr);
+
+        // Helper functions for QP routing
+        int GetQPForCacheInvalidation();
+        int GetQPForDeltaPull();
+
         //FUnction for invalidation message handling
         void Writer_Inv_Shared_handler(RDMA_Request* receive_msg_buf, uint8_t target_node_id);
 

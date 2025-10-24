@@ -104,7 +104,7 @@ extern bool Show_Me_The_Print;
 //#define RDMAPROCESSANALYSIS
 
 //Configuration macro
-#define NUM_QP_ACCROSS_COMPUTE 1
+#define NUM_QP_ACCROSS_COMPUTE 2
 #define RDMAFAAFORREADLOCK
 #define CACHECOHERENCEPROTOCOL
 #define DYNAMIC_ANALYSE_PAGE

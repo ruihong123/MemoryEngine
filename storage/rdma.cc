@@ -1495,6 +1495,7 @@ namespace DSMEngine {
         *global_lock_mr = ((ibv_mr *) temp_receive)[1];
         mr_map_lock.insert({target_node_id, global_lock_mr});
         base_addr_map_lock.insert({target_node_id, (uint64_t) global_lock_mr->addr});
+        assert(target_node_id%2 == 1);
         rkey_map_lock.insert({target_node_id, (uint64_t) global_lock_mr->rkey});
         // Set the remote address for the index table.
         if (target_node_id == 1) {
@@ -1583,16 +1584,15 @@ namespace DSMEngine {
         while (compute_connection_counter.load() != compute_nodes.size() - 1);
         // Do we need to sync below?, probably not at below, should be synced outside
         // this function.
-        for (int i = 0; i < NUM_QP_ACCROSS_COMPUTE; ++i) {
+        // Create single thread per compute node to handle all QPs
+        {
             std::unique_lock<std::mutex> lck(invalidate_channel_mtx);
-            //        std::thread
-            //        p_t(&::DSMEngine::RDMA_Manager::compute_message_handling_thread,
-            //        this, target_node_id, i, recv_mr[i]);
             Invalidation_bg_threads.emplace_back(
-                &RDMA_Manager::cross_compute_message_handling_worker, this,
-                target_node_id, i, recv_mr[i]);
-            //        Invalidation_bg_threads.back().detach();
+                &RDMA_Manager::cross_compute_message_handling_worker_consolidated, this,
+                target_node_id, recv_mr);
         }
+
+        //        Invalidation_bg_threads.back().detach();
         //    std::unique_lock<std::mutex> lck(invalidate_channel_mtx);
         //    sleep(2);
         for (auto &iter: Invalidation_bg_threads) {
@@ -1767,6 +1767,132 @@ namespace DSMEngine {
         }
     }
 
+    void RDMA_Manager::cross_compute_message_handling_worker_consolidated(
+        uint16_t target_node_id, void* recv_mr_ptr) {
+        ibv_mr (*recv_mr)[NUM_QP_ACCROSS_COMPUTE][RECEIVE_OUTSTANDING_SIZE] = 
+            (ibv_mr (*)[NUM_QP_ACCROSS_COMPUTE][RECEIVE_OUTSTANDING_SIZE])recv_mr_ptr;
+        ibv_wc wc[3] = {};
+        int buffer_position[NUM_QP_ACCROSS_COMPUTE] = {0}; // Track buffer position for each QP
+        int miss_poll_counter = 0;
+        
+        while (true) {
+            assert(target_node_id != node_id);
+            
+            bool found_message = false;
+            
+            // Poll all QPs in round-robin fashion
+            for (int qp_num = 0; qp_num < NUM_QP_ACCROSS_COMPUTE; qp_num++) {
+                if (try_poll_completions_xcompute(wc, 1, false, target_node_id, qp_num) > 0) {
+                    found_message = true;
+                    int buff_pos = buffer_position[qp_num];
+                    
+                    RDMA_Request *receive_msg_buf = new RDMA_Request();
+                    *receive_msg_buf = *(RDMA_Request *) (*recv_mr)[qp_num][buff_pos].addr;
+                    
+                    // Route message based on type
+                    switch (receive_msg_buf->command) {
+                        case writer_invalidate_modified:
+                            post_receive_xcompute(&(*recv_mr)[qp_num][buff_pos], target_node_id, qp_num);
+                            Writer_Inv_Modified_handler(receive_msg_buf, target_node_id);
+                            break;
+                        case writer_invalidate_shared:
+                            post_receive_xcompute(&(*recv_mr)[qp_num][buff_pos], target_node_id, qp_num);
+                            Writer_Inv_Shared_handler(receive_msg_buf, target_node_id);
+                            break;
+                        case reader_invalidate_modified:
+                            post_receive_xcompute(&(*recv_mr)[qp_num][buff_pos], target_node_id, qp_num);
+                            Reader_Inv_Modified_handler(receive_msg_buf, target_node_id);
+                            break;
+                        case broadcast_create_ds:
+                            post_receive_xcompute(&(*recv_mr)[qp_num][buff_pos], target_node_id, qp_num);
+                            Create_Delta_Section_handler(receive_msg_buf, target_node_id);
+                            break;
+                        case pull_delta_section:
+                            post_receive_xcompute(&(*recv_mr)[qp_num][buff_pos], target_node_id, qp_num);
+                            Pull_Delta_Section_handler(receive_msg_buf, target_node_id);
+                            break;
+                        case push_least_snapshot:
+                            post_receive_xcompute(&(*recv_mr)[qp_num][buff_pos], target_node_id, qp_num);
+                            Push_Least_Snapshot_handler(receive_msg_buf, target_node_id);
+                            break;
+                        case heart_beat:
+                            printf("heart_beat\n");
+                            post_receive_xcompute(&(*recv_mr)[qp_num][buff_pos], target_node_id, qp_num);
+                            break;
+                        case tuple_read_2pc:
+                            post_receive_xcompute(&(*recv_mr)[qp_num][buff_pos], target_node_id, qp_num);
+                            Tuple_read_2pc_handler(receive_msg_buf, target_node_id);
+                            break;
+                        case prepare_2pc:
+                            post_receive_xcompute(&(*recv_mr)[qp_num][buff_pos], target_node_id, qp_num);
+                            Prepare_2pc_handler(receive_msg_buf, target_node_id);
+                            break;
+                        case commit_2pc:
+                            post_receive_xcompute(&(*recv_mr)[qp_num][buff_pos], target_node_id, qp_num);
+                            Commit_2pc_handler(receive_msg_buf, target_node_id);
+                            break;
+                        case abort_2pc:
+                            post_receive_xcompute(&(*recv_mr)[qp_num][buff_pos], target_node_id, qp_num);
+                            Abort_2pc_handler(receive_msg_buf, target_node_id);
+                            break;
+                        default:
+                            printf("corrupt message from client. %d\n", receive_msg_buf->command);
+                            assert(false);
+                            exit(0);
+                            break;
+                    }
+                    
+                    // Update buffer position for this QP
+                    if (buffer_position[qp_num] == RECEIVE_OUTSTANDING_SIZE - 1) {
+                        buffer_position[qp_num] = 0;
+                    } else {
+                        buffer_position[qp_num]++;
+                    }
+                    
+                    break; // Process one message at a time
+                }
+            }
+            
+            if (!found_message) {
+                // Exponential back off to save cpu cycles
+                if (++miss_poll_counter < 20480) {
+                    continue;
+                }
+                if (++miss_poll_counter < 40960) {
+                    pthread_yield();
+                    continue;
+                }
+                if (++miss_poll_counter < 81920) {
+                    usleep(16);
+                    continue;
+                } else {
+                    usleep(512);
+                    continue;
+                }
+            }
+            miss_poll_counter = 0;
+        }
+        assert(false);
+        for (int qp_num = 0; qp_num < NUM_QP_ACCROSS_COMPUTE; qp_num++) {
+            for (int i = 0; i < RECEIVE_OUTSTANDING_SIZE; i++) {
+                Deallocate_Local_RDMA_Slot((*recv_mr)[qp_num][i].addr, Message);
+            }
+        }
+    }
+
+    // Helper functions for QP routing
+    int RDMA_Manager::GetQPForCacheInvalidation() {
+        // Cache invalidation messages use QPs 0 to NUM_QP_ACCROSS_COMPUTE-2
+        static std::atomic<int> cache_inv_qp_counter{0};
+        int qp_id = cache_inv_qp_counter.fetch_add(1) % (NUM_QP_ACCROSS_COMPUTE - 1);
+        return qp_id;
+    }
+
+    int RDMA_Manager::GetQPForDeltaPull() {
+        // Delta pull messages always use the last QP
+        return NUM_QP_ACCROSS_COMPUTE - 1;
+    }
+
     void RDMA_Manager::Put_qp_info_into_RemoteM(
         uint16_t target_compute_node_id,
         std::array<ibv_cq *, NUM_QP_ACCROSS_COMPUTE * 2> *cq_arr,
@@ -1798,6 +1924,7 @@ namespace DSMEngine {
         memcpy(send_pointer->content.qp_config_xcompute.gid, &my_gid, 16);
         send_pointer->content.qp_config_xcompute.node_id_pairs =
                 (uint32_t) target_compute_node_id | ((uint32_t) node_id) << 16;
+        assert(target_compute_node_id!= node_id);
         //    printf("node id pair to be put is %x 1 \n",
         //    send_pointer->content.qp_config_xcompute.node_id_pairs); fprintf(stdout,
         //    "Local LID = 0x%x\n", res->port_attr.lid); send_pointer->buffer =
@@ -2343,7 +2470,7 @@ namespace DSMEngine {
         //  else{
         //    printf("connection built up!\n");
         //  }
-        fprintf(stdout, "QP %p state was change to RTS\n", qp);
+        // fprintf(stdout, "QP %p state was change to RTS\n", qp);
         /* sync to make sure that both sides are in states that they can connect to
          * prevent packet loose */
     connect_qp_exit:
@@ -7420,8 +7547,8 @@ namespace DSMEngine {
 #ifndef NDEBUG
         memset(page_buffer->addr, 0, page_buffer->length);
 #endif
-        // USE static ticket to minuimize the conflict.
-        int qp_id = qp_inc_ticket++ % NUM_QP_ACCROSS_COMPUTE;
+        // Use dedicated QP for cache invalidation messages
+        int qp_id = GetQPForCacheInvalidation();
         send_pointer = (RDMA_Request *) send_mr->addr;
         send_pointer->command = writer_invalidate_modified;
         send_pointer->content.inv_message.pending_reminder = false;
@@ -7538,11 +7665,11 @@ namespace DSMEngine {
         // #ifndef NDEBUG
         //         memset(page_mr->addr, 0, page_mr->length);
         // #endif
-        //  USE static ticket to minuimize the conflict.
+        // Use dedicated QP for cache invalidation messages
         send_pointer = (RDMA_Request *) send_mr->addr;
         send_pointer->command = reader_invalidate_modified;
         send_pointer->content.inv_message.pending_reminder = false;
-        int qp_id = qp_inc_ticket++ % NUM_QP_ACCROSS_COMPUTE;
+        int qp_id = GetQPForCacheInvalidation();
     inv_resend:
         if (++retry_cnt < 20) {
             //                port::AsmVolatilePause();
@@ -7651,7 +7778,7 @@ namespace DSMEngine {
         // Clear the reply buffer for the polling.
         *receive_pointer = waiting;
 
-        int qp_id = qp_inc_ticket++ % NUM_QP_ACCROSS_COMPUTE;
+        int qp_id = GetQPForCacheInvalidation();
 
         post_send_xcompute(send_mr, target_node_id, qp_id, sizeof(RDMA_Request));
         ibv_wc wc[2] = {};
@@ -7688,7 +7815,7 @@ namespace DSMEngine {
             if (iter.first == node_id) {
                 continue;
             }
-            int qp_id = qp_inc_ticket++ % NUM_QP_ACCROSS_COMPUTE;
+            int qp_id = GetQPForDeltaPull();
             post_send_xcompute(send_mr, iter.first, qp_id, sizeof(RDMA_Request));
         }
     }
@@ -7734,7 +7861,7 @@ namespace DSMEngine {
         memset(recv_mr->addr, 0, recv_mr->length);
         //        *receive_pointer = {};
 
-        int qp_id = qp_inc_ticket++ % NUM_QP_ACCROSS_COMPUTE;
+        int qp_id = GetQPForCacheInvalidation();
 
         post_send_xcompute(send_mr, target_node_id, qp_id, sizeof(RDMA_Request));
         ibv_wc wc[2] = {};
@@ -7779,7 +7906,7 @@ namespace DSMEngine {
         // Clear the reply buffer for the polling.
         *receive_pointer = {};
 
-        int qp_id = qp_inc_ticket++ % NUM_QP_ACCROSS_COMPUTE;
+        int qp_id = GetQPForCacheInvalidation();
 
         post_send_xcompute(send_mr, target_node_id, qp_id, sizeof(RDMA_Request));
         ibv_wc wc[2] = {};
@@ -7825,7 +7952,7 @@ namespace DSMEngine {
         // Clear the reply buffer for the polling.
         *receive_pointer = {};
 
-        int qp_id = qp_inc_ticket++ % NUM_QP_ACCROSS_COMPUTE;
+        int qp_id = GetQPForCacheInvalidation();
 
         post_send_xcompute(send_mr, target_node_id, qp_id, sizeof(RDMA_Request));
         ibv_wc wc[2] = {};
@@ -7857,7 +7984,7 @@ namespace DSMEngine {
         // Clear the reply buffer for the polling.
         *receive_pointer = {};
 
-        int qp_id = qp_inc_ticket++ % NUM_QP_ACCROSS_COMPUTE;
+        int qp_id = GetQPForCacheInvalidation();
 
         post_send_xcompute(send_mr, target_node_id, qp_id, sizeof(RDMA_Request));
         ibv_wc wc[2] = {};
@@ -9065,7 +9192,7 @@ namespace DSMEngine {
 
     message_reply:
         ibv_mr *local_mr = nullptr;
-        int qp_id = qp_inc_ticket++ % NUM_QP_ACCROSS_COMPUTE;
+        int qp_id = GetQPForCacheInvalidation();
         // TODO: the same global cache line should better be transferred by the same
         // qp.
         //  int qp_id = g_ptr % NUM_QP_ACCROSS_COMPUTE;
@@ -9277,7 +9404,7 @@ namespace DSMEngine {
         // TODO: the same global cache line should better be transferred by the same
         // qp.
         //  int qp_id = g_ptr % NUM_QP_ACCROSS_COMPUTE;
-        int qp_id = qp_inc_ticket++ % NUM_QP_ACCROSS_COMPUTE;
+        int qp_id = GetQPForCacheInvalidation();
 
         switch (reply_type) {
             case processed:
@@ -9501,7 +9628,7 @@ namespace DSMEngine {
 
     message_reply:
         ibv_mr *local_mr = nullptr;
-        int qp_id = qp_inc_ticket++ % NUM_QP_ACCROSS_COMPUTE;
+        int qp_id = GetQPForCacheInvalidation();
         // TODO: the same global cache line should better be transferred by the same
         // qp.
         //  int qp_id = g_ptr % NUM_QP_ACCROSS_COMPUTE;
