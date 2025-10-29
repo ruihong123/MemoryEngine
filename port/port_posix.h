@@ -114,7 +114,7 @@ extern bool Show_Me_The_Print;
 #define BIGPAGESIZE (1024*1024)
 #define ROCKSDB_PTHREAD_ADAPTIVE_MUTEX
 #define RECEIVE_OUTSTANDING_SIZE 1024 // used to be 1024
-#define SEND_OUTSTANDING_SIZE_XCOMPUTE 32 //todo: enlarge this
+#define SEND_OUTSTANDING_SIZE_XCOMPUTE 128 //todo: enlarge this
 #define ATOMIC_OUTSTANDING_SIZE 16
 #define MAX_INLINE_SIZE 256
 //#define ASYNC_UNLOCK

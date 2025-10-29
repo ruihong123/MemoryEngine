@@ -839,7 +839,7 @@ namespace DSMEngine {
             // TODO: make the code below protected by mutex in thread local alocator
             name_to_mem_pool.at(pool_name).insert({(*p2mrpointer)->addr, in_use_array});
         } else {
-            printf("Register memory for computing node\n");
+            // printf("Register memory for computing node\n");
         }
         total_registered_size = total_registered_size + (*p2mrpointer)->length;
 
@@ -1111,29 +1111,56 @@ namespace DSMEngine {
             // size is optional; if absent, region_bytes stays 0 (unspecified)
             std::streampos after_id = iss.tellg();
             if (iss >> size_tok) {
-                // Look ahead: if token is purely digits or ends with unit → treat as
-                // size; else revert
-                bool is_size = std::isdigit(size_tok[0]);
-                for (auto c: size_tok) {
-                    if (std::isalpha(c)) {
-                        is_size = true;
-                        break;
+                // Look ahead: determine if token is a size specifier
+                // Valid sizes: pure digits (e.g., "1024") or digits + unit (e.g., "16g", "32MB")
+                // Invalid: non-digits before numbers (e.g., "abc", "size100")
+                bool is_size = false;
+                
+                // Check if token starts with a digit (required for size)
+                if (std::isdigit(size_tok[0])) {
+                    is_size = true;  // At minimum, valid if starts with digit
+                    // Further validate: after digits, only alphabetic unit suffix allowed
+                    bool saw_digit = true;
+                    for (size_t i = 1; i < size_tok.length(); i++) {
+                        if (std::isalpha(size_tok[i])) {
+                            // From this point, only alphabetic chars allowed (unit)
+                            saw_digit = false;
+                        } else if (std::isdigit(size_tok[i])) {
+                            // Still in numeric part
+                            if (!saw_digit) {
+                                // Digits after letters are invalid
+                                is_size = false;
+                                break;
+                            }
+                        } else {
+                            // Non-digit, non-alpha chars are invalid
+                            is_size = false;
+                            break;
+                        }
                     }
                 }
+                
                 if (!is_size) {
                     iss.seekg(after_id);
                     size_tok.clear();
                 }
             }
             if (!size_tok.empty()) {
-                region_bytes = parse_size(size_tok);
-                assert(region_bytes != 2147483648);
+                try {
+                    region_bytes = parse_size(size_tok);
+                    assert(region_bytes != 2147483648);
+                } catch (const std::exception& e) {
+                    fprintf(stderr, "ERROR: Failed to parse size '%s' for logical_id=%u: %s\n",
+                            size_tok.c_str(), logical_id, e.what());
+                    assert(false);
+                    exit(1);
+                }
             } else {
-                printf("Config parsing: logical_id=%u, no size specified "
-                       "(region_bytes=%lu)\n",
+                printf("Config parsing WARNING: logical_id=%u, no size specified "
+                       "(using 0 for region_bytes=%lu). This might cause issues.\n",
                        logical_id, region_bytes);
-                assert(false);
-                exit(1);
+                // Don't exit - allow the system to continue with unspecified size
+                // The application may set it later
             }
 
             std::vector<PhysicalRegion> physical_regions;
@@ -1533,9 +1560,9 @@ namespace DSMEngine {
         auto *temp_counter =
                 new std::array<std::atomic<uint16_t>, NUM_QP_ACCROSS_COMPUTE * 2>();
         auto *temp_mtx_arr = new std::array<SpinMutex, NUM_QP_ACCROSS_COMPUTE>();
-        auto *temp_mtx_async =
+        auto *temp_async =
                 new std::array<Async_Xcompute_Tasks, NUM_QP_ACCROSS_COMPUTE>();
-        assert((*temp_mtx_async)[0].mrs[0] != nullptr);
+        assert((*temp_async)[0].mrs[0] != nullptr);
         for (int i = 0; i < NUM_QP_ACCROSS_COMPUTE; ++i) {
             (*temp_counter)[i].store(0);
         }
@@ -1559,7 +1586,7 @@ namespace DSMEngine {
         cq_xcompute.insert({target_node_id, cq_arr});
         qp_xcompute.insert({target_node_id, qp_arr});
         qp_xcompute_os_c.insert({target_node_id, temp_counter});
-        qp_xcompute_asyncT.insert({target_node_id, temp_mtx_async});
+        qp_xcompute_asyncT.insert({target_node_id, temp_async});
         qp_xcompute_mtx.insert({target_node_id, temp_mtx_arr});
         // we need lock for post_receive_xcompute because qp_xcompute is not thread
         // safe.
@@ -2100,7 +2127,6 @@ namespace DSMEngine {
                     // #ifndef NDEBUG
                     answered_nodes.push_back(iter.first);
                     // #endif
-                    printf("compute node sync number is %d\n", iter.first);
                     if (number_of_ready == compute_nodes.size()) {
                         // TODO: answer back.
                         broadcast_to_computes_through_socket();
@@ -2138,12 +2164,12 @@ namespace DSMEngine {
         ibv_mr *ret;
         ret = (ibv_mr *) big_buffer->Get();
         if (ret == nullptr) {
-            char *buffer = new char[name_to_chunksize.at(DeltaChunk)];
+            char *buffer = new char[name_to_chunksize.at(BigPage)];
             auto mr_flags = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ |
                             IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_ATOMIC;
             //  auto start = std::chrono::high_resolution_clock::now();
             ret =
-                    ibv_reg_mr(res->pd, buffer, name_to_chunksize.at(DeltaChunk), mr_flags);
+                    ibv_reg_mr(res->pd, buffer, name_to_chunksize.at(BigPage), mr_flags);
             big_buffer->Reset(ret);
         }
         assert(ret + 0);
@@ -3593,6 +3619,103 @@ namespace DSMEngine {
                     static_cast<ibv_qp *>((*qp_xcompute.at(target_node_id))[num_of_qp]);
             //            printf("RDMA write to be posted with signal, message size is
             //            %zu, thread id is %d\n", msg_size, thread_id); fflush(stdout);
+            rc = ibv_post_send(qp, &sr, &bad_wr);
+
+            ibv_wc wc[2] = {};
+            if (rc) {
+                assert(false);
+                fprintf(stderr, "failed to post SR, return is %d\n", rc);
+            }
+            if (poll_completion_xcompute(wc, 1, std::string("main"), true,
+                                         target_node_id, num_of_qp)) {
+                fprintf(stderr, "failed to poll send for remote memory register\n");
+                assert(false);
+            }
+            os_start->store(0);
+        }
+        mtx->unlock();
+
+        if (rc) {
+            assert(false);
+            fprintf(stderr, "failed to post SR, return is %d， errno is %d\n", rc,
+                    errno);
+        }
+        return rc;
+    }
+
+    int RDMA_Manager::RDMA_Write_xcompute_localcopy(ibv_mr *local_mr, void *addr,
+                                          uint32_t rkey, size_t msg_size,
+                                          uint16_t target_node_id, int num_of_qp,
+                                          bool async, std::shared_lock<RWSpinMutex>* out_side_lock) {
+        struct ibv_send_wr sr;
+        struct ibv_sge sge;
+        struct ibv_send_wr *bad_wr = NULL;
+        int rc = 0;
+
+        /* prepare the send work request */
+        memset(&sr, 0, sizeof(sr));
+        sr.next = NULL;
+        sr.wr_id = 0;
+        sr.sg_list = &sge;
+        sr.num_sge = 1;
+        sr.opcode = IBV_WR_RDMA_WRITE;
+        sr.wr.rdma.remote_addr = (uint64_t) addr;
+        sr.wr.rdma.rkey = rkey;
+        sr.send_flags = msg_size < MAX_INLINE_SIZE
+                            ? IBV_SEND_INLINE : 0;
+        // TODO: maybe unsingaled wr does not perform well, when there is high
+        // concurrrency over the same queue pair, because
+        //  we need a lock to protect the outstanding counter. We shall adjust
+        //  SEND_OUTSTANDING_SIZE_XCOMPUTE to much larger than (2x) the parallelism of
+        //  the compute node.
+        std::atomic<uint16_t> *os_start =
+                &(*qp_xcompute_os_c.at(target_node_id))[2 * num_of_qp];
+        SpinMutex *mtx = &(*qp_xcompute_mtx.at(target_node_id))[num_of_qp];
+        mtx->lock();
+        auto pending_num = os_start->fetch_add(1);
+        bool need_signal = pending_num >= SEND_OUTSTANDING_SIZE_XCOMPUTE - 1;
+
+        //        bool need_signal = true; // Let's first test it with all signalled
+        //        RDMA. Delete it after the debug
+        if (!async) {
+            need_signal = true;
+        }
+        if (!need_signal) {
+            ibv_mr *async_buf =
+                    (*qp_xcompute_asyncT.at(target_node_id))[num_of_qp].mrs[pending_num];
+            assert(local_mr->length >= msg_size);
+            assert(async_buf->length >= msg_size);
+            memcpy(async_buf->addr, local_mr->addr, msg_size);
+            if (out_side_lock) {
+                out_side_lock->unlock();
+            }
+            /* prepare the scatter/gather entry */
+            memset(&sge, 0, sizeof(sge));
+            sge.addr = (uintptr_t) async_buf->addr;
+            sge.length = msg_size;
+            sge.lkey = async_buf->lkey;
+            ibv_qp *qp =
+                    static_cast<ibv_qp *>((*qp_xcompute.at(target_node_id))[num_of_qp]);
+            rc = ibv_post_send(qp, &sr, &bad_wr);
+        } else {
+            // we still use the async buffer to unlock the outsider lock earlier.
+            auto& to_debug = (*qp_xcompute_asyncT.at(target_node_id));
+            ibv_mr *async_buf =
+                    (*qp_xcompute_asyncT.at(target_node_id))[num_of_qp].mrs[pending_num];
+            assert(local_mr->length >= msg_size);
+            assert(async_buf->length >= msg_size);
+            memcpy(async_buf->addr, local_mr->addr, msg_size);
+            if (out_side_lock) {
+                out_side_lock->unlock();
+            }
+            /* prepare the scatter/gather entry */
+            memset(&sge, 0, sizeof(sge));
+            sge.addr = (uintptr_t) async_buf->addr;
+            sge.length = msg_size;
+            sge.lkey = async_buf->lkey;
+            sr.send_flags = sr.send_flags | IBV_SEND_SIGNALED;
+            ibv_qp *qp =
+                    static_cast<ibv_qp *>((*qp_xcompute.at(target_node_id))[num_of_qp]);
             rc = ibv_post_send(qp, &sr, &bad_wr);
 
             ibv_wc wc[2] = {};

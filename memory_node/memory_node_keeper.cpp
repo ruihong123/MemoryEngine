@@ -654,7 +654,7 @@ void Memory_Node_Keeper::create_qp_handler(RDMA_Request *request,
                                            std::string &client_ip,
                                            uint8_t target_node_id) {
   int rc;
-  DEBUG_PRINT("Create new qp\n");
+  // DEBUG_PRINT("Create new qp\n");
   assert(request->buffer != nullptr);
   assert(request->rkey != 0);
   char gid_str[17];

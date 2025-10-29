@@ -264,6 +264,12 @@ class SpinMutex {
 
         // Releases a shared (reader) lock.
         void unlock_shared() {
+            // Verify that we're actually releasing a reader lock and press present.
+            uint64_t cur = state.load(std::memory_order_acquire);
+            assert((cur & READER_COUNT_MASK) >= READER_COUNT_INCREMENT && 
+                   "unlock_shared() called without holding shared lock!");
+            // Verify no writer is active (shouldn't have reader + writer simultaneously).
+            assert(!(cur & WRITER_ACTIVE_MASK) && "unlock_shared() called while writer is active!");
             state.fetch_sub(READER_COUNT_INCREMENT, std::memory_order_release);
         }
 
@@ -312,6 +318,11 @@ class SpinMutex {
 
         // Releases an exclusive (writer) lock.
         void unlock() {
+            // Verify that writer lock is actually held before releasing.
+            uint64_t cur = state.load(std::memory_order_acquire);
+            assert((cur & WRITER_ACTIVE_MASK) && "unlock() called without holding writer lock!");
+            // Verify no readers are present (shouldn't have writer + readers simultaneously).
+            assert((cur & READER_COUNT_MASK) == 0 && "unlock() called while readers are present!");
             state.fetch_and(~WRITER_ACTIVE_MASK, std::memory_order_release);
         }
 

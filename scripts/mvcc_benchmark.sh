@@ -14,7 +14,7 @@ memcached_conf_file_all=$bin/../memcached_cloudlab_servers.conf
 memcached_conf_file=$bin/../memcached_ip.conf
 
 log_file=$bin/log
-cache_mem_size=8 # 8 GB Local cache size
+cache_mem_size=4 # 4 GB Local cache size
 mem_region_size=40 # 40 GB Remote memory size per memory server
 port=$((10000+RANDOM%1000))
 
@@ -58,6 +58,9 @@ run() {
     echo "mixed_workload=$mixed_workload, zipfian_theta=$zipfian_theta"
     echo "duration=$duration"
     echo "========================================="
+    
+    # Create results directory if it doesn't exist
+    mkdir -p "$(dirname "$result_file")"
 
     # Get compute and memory nodes from config
     compute_line_all=$(grep -v '^#' "$conf_file_all" | grep -v '^$' | sed -n '1p')
@@ -240,7 +243,21 @@ run() {
       fi
       
       echo "$cmd"
-      ssh -o StrictHostKeyChecking=no $ip "ulimit -c 50000000 && cd $BIN_HOME && $cmd | tee $log_file.$ip" &
+      
+      # Create unique log file name for this run (includes parameter values)
+      local_log_file="${result_file}.node${i}.n${node}.t${threads}.r${read_ratio}.st${storage_type}.wt${workload_type}.zip${zipfian_theta}.snap${snapshot_lag}"
+      
+      # Execute on remote node with both remote log and copy the output back
+      # For node 0 (master), also show output in terminal
+      if [ $i = 0 ]; then
+          # Node 0: tee both to file and to stdout so we can see it in terminal
+          ssh -o StrictHostKeyChecking=no $ip "ulimit -c 50000000 && cd $BIN_HOME && $cmd | tee $log_file.$ip" | tee "$local_log_file" &
+      else
+          # Other nodes: redirect to file only
+          ssh -o StrictHostKeyChecking=no $ip "ulimit -c 50000000 && cd $BIN_HOME && $cmd | tee $log_file.$ip" > "$local_log_file" 2>&1 &
+      fi
+      
+      echo "Logging stdout to: $local_log_file"
       sleep 1
       i=$((i+1))
     done
@@ -300,8 +317,8 @@ run_mvcc_benchmark() {
   : ${writers:=1}                  # For mixed_workload=0: number of writer threads
   : ${readers:=7}                  # For mixed_workload=0: number of reader threads
   
-  : ${storage_type_range:="2"}
-  : ${workload_type_range:="0 1"}
+  : ${storage_type_range:="1"}
+  : ${workload_type_range:="1"}
   : ${zipfian_theta_range:="0.99"}
   : ${num_tuples:=100000}
   : ${snapshot_lag_range:="10000"}
@@ -343,16 +360,16 @@ run_mvcc_benchmark() {
   do
     for node in $node_range
     do
-      for threads in $threads_range
+    for read_ratio in $read_ratio_range
+    do
+      for workload_type in $workload_type_range
       do
-        for read_ratio in $read_ratio_range
+        for zipfian_theta in $zipfian_theta_range
         do
-          for workload_type in $workload_type_range
+          for snapshot_lag in $snapshot_lag_range
           do
-            for zipfian_theta in $zipfian_theta_range
+            for threads in $threads_range
             do
-              for snapshot_lag in $snapshot_lag_range
-              do
                 run
               done
             done

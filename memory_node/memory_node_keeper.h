@@ -42,10 +42,10 @@ class Memory_Node_Keeper {
       }
       // Give detached worker threads time to notice exit_flag and terminate
       // The threads check exit_flag in their polling loops and will exit
-      std::cout << "Waiting for worker threads to exit..." << std::endl;
+      // std::cout << "Waiting for worker threads to exit..." << std::endl;
       sleep(2);  // Wait 2 seconds for threads to exit
       JoinAllThreads(false);
-      std::cout << "All threads exited" << std::endl;
+      // std::cout << "All threads exited" << std::endl;
   }
 //  void MaybeScheduleCompaction(std::string& client_ip);
 //  static void BGWork_Compaction(void* thread_args);

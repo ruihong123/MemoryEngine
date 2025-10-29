@@ -79,9 +79,6 @@ int main(int argc,char* argv[])
       free(ret);
     }
   }
-  
-  printf("Memory Server %d: All compute nodes completed. Shutting down...\n", 
-         mn_keeper->rdma_mg->node_id);
   mn_keeper->ExitAllThreads();
   delete mn_keeper;
   delete TPC_connection_handler;

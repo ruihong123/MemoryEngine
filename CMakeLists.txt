@@ -211,6 +211,7 @@ target_link_libraries(memory_server_tpcc DSMEngine)
 target_link_libraries(btree_bench DSMEngine)
 target_link_libraries(second_btree_bench DSMEngine)
 target_link_libraries(micro_bench DSMEngine)
+target_compile_definitions(mvcc_storage_bench PRIVATE MVCC_STORAGE_BENCH)
 target_link_libraries(mvcc_storage_bench DSMEngine)
 target_link_libraries(cpu_scale_test -lnuma)
 

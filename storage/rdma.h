@@ -701,7 +701,7 @@ namespace DSMEngine
             Async_Xcompute_Tasks()
             {
                 auto rdma_mg = RDMA_Manager::Get_Instance();
-                for (int i = 0; i < SEND_OUTSTANDING_SIZE_XCOMPUTE - 1; ++i)
+                for (int i = 0; i <= SEND_OUTSTANDING_SIZE_XCOMPUTE - 1; ++i)
                 {
                     ibv_mr* mr = new ibv_mr{};
                     rdma_mg->Allocate_Local_RDMA_Slot(*mr, BigPage);
@@ -712,7 +712,7 @@ namespace DSMEngine
             ~Async_Xcompute_Tasks()
             {
                 auto rdma_mg = RDMA_Manager::Get_Instance();
-                for (int i = 0; i < SEND_OUTSTANDING_SIZE_XCOMPUTE - 1; ++i)
+                for (int i = 0; i <= SEND_OUTSTANDING_SIZE_XCOMPUTE - 1; ++i)
                 {
                     rdma_mg->Deallocate_Local_RDMA_Slot(mrs[i]->addr, BigPage);
                 }
@@ -918,6 +918,8 @@ namespace DSMEngine
 
         int RDMA_Write_xcompute(ibv_mr* local_mr, void* addr, uint32_t rkey, size_t msg_size, uint16_t target_node_id,
                                 int num_of_qp, bool async);
+        int RDMA_Write_xcompute_localcopy(ibv_mr* local_mr, void* addr, uint32_t rkey, size_t msg_size, uint16_t target_node_id,
+                                int num_of_qp, bool async, std::shared_lock<RWSpinMutex>* out_side_lock = nullptr);
 
         int
         RDMA_Write_xcompute_imm(ibv_mr* local_mr, void* addr, uint32_t rkey, size_t msg_size, uint16_t target_node_id,

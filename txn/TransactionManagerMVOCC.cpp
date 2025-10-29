@@ -260,13 +260,17 @@ namespace DSMEngine{
 #ifndef NDEBUG
                 bool need_pull_update = false;
 #endif
+                long offset = tuple_gaddr.offset - handle->gptr.offset - STRUCT_OFFSET(DeltaSection, local_addr_);
+
                 {
+                    // Calculate offset from global address
+                    
                     // we use the latch for shadow copy because the garbage collection or delta appending shall not fail
                     // the delta section validation in any way. In other word,  the new tail or epoch will not make the prev delta invalid.
                     // and the garbage collection shall never collect the delta record that this transaciton snapshot can still see.
                     std::shared_lock<RWSpinMutex> slck(delta_section->shadow_mtx_);
                     if (delta_section->inner_section->is_empty_ ||
-                        !delta_section->isOffsetValid(prev_delta, meta.prev_delta_epoch_)) {
+                        !delta_section->isOffsetValid(offset, meta.prev_delta_epoch_)) {
 #ifndef NDEBUG
                         need_pull_update = true;
 #endif
@@ -275,7 +279,7 @@ namespace DSMEngine{
                         // use double-checked locking to avoid conflict.
                         std::unique_lock<RWSpinMutex> lck(delta_section->shadow_mtx_);
                         if (delta_section->inner_section->is_empty_ ||
-                            !delta_section->isOffsetValid(prev_delta, meta.prev_delta_epoch_)) {
+                            !delta_section->isOffsetValid(offset, meta.prev_delta_epoch_)) {
                             assert(delta_section->owner_compute_node_id_ != RDMA_Manager::node_id);
                             delta_section->PullUpdates();
                             delta_pull_num[thread_id_]++;
@@ -289,16 +293,14 @@ namespace DSMEngine{
 
 //                std::shared_lock<std::shared_mutex> lck(delta_section->shadow_mtx_);
 
-                assert(meta.prev_delta_epoch_ <= delta_section->inner_section->epoch);
+                assert(meta.prev_delta_epoch_ <= delta_section->GetEpoch());
 
 #ifndef NDEBUG
 //                ds_tail = delta_section->GetTail();
 //                ds_head = delta_section->GetHead();
                 assert(!delta_section->inner_section->is_empty_ &&
-                       delta_section->isOffsetValid(prev_delta, meta.prev_delta_epoch_));
-
-                long offset = prev_delta.offset - delta_section->seg_addr_.offset -
-                              STRUCT_OFFSET(DeltaSection, local_seg_addr_);
+                       delta_section->isOffsetValid(offset, meta.prev_delta_epoch_));
+                
                 if (ds_tail >= ds_head) {
                     assert(delta_section->inner_section->tail_ - offset > STRUCT_OFFSET(DeltaRecord, data_));
                 }
@@ -467,7 +469,7 @@ namespace DSMEngine{
 //                printf("Node %u thread %u The delta record is written at %u, %lu, epoch is %u, tuple_gaddr is %p\n", RDMA_Manager::node_id, thread_id_, delta_gadd.nodeID, delta_gadd.offset, ds_for_write->GetEpoch(), access->access_addr_.val);
 //                fflush(stdout);
                 MetaColumn meta = access->txn_local_tuple_->GetMeta();
-                assert(delta_gadd.offset - ds_for_write->seg_addr_.offset < ds_for_write->seg_real_size_ + STRUCT_OFFSET(DeltaSection, local_seg_addr_));
+                assert(delta_gadd.offset - ds_for_write->seg_addr_.offset < ds_for_write->seg_real_size_ + STRUCT_OFFSET(DeltaSection, local_addr_));
                 meta.prev_version_ = delta_gadd;
                 meta.prev_delta_epoch_ = ds_for_write->GetEpoch();
                 meta.prev_delta_data_size_ = delta_size;
@@ -629,84 +631,101 @@ namespace DSMEngine{
         uint64_t old_epoch = receive_msg_buf->content.pull_ds.old_epoch;
         uint8_t requester_node_id = receive_msg_buf->content.pull_ds.requester_node_id;
 
+        DeltaSectionWrap* ds_w = nullptr;
+        uint64_t calculated_danger_size = 0;
+        
         {
             std::shared_lock<std::shared_mutex> map_lck(TransactionManager::delta_map_mtx);
             auto it = TransactionManager::delta_sections.find(ds_gaddr);
             map_lck.unlock();
-            DeltaSectionWrap* ds_w = it->second;
-            // RDMA write back the most updated delta section.
-            std::shared_lock<std::shared_mutex> delta_lck(ds_w->main_mtx_);
+
+            if (it == TransactionManager::delta_sections.end()) {
+                delete receive_msg_buf;
+                assert(false);
+                return;
+            }
+
+            ds_w = it->second;
+            std::shared_lock<RWSpinMutex> delta_lck(ds_w->main_mtx_);
+            while (ds_w->inner_section->tail_ != ds_w->inner_section->tail_allocated) {
+                _mm_pause();
+            }
             assert(!ds_w->inner_section->is_empty_);
+            
+            // Capture head and tail values at function start to ensure consistency
+            uint64_t captured_head = ds_w->GetHead();
+            uint64_t captured_tail = ds_w->GetTail();
+            
+            int qp_id = rdma_mg->GetQPForDeltaPull();
             ibv_mr local_mr = *ds_w->seg_local_mr_;
             char* remote_addr = (char*)receive_msg_buf->buffer;
-//                if (old_epoch < ds_w->inner_section->epoch){
-            // the local copy is up to date.
-            //todo: develop reply mechanism according to the old epoch, old head and old tail and also try to make the delta
-            // write an async operation to minumize the latency.
-             int qp_id = rdma_mg->GetQPForDeltaPull();
-             uint8_t* polling_byte = (uint8_t*)((uint8_t*)local_mr.addr + rdma_mg->delta_section_size - 1);
-             assert(ds_w->inner_section->tail_ != ds_w->inner_section->head_ || ds_w->inner_section->is_empty_);
-             *polling_byte = 5;
+            uint8_t* polling_byte = (uint8_t*)((uint8_t*)local_mr.addr + rdma_mg->delta_section_size - 1);
+            assert(ds_w->inner_section->tail_ != ds_w->inner_section->head_ || ds_w->inner_section->is_empty_);
+            *polling_byte = 5;
+            
             std::vector<std::pair<uint64_t, uint64_t>> boundaries;
-             ds_w->CalculateWriteBoundaries(boundaries, old_head_, old_tail_, old_epoch);
-             bool async = false;
-             //todo: it is possible that the tail is updated but the boundary is not updated,
-             // as the tail_cahnge is ourside of the latch guard.
-             for(auto pair : boundaries){
-                 assert(boundaries.size() <= 3);
-                 assert(boundaries.size() > 0);
-                 qp_id = rdma_mg->GetQPForDeltaPull();
+            // Calculate boundaries and danger_size without modifying delta section (holding shared lock)
+            calculated_danger_size = ds_w->CalculateWriteBoundaries(boundaries, old_head_, old_tail_, old_epoch);
+            
+            // // Print boundaries information
+            //  printf("[Delta Pull Handler] Node %d -> Node %d: old_head=%lu, old_tail=%lu, old_epoch=%lu, "
+            //         "current_head=%lu, current_tail=%lu, current_epoch=%lu, danger_size=%lu, num_boundaries=%lu\n",
+            //         rdma_mg->node_id, requester_node_id, old_head_, old_tail_, old_epoch,
+            //         ds_w->GetHead(), ds_w->GetTail(), ds_w->GetEpoch(), 
+            //         calculated_danger_size, boundaries.size());
+            //  for (size_t i = 0; i < boundaries.size(); i++) {
+            //      printf("  Boundary %lu: start=%lu, end=%lu, size=%lu bytes\n", 
+            //             i, boundaries[i].first, boundaries[i].second, 
+            //             boundaries[i].second - boundaries[i].first);
+            //  }
+            //  fflush(stdout);
+            
+            // danger_size is now calculated automatically in CalculateWriteBoundaries
+            
+            int count = 0;
+            for (auto pair: boundaries) {
+                qp_id = rdma_mg->GetQPForDeltaPull();
+                
+                if (count == 0) {
+                  local_mr = *rdma_mg->Get_local_big_mr();
+                  remote_addr = (char*)receive_msg_buf->buffer;
+                  uint64_t start = pair.first;
+                  uint64_t end = pair.second;
+                  size_t write_size = end - start;
+                  // copy the header to a local buffer
+                  memcpy(local_mr.addr, ds_w->seg_local_mr_->addr, write_size);
+                  // set the danger size in the local_mr.
+                  ((DeltaSection*)local_mr.addr)->danger_size.store(calculated_danger_size, std::memory_order_release);
+                  
+                  assert(write_size >= STRUCT_OFFSET(DeltaSection, local_addr_));
+                  bool async = true;
+                    // Verify that head and tail have not changed during function execution
+                    assert(captured_head == ds_w->GetHead() && "Head changed during delta pull!");
+                    assert(captured_tail == ds_w->GetTail() && "Tail changed during delta pull!");
+                  rdma_mg->RDMA_Write_xcompute_localcopy(&local_mr, remote_addr, receive_msg_buf->rkey,
+                    write_size, requester_node_id, qp_id, true, &delta_lck);
+                } else {
+                  local_mr = *ds_w->seg_local_mr_;
+                  remote_addr = (char*)receive_msg_buf->buffer;
+                  uint64_t start = pair.first;
+                  uint64_t end = pair.second;
+                  size_t write_size = end - start;
+                  bool async = true;
 
-                local_mr = *ds_w->seg_local_mr_;
-                remote_addr = (char*)receive_msg_buf->buffer;
-                uint64_t start = pair.first;
-                uint64_t end = pair.second;
-                size_t write_size = end - start;
-                 if (write_size < BIGPAGESIZE){
-                     async = true;
-                 }else{
-                     async = false;
-                 }
-                local_mr.addr = (void*)((char*)local_mr.addr + start);
-                 remote_addr += start;
-//                 printf("Issue write request from %lu to %lu\n", start, end);
-//                 fflush(stdout);
-                rdma_mg->RDMA_Write_xcompute(&local_mr, remote_addr, receive_msg_buf->rkey,
-                                            write_size,
-                                            requester_node_id, qp_id, async);
+                  local_mr.addr = (void*)((char*)local_mr.addr + start);
+                  remote_addr += start;
+                  std::atomic_thread_fence(std::memory_order_release);
+                  //todo: may be use RDMA atomic operation can help?
+                  rdma_mg->RDMA_Write_xcompute_localcopy(&local_mr, remote_addr, receive_msg_buf->rkey,
+                    write_size, requester_node_id, qp_id, true, nullptr);
+                }
+                count++;
              }
+             
+
          }
          delete receive_msg_buf;
              // todo: implement the async write according to the returned boundaries.
-//             {// write the header.
-//                 size_t write_size = STRUCT_OFFSET(DeltaSection, local_seg_addr_);
-//                 rdma_mg->RDMA_Write_xcompute(&local_mr, remote_addr, receive_msg_buf->rkey,
-//                                              write_size,
-//                                              requester_node_id, qp_id, true);
-//
-//                 // write the active delta section.
-//                 qp_id = rdma_mg->qp_inc_ticket++ % NUM_QP_ACCROSS_COMPUTE;
-//                 bool async = ds_w->inner_section->tail_ - ds_w->inner_section->head_ >= BIGPAGESIZE;
-//                 remote_addr += STRUCT_OFFSET(DeltaSection, local_seg_addr_) + ds_w->inner_section->head_;
-//                 local_mr.addr = (char*)local_mr.addr + STRUCT_OFFSET(DeltaSection, local_seg_addr_) + ds_w->inner_section->head_;
-//                 rdma_mg->RDMA_Write_xcompute(&local_mr, remote_addr, receive_msg_buf->rkey,
-//                                              ds_w->inner_section->tail_ - ds_w->inner_section->head_,
-//                                              requester_node_id, qp_id, async);
-//                 // write the polling byte.
-//                 remote_addr = (char*)receive_msg_buf->buffer + rdma_mg->delta_section_size - 1;
-//                 local_mr.addr = (char*)ds_w->seg_local_mr_->addr + rdma_mg->delta_section_size - 1;
-//                 rdma_mg->RDMA_Write_xcompute(&local_mr, remote_addr, receive_msg_buf->rkey,
-//                                              1, requester_node_id, qp_id, true);
-//             }
-//            *polling_byte = 5;
-//            rdma_mg->RDMA_Write_xcompute(local_mr, receive_msg_buf->buffer, receive_msg_buf->rkey,
-//                                        rdma_mg->delta_section_size,
-//                                        requester_node_id, qp_id, false);
-            // ibv_mr* thread_local_mr = rdma_mg->Get_local_send_message_mr();
-            // uint8_t* local_uint8 = (uint8_t*)thread_local_mr->addr;
-            // *local_uint8 = 5;
-            // rdma_mg->RDMA_Write_xcompute(thread_local_mr, receive_msg_buf->buffer + rdma_mg->delta_section_size - 1, receive_msg_buf->rkey,
-            //     1, requester_node_id, qp_id, true);
     }
 
     void TransactionManager::ProcessSnapshotPush(void* args){
