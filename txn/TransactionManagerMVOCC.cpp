@@ -6,7 +6,7 @@ namespace DSMEngine{
 
         WritableFile* TransactionManager::log_file = nullptr;
         std::atomic<uint64_t > TransactionManager::largest_sp_acquired = 0;
-        std::shared_mutex TransactionManager::delta_map_mtx;
+        RWSpinMutex TransactionManager::delta_map_mtx;
         std::map<GlobalAddress, DeltaSectionWrap*, std::greater<GlobalAddress>> TransactionManager::delta_sections;
         RWSpinMutex TransactionManager::garb_mtx;
         SpinMutex TransactionManager::pin_sp_mtx;
@@ -236,7 +236,7 @@ namespace DSMEngine{
 #endif
                 uint64_t ds_epoch = 0;
                 {
-                    std::shared_lock<std::shared_mutex> l(delta_map_mtx);
+                    std::shared_lock<RWSpinMutex> l(delta_map_mtx);
                     auto iter = delta_sections.lower_bound(prev_delta);
                     assert(iter != delta_sections.end());
                     delta_section = iter->second;
@@ -268,13 +268,13 @@ namespace DSMEngine{
                     // we use the latch for shadow copy because the garbage collection or delta appending shall not fail
                     // the delta section validation in any way. In other word,  the new tail or epoch will not make the prev delta invalid.
                     // and the garbage collection shall never collect the delta record that this transaciton snapshot can still see.
-                    std::shared_lock<RWSpinMutex> slck(delta_section->shadow_mtx_);
+                    // std::shared_lock<RWSpinMutex> slck(delta_section->shadow_mtx_);
                     if (delta_section->inner_section->is_empty_ ||
-                        !delta_section->isOffsetValid(offset, meta.prev_delta_epoch_)) {
+                        !delta_section->isvalidandnotdangerours(offset, meta.prev_delta_epoch_)) {
 #ifndef NDEBUG
                         need_pull_update = true;
 #endif
-                        slck.unlock();
+                        // slck.unlock();
                         // fetch the latest version of the delta section.
                         // use double-checked locking to avoid conflict.
                         std::unique_lock<RWSpinMutex> lck(delta_section->shadow_mtx_);
@@ -613,7 +613,7 @@ namespace DSMEngine{
         // we need to wrap the funciton to a function pointer or funciton object.
         auto* ds_= new DeltaSectionWrap(compute_node_id, ds_gaddr, rdma_mg->delta_section_size, local_mr);
         {
-            std::unique_lock<std::shared_mutex> lck(TransactionManager::delta_map_mtx);
+            std::unique_lock<RWSpinMutex> lck(TransactionManager::delta_map_mtx);
             TransactionManager::delta_sections.insert(std::make_pair(ds_gaddr, ds_));
         }
         delete receive_msg_buf;
@@ -635,7 +635,7 @@ namespace DSMEngine{
         uint64_t calculated_danger_size = 0;
         
         {
-            std::shared_lock<std::shared_mutex> map_lck(TransactionManager::delta_map_mtx);
+            std::shared_lock<RWSpinMutex> map_lck(TransactionManager::delta_map_mtx);
             auto it = TransactionManager::delta_sections.find(ds_gaddr);
             map_lck.unlock();
 

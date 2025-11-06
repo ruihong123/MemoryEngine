@@ -68,7 +68,7 @@ namespace DSMEngine {
             ibv_mr* local_mr = new ibv_mr{};
             rdma_mg->Allocate_Local_RDMA_Slot(*local_mr, DeltaChunk);
 #ifdef SINGLE_DELTA_PER_NODE
-            std::unique_lock<std::shared_mutex> lck1(delta_map_mtx);
+            std::unique_lock<RWSpinMutex> lck1(delta_map_mtx);
             if (ds_for_write == nullptr) {
                 ds_for_write =
                     new DeltaSectionWrap(rdma_mg->node_id, remote_addr, rdma_mg->delta_section_size, local_mr);
@@ -244,7 +244,7 @@ namespace DSMEngine {
         static std::atomic<uint64_t> largest_sp_acquired;
 
 #if defined(MVOCC)
-        static std::shared_mutex delta_map_mtx;
+        static RWSpinMutex delta_map_mtx;
         static std::map<GlobalAddress, DeltaSectionWrap*, std::greater<GlobalAddress>> delta_sections;
         static RWSpinMutex garb_mtx;
         static SpinMutex pin_sp_mtx;

@@ -368,18 +368,15 @@ namespace DSMEngine {
             return inner_section->tail_allocated;
         }
 #endif
-        bool isOffsetDangerous(long offset, uint64_t epoch, int& debug) {
-            // Use sequential consistency to ensure we see the latest value
-            // This pairs with the seq_cst fence in PullUpdates when danger_size is reset
-            if (inner_section->danger_size.load(std::memory_order_seq_cst) == 0) {
-                debug = 1;
+        bool isOffsetDangerous(long offset, uint64_t epoch) {
+            // Use acquire to observe updates published with release in PullUpdates
+            if (inner_section->danger_size.load(std::memory_order_relaxed) == 0) {
                 return false;
             }
-            uint64_t tail = GetTail();
-            uint64_t danger_size = inner_section->danger_size.load(std::memory_order_seq_cst);
+            uint64_t tail = inner_section->tail_.load(std::memory_order_relaxed);
+            uint64_t danger_size = inner_section->danger_size.load(std::memory_order_relaxed);
             
             if (offset <= tail) {
-                debug = 2;
                 // offset is in the lower part [0, tail]
                 // Dangerous if offset is within danger_size of tail
                 return offset >= tail - danger_size;
@@ -389,29 +386,24 @@ namespace DSMEngine {
                 if (danger_size > tail) {
                     // Calculate where the upper dangerous region starts
                     uint64_t upper_danger_start = seg_real_size_ - (danger_size - tail);
-                    debug = 3;
                     return offset >= upper_danger_start && offset < seg_real_size_;
                 } else {
                     // danger_size doesn't extend into upper part
-                    debug = 4;
                     return false;
                 }
             }
         }
 
         bool isOffsetValid(long offset, uint64_t epoch) {
-            // Use sequential consistency to ensure we see the latest committed values
-            // This ensures head, tail, and epoch are read with consistent ordering
-            uint64_t head = inner_section->head_.load(std::memory_order_seq_cst);
-            uint64_t tail = inner_section->tail_.load(std::memory_order_seq_cst);
+            // Use acquire to observe committed values (writers publish with release)
+            uint64_t head = inner_section->head_.load(std::memory_order_acquire);
+            uint64_t tail = inner_section->tail_.load(std::memory_order_acquire);
 
             assert(offset >= 0);
 
             // Check epoch first: a larger epoch means the offset is invalid
-            // This happens when the delta section was cleared/recycled
-            // Note: epoch reads are safe here because all epoch updates happen under main_mtx_
-            // and our double-checked locking pattern uses shadow_mtx_ to synchronize reads
-            uint64_t current_epoch = inner_section->epoch_.load(std::memory_order_seq_cst);
+            // Epoch is published under locks; acquire is sufficient here
+            uint64_t current_epoch = inner_section->epoch_.load(std::memory_order_acquire);
             if (epoch > current_epoch) {
                 return false;
             }
@@ -432,6 +424,52 @@ namespace DSMEngine {
                 return ((offset >= head && offset < seg_real_size_) ||
                         (offset >= 0 && offset < tail));
             }
+        }
+
+        // Combined fast path: validate offset and ensure it is not in the dangerous region
+        // Reduces atomic loads by snapshotting head/tail/epoch/danger_size once.
+        bool isvalidandnotdangerours(long offset, uint64_t epoch) {
+            assert(offset >= 0);
+            // Snapshot shared state (acquire pairs with release updates)
+            uint64_t head = inner_section->head_.load(std::memory_order_acquire);
+            uint64_t tail = inner_section->tail_.load(std::memory_order_acquire);
+            uint64_t current_epoch = inner_section->epoch_.load(std::memory_order_acquire);
+            uint64_t danger_sz = inner_section->danger_size.load(std::memory_order_acquire);
+
+            // Epoch check: larger epoch means offset invalid
+            if (epoch > current_epoch) {
+                return false;
+            }
+
+            // Validity check (same as isOffsetValid)
+            bool valid;
+            if (tail >= head) {
+                // Occupied: [head, tail)
+                valid = (offset < tail);
+            } else {
+                // Wrapped: [head, N) U [0, tail)
+                valid = ((offset >= head && offset < seg_real_size_) || (offset >= 0 && offset < tail));
+            }
+            if (!valid) return false;
+
+            // Danger check (same as isOffsetDangerous), but inverted result
+            if (danger_sz == 0) return true;
+
+            if (offset <= tail) {
+                // Lower part [0, tail]
+                if (offset >= tail - danger_sz) {
+                    return false; // dangerous
+                }
+            } else {
+                // Upper part (wrapped case)
+                if (danger_sz > tail) {
+                    uint64_t upper_danger_start = seg_real_size_ - (danger_sz - tail);
+                    if (offset >= upper_danger_start && offset < seg_real_size_) {
+                        return false; // dangerous
+                    }
+                }
+            }
+            return true;
         }
 
         void PullUpdates() {

@@ -194,8 +194,8 @@ void Memory_Node_Keeper::SetBackgroundThreads(int num, ThreadPoolType type) {
 
 void Memory_Node_Keeper::server_communication_thread(std::string client_ip,
                                                      int socket_fd) {
-  printf("A new shared memory thread start\n");
-  printf("checkpoint1");
+  // printf("A new shared memory thread start\n");
+  // printf("checkpoint1");
   char temp_receive[4 * sizeof(ibv_mr)];
   char temp_send[4 * sizeof(ibv_mr)] = "Q";
   int rc = 0;
@@ -446,7 +446,6 @@ void Memory_Node_Keeper::Server_to_Client_Communication() {
   }
   int rc;
   if (rdma_mg->rdma_config.gid_idx >= 0) {
-    printf("checkpoint0");
     rc = ibv_query_gid(rdma_mg->res->ib_ctx, rdma_mg->rdma_config.ib_port,
                        rdma_mg->rdma_config.gid_idx, &(rdma_mg->res->my_gid));
     if (rc) {
@@ -503,7 +502,7 @@ int Memory_Node_Keeper::server_sock_connect(const char *servername, int port) {
             std::to_string(((struct sockaddr_in *)(&address))->sin_port);
         // Client id must be composed of ip address and port number.
         std::cout << "connection built up from" << client_id << std::endl;
-        std::cout << "connection family is " << address.sa_family << std::endl;
+        // std::cout << "connection family is " << address.sa_family << std::endl;
         if (sockfd < 0) {
           fprintf(stderr, "Connection accept error, erron: %d\n", errno);
           break;
@@ -840,7 +839,7 @@ void DSMEngine::Memory_Node_Keeper::broadcastReplicaMetadata(
 
   // Use RDMA_Manager's memcached interface
   rdma_mg->memcachedSet(key, strlen(key), value, strlen(value));
-  printf("Broadcasted metadata: logical_id=%u, physical_id=%u, base_ptr=%lu, "
-         "rkey=%u\n",
-         logical_id, physical_id, base_ptr, rkey);
+  // printf("Broadcasted metadata: logical_id=%u, physical_id=%u, base_ptr=%lu, "
+  //        "rkey=%u\n",
+  //        logical_id, physical_id, base_ptr, rkey);
 }

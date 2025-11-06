@@ -308,20 +308,32 @@ run() {
 run_mvcc_benchmark() {
   # Set defaults for any unset parameters (using := syntax)
   : ${result_file:=$bin/results/mvcc_storage}
+  
+  # Clear results directory before running benchmarks
+  results_dir=$(dirname "$result_file")
+  if [ -d "$results_dir" ]; then
+    echo "Clearing existing log files in $results_dir..."
+    rm -f "$results_dir"/*.node* "$results_dir"/*.log 2>/dev/null
+    echo "Results directory cleared."
+  else
+    echo "Creating results directory: $results_dir"
+    mkdir -p "$results_dir"
+  fi
+  
   : ${node_range:="8"}
-  : ${threads_range:="1 4 8"}
+  : ${threads_range:="8"}
   
   # Workload mode configuration
-  : ${mixed_workload:=1}           # 1=mixed read/write, 0=separate writers/readers
-  : ${read_ratio_range:="50"}      # For mixed_workload=1: read percentage
+  : ${mixed_workload:=0}           # 1=mixed read/write, 0=separate writers/readers
+  : ${read_ratio_range:="0"}      # For mixed_workload=1: read percentage
   : ${writers:=1}                  # For mixed_workload=0: number of writer threads
-  : ${readers:=7}                  # For mixed_workload=0: number of reader threads
+  : ${readers:=1}                  # For mixed_workload=0: number of reader threads
   
-  : ${storage_type_range:="1"}
+  : ${storage_type_range:="1 2 3"}
   : ${workload_type_range:="1"}
   : ${zipfian_theta_range:="0.99"}
-  : ${num_tuples:=100000}
-  : ${snapshot_lag_range:="10000"}
+  : ${num_tuples:=10000000}
+  : ${snapshot_lag_range:="100 "} # 100000 (uniform) OR 100 (zipfian)
   : ${warmup_duration:=10}
   : ${duration:=10}
   : ${size_grow:=0}
@@ -360,9 +372,9 @@ run_mvcc_benchmark() {
   do
     for node in $node_range
     do
-    for read_ratio in $read_ratio_range
+    for workload_type in $workload_type_range
     do
-      for workload_type in $workload_type_range
+      for read_ratio in $read_ratio_range
       do
         for zipfian_theta in $zipfian_theta_range
         do

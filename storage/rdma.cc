@@ -45,7 +45,7 @@ namespace DSMEngine {
     std::atomic<uint64_t> RDMA_Manager::ReadCount = 0;
 #endif
 #define INVALIDATION_INTERVAL 5
-#define DELTASECTIONSIZE 64 * 1024 * 1024
+#define DELTASECTIONSIZE 256 * 1024 * 1024
     // TODO: This should be moved to some other classes which is strongly related to
     // btree or storage engine.
     thread_local GlobalAddress path_stack[define::kMaxLevelOfTree];
@@ -209,10 +209,11 @@ namespace DSMEngine {
         if (!local_mem_regions.empty()) {
             for (ibv_mr *p: local_mem_regions) {
                 size_t size = p->length;
+                void *addr = p->addr;
                 ibv_dereg_mr(p);
                 //       local buffer is registered on this machine need deregistering.
                 //      delete (char*)p->addr;
-                hugePageDealloc(p->addr, size);
+                hugePageDealloc(addr, size);
             }
             //    local_mem_regions.clear();
         }
@@ -240,12 +241,12 @@ namespace DSMEngine {
         if (!res->cq_map.empty()) {
             for (auto it = res->cq_map.begin(); it != res->cq_map.end(); it++) {
                 if (ibv_destroy_cq(it->second.first)) {
-                    fprintf(stderr, "node %d failed to destroy CQ\n", node_id);
+                    // fprintf(stderr, "node %d failed to destroy CQ\n", node_id);
                 } else {
                     //        delete it->second.first;
                 }
                 if (it->second.second != nullptr && ibv_destroy_cq(it->second.second)) {
-                    fprintf(stderr, "node %d failed to destroy CQ\n", node_id);
+                    // fprintf(stderr, "node %d failed to destroy CQ\n", node_id);
                 } else {
                     //        delete it->second.second;
                 }
@@ -254,9 +255,9 @@ namespace DSMEngine {
         if (!res->qp_map.empty()) {
             for (auto it = res->qp_map.begin(); it != res->qp_map.end(); it++) {
                 if (ibv_destroy_qp(it->second)) {
-                    fprintf(stderr, "node %d failed to destroy QP\n", node_id);
+                    // fprintf(stderr, "node %d failed to destroy QP\n", node_id);
                 } else {
-                    delete it->second;
+                    // delete it->second;
                 }
             }
         }
@@ -669,7 +670,6 @@ namespace DSMEngine {
         //  std::string qp_id = "main";
 
         /* exchange using TCP sockets info required to connect QPs */
-        printf("checkpoint1\n");
 
         bool seperated_cq = true;
         struct ibv_qp_init_attr qp_init_attr;
@@ -1076,7 +1076,7 @@ namespace DSMEngine {
             }
             uint64_t bytes = v * mul;
             assert(bytes != 2147483648);
-            printf("DEBUG parse_size: input='%s', v=%lu, mul=%lu, result=%lu\n",
+            printf("parse_size: input='%s', v=%lu, mul=%lu, result=%lu\n",
                    tok.c_str(), v, mul, bytes);
             if (bytes == 0) {
                 throw std::out_of_range("size is zero: " + tok);
@@ -2432,7 +2432,7 @@ namespace DSMEngine {
             }
             //            qp_xcompute_info.insert()
 
-            fprintf(stdout, "Xcompute QPs were created, QP number=0x%x\n", qp->qp_num);
+            // fprintf(stdout, "Xcompute QPs were created, QP number=0x%x\n", qp->qp_num);
         }
         //        cp_xcompute.insert({target_node_id, cq_arr});
         //        qp_xcompute.insert({target_node_id, qp_arr});

@@ -696,12 +696,12 @@ namespace DSMEngine
         public:
             uint32_t counter = 0;
             //        void* handles[SEND_OUTSTANDING_SIZE_XCOMPUTE] = {nullptr};
-            ibv_mr* mrs[SEND_OUTSTANDING_SIZE_XCOMPUTE - 1] = {nullptr};
+            ibv_mr* mrs[SEND_OUTSTANDING_SIZE_XCOMPUTE] = {nullptr};
 
             Async_Xcompute_Tasks()
             {
                 auto rdma_mg = RDMA_Manager::Get_Instance();
-                for (int i = 0; i <= SEND_OUTSTANDING_SIZE_XCOMPUTE - 1; ++i)
+                for (int i = 0; i < SEND_OUTSTANDING_SIZE_XCOMPUTE; ++i)
                 {
                     ibv_mr* mr = new ibv_mr{};
                     rdma_mg->Allocate_Local_RDMA_Slot(*mr, BigPage);
