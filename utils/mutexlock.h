@@ -8,6 +8,7 @@
 #include <atomic>
 #include <functional>
 #include <mutex>
+#include <shared_mutex>
 #include <thread>
 
 #include "port/port.h"
@@ -16,14 +17,6 @@ namespace DSMEngine {
 
 // Helper class that locks a mutex on construction and unlocks the mutex when
 // the destructor of the MutexLock object is invoked.
-//
-// Typical usage:
-//
-//   void MyClass::MyMethod() {
-//     MutexLock l(&mu_);       // mu_ is an instance variable
-//     ... some complex code, possibly with multiple return paths ...
-//   }
-
 class MutexLock {
  public:
   explicit MutexLock(port::Mutex *mu) : mu_(mu) {
@@ -38,7 +31,91 @@ class MutexLock {
  private:
   port::Mutex *const mu_;
 };
-//
+
+#ifdef USE_STD_LOCKS
+
+// Alternative locking primitives backed by std library types.
+class SpinMutex {
+ public:
+  SpinMutex() = default;
+
+  bool try_lock() { return mutex_.try_lock(); }
+  void lock() { mutex_.lock(); }
+  void unlock() { mutex_.unlock(); }
+
+ private:
+  std::mutex mutex_;
+};
+
+class RWSpinMutex {
+ public:
+  explicit RWSpinMutex(bool writerPrioritized = true)
+      : writer_prioritized_(writerPrioritized) {}
+
+  void lock_shared() {
+    shared_mutex_.lock_shared();
+    reader_count_.fetch_add(1, std::memory_order_relaxed);
+  }
+
+  void unlock_shared() {
+    reader_count_.fetch_sub(1, std::memory_order_relaxed);
+    shared_mutex_.unlock_shared();
+  }
+
+  void lock(size_t /*thread_ID*/ = 128) {
+    shared_mutex_.lock();
+    writer_active_.store(true, std::memory_order_relaxed);
+  }
+
+  void unlock() {
+    writer_active_.store(false, std::memory_order_relaxed);
+    shared_mutex_.unlock();
+  }
+
+  bool try_shared_lock() {
+    if (!shared_mutex_.try_lock_shared()) {
+      return false;
+    }
+    reader_count_.fetch_add(1, std::memory_order_relaxed);
+    return true;
+  }
+
+  bool try_lock(size_t /*thread_ID*/ = 128) {
+    if (!shared_mutex_.try_lock()) {
+      return false;
+    }
+    writer_active_.store(true, std::memory_order_relaxed);
+    return true;
+  }
+
+  bool try_upgrade() {
+    reader_count_.fetch_sub(1, std::memory_order_relaxed);
+    shared_mutex_.unlock_shared();
+    if (shared_mutex_.try_lock()) {
+      writer_active_.store(true, std::memory_order_relaxed);
+      return true;
+    }
+    shared_mutex_.lock_shared();
+    reader_count_.fetch_add(1, std::memory_order_relaxed);
+    return false;
+  }
+
+  bool islocked() {
+    return writer_active_.load(std::memory_order_relaxed);
+  }
+
+  bool issharelocked() {
+    return reader_count_.load(std::memory_order_relaxed) > 0;
+  }
+
+ private:
+  std::shared_mutex shared_mutex_;
+  std::atomic<size_t> reader_count_{0};
+  std::atomic<bool> writer_active_{false};
+  const bool writer_prioritized_;
+};
+
+#else  // USE_STD_LOCKS
 // SpinMutex has very low overhead for low-contention cases.  Method names
 // are chosen so you can use std::unique_lock or std::lock_guard with it.
 //
@@ -429,6 +506,8 @@ class SpinMutex {
             }
         }
     };
+
+#endif  // USE_STD_LOCKS
 
 class SpinLock {
  public:

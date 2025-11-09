@@ -19,7 +19,7 @@ namespace DSMEngine{
                 }
 
 
-				return rdma_mg->FetchAddNextTimestamp();
+				return rdma_mg->FetchAddNextTimestamp(1);
 			}
             static uint64_t GetMonotoneTimestamp(){
                 if (!rdma_mg){

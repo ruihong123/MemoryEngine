@@ -359,7 +359,7 @@ void Memory_Node_Keeper::server_communication_thread(std::string client_ip,
 
     // copy the pointer of receive buf to a new place because
     // it is the same with send buff pointer.
-    if (receive_msg_buf->command == create_mr_128MB_) {
+    if (receive_msg_buf->command == create_mr_with_size_) {
       rdma_mg->post_receive<RDMA_Request>(&recv_mr[buffer_position],
                                           compute_node_id, client_ip);
 

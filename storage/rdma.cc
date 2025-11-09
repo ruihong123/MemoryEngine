@@ -348,9 +348,9 @@ namespace DSMEngine {
 
     size_t RDMA_Manager::GetComputeNodeNum() { return compute_nodes.size(); }
 
-    uint64_t RDMA_Manager::FetchAddNextTimestamp() {
+    uint64_t RDMA_Manager::FetchAddNextTimestamp(int add_value) {
         ibv_mr *local_cas_buffer = Get_local_CAS_mr();
-        RDMA_FAA(timestamp_oracle, local_cas_buffer, 1, 1, IBV_SEND_SIGNALED, 1);
+        RDMA_FAA(timestamp_oracle, local_cas_buffer, add_value, 1, IBV_SEND_SIGNALED, 1);
         assert(*(uint64_t *)local_cas_buffer->addr < 0x700d2c00cbe9);
         return *(uint64_t *) local_cas_buffer->addr;
     }
@@ -7526,7 +7526,7 @@ namespace DSMEngine {
         ibv_mr send_mr = {};
         Allocate_Local_RDMA_Slot(send_mr, Message);
         send_pointer = (RDMA_Request *) send_mr.addr;
-        send_pointer->command = create_mr_128MB_;
+        send_pointer->command = create_mr_with_size_;
         // todo: the remote server need to return the memory chunk for the target
         // region (main copy)
         //  The target region main copy may not start from the beggining of the big

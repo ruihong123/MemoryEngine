@@ -193,7 +193,7 @@ namespace DSMEngine
     {
         invalid_command_ = 0,
         create_qp_,
-        create_mr_128MB_,
+        create_mr_with_size_,
         create_mr_any_,
         near_data_compaction,
         install_version_edit,
@@ -748,7 +748,7 @@ namespace DSMEngine
 
         size_t GetComputeNodeNum();
 
-        uint64_t FetchAddNextTimestamp();
+        uint64_t FetchAddNextTimestamp(int add_value = 1);
 
         uint64_t GetTimestamp();
 

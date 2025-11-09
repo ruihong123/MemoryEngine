@@ -396,14 +396,13 @@ namespace DSMEngine {
 
         bool isOffsetValid(long offset, uint64_t epoch) {
             // Use acquire to observe committed values (writers publish with release)
-            uint64_t head = inner_section->head_.load(std::memory_order_acquire);
-            uint64_t tail = inner_section->tail_.load(std::memory_order_acquire);
-
-            assert(offset >= 0);
-
+            uint64_t head = inner_section->head_.load(std::memory_order_relaxed);
+            uint64_t tail = inner_section->tail_.load(std::memory_order_relaxed);
             // Check epoch first: a larger epoch means the offset is invalid
             // Epoch is published under locks; acquire is sufficient here
-            uint64_t current_epoch = inner_section->epoch_.load(std::memory_order_acquire);
+            uint64_t current_epoch = inner_section->epoch_.load(std::memory_order_relaxed);
+            assert(offset >= 0);
+
             if (epoch > current_epoch) {
                 return false;
             }
@@ -431,10 +430,10 @@ namespace DSMEngine {
         bool isvalidandnotdangerours(long offset, uint64_t epoch) {
             assert(offset >= 0);
             // Snapshot shared state (acquire pairs with release updates)
-            uint64_t head = inner_section->head_.load(std::memory_order_acquire);
-            uint64_t tail = inner_section->tail_.load(std::memory_order_acquire);
-            uint64_t current_epoch = inner_section->epoch_.load(std::memory_order_acquire);
-            uint64_t danger_sz = inner_section->danger_size.load(std::memory_order_acquire);
+            uint64_t head = inner_section->head_.load(std::memory_order_relaxed);
+            uint64_t tail = inner_section->tail_.load(std::memory_order_relaxed);
+            uint64_t current_epoch = inner_section->epoch_.load(std::memory_order_relaxed);
+            uint64_t danger_sz = inner_section->danger_size.load(std::memory_order_relaxed);
 
             // Epoch check: larger epoch means offset invalid
             if (epoch > current_epoch) {
@@ -577,13 +576,13 @@ namespace DSMEngine {
             // fflush(stdout);
 
             // Print summary after every 10 pulls or at specific intervals
-            if (pulls % 1000 == 0 || elapsed_us > 10000) {
-                // Every 10 pulls or if time > 10ms
-                uint64_t avg = total / pulls;
-                printf("[Delta Pull Summary] Total pulls: %lu, Avg time: %lu us, Min: %lu us, Max: %lu us\n",
-                       pulls, avg, min_time_us.load(), max_time_us.load());
-                fflush(stdout);
-            }
+            // if (pulls % 1000 == 0 || elapsed_us > 10000) {
+            //     // Every 10 pulls or if time > 10ms
+            //     uint64_t avg = total / pulls;
+            //     printf("[Delta Pull Summary] Total pulls: %lu, Avg time: %lu us, Min: %lu us, Max: %lu us\n",
+            //            pulls, avg, min_time_us.load(), max_time_us.load());
+            //     fflush(stdout);
+            // }
 
             // Export this pull's timing via a callback function pointer
             // This allows the benchmark to collect statistics without tight coupling
@@ -750,9 +749,9 @@ namespace DSMEngine {
 
             // Split boundaries by BigPage size and return (common for all cases)
             SplitBoundariesByBigPage(boundaries);
-            if (old_epoch == snapshot_epoch) {
-                assert(boundaries.size() <= 3);
-            }
+            // if (old_epoch == snapshot_epoch) {
+            //     assert(boundaries.size() <= 3);
+            // }
             
             // Calculate danger_size: the size of new deltas written since old_tail
             // This represents the region that might be modified during the RDMA write

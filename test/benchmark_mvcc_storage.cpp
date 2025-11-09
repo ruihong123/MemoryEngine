@@ -21,6 +21,9 @@
 #include <cstring>
 #include <iostream>
 #include <map>
+#include <algorithm>
+#include <deque>
+#include <memory>
 #include <random>
 #include <thread>
 #include <unordered_map>
@@ -51,8 +54,8 @@ namespace DSMEngine {
 
 // Benchmark Configuration
 const int kMaxThreads = 32;
-uint64_t kNumTuples = 1000000; // Number of tuples to work with
-uint64_t kSnapshotLag = 10000; // Max snapshot lag (read snapshot in [current_ts - kSnapshotLag, current_ts])
+uint64_t kNumTuples = 100000000; // Number of tuples to work with
+uint64_t kSnapshotLag = 1000000; // Max snapshot lag (read snapshot in [current_ts - kSnapshotLag, current_ts])
 int kBenchmarkDurationSec = 30;
 int kWarmupDurationSec = 10; // Warmup duration (same as normal run)
 
@@ -242,7 +245,8 @@ void GarbageCollectionThread() {
         // Simplified GC: gc_threshold = current_local_sp - 4*kSnapshotLag
         if (g_local_snapshot_ptr != nullptr) {
             uint64_t local_sp = g_local_snapshot_ptr->load(std::memory_order_relaxed);
-            uint64_t gc_threshold = (local_sp > 2 * kSnapshotLag) ? (local_sp - 2 * kSnapshotLag) : 0;
+            uint64_t effective_snapshot_lag = std::max<uint64_t>(kSnapshotLag, 10000);
+            uint64_t gc_threshold = (local_sp > 2 * effective_snapshot_lag) ? (local_sp - 2 * effective_snapshot_lag) : 0;
 
             if (g_ds_for_write != nullptr && gc_threshold > 0) {
                 g_ds_for_write->GarbageCollectionBySnapshot(gc_threshold);
@@ -301,16 +305,34 @@ public:
     // For VERSION_CHAIN strategy: we use the primary index to find the latest version
     // No additional data structures needed - all metadata stored in MetaColumn
 
-    // For DELTA_IN_GCL strategy: delta storage with shared opened page (one per compute node)
+    // For DELTA_IN_GCL strategy: delta storage with centralized page pool and GC
     RecordSchema *delta_schema_;  // Schema for delta records (tuple_key, old_wts, old_value, next_delta)
-    
-    // Shared delta page management (one opened page per compute node, shared by all threads)
-    GlobalAddress shared_delta_page_{GlobalAddress::Null()};  // Currently opened delta page
-    std::unique_ptr<SpinMutex> delta_page_mutex_{new SpinMutex()};  // Mutex to protect shared page access
-    
-    // Garbage collection: track filled pages that are no longer in use
-    std::vector<GlobalAddress> filled_delta_pages_;  // Pages that have been filled and can be recycled (for future GC)
-    std::unique_ptr<SpinMutex> gc_mutex_{new SpinMutex()};  // Mutex for GC operations
+
+    struct DeltaPageInfo {
+        GlobalAddress page_addr{GlobalAddress::Null()};
+        std::atomic<uint32_t> live_records{0};
+        std::atomic<bool> sealed{false};
+    };
+
+    struct DeltaHistoryEntry {
+        uint64_t old_wts{0};
+        GlobalAddress delta_addr{GlobalAddress::Null()};
+        std::shared_ptr<DeltaPageInfo> page_info;
+    };
+
+    // Centralized delta page pool and metadata
+    std::deque<GlobalAddress> free_delta_pages_;
+    std::unique_ptr<SpinMutex> delta_page_pool_mutex_{new SpinMutex()};
+    std::unordered_map<uint64_t, std::shared_ptr<DeltaPageInfo> > delta_page_infos_;
+    std::unique_ptr<SpinMutex> delta_page_info_mutex_{new SpinMutex()};
+
+    // Per-thread state for delta allocation and history tracking
+    std::vector<std::deque<DeltaHistoryEntry> > thread_delta_histories_;
+    std::vector<std::unique_ptr<SpinMutex> > thread_history_mutexes_;
+
+    // Background garbage collector for delta pages
+    std::atomic<bool> delta_gc_running_{false};
+    std::unique_ptr<std::thread> delta_gc_thread_;
 
     // Per-thread stats to avoid atomics in hot paths
     std::vector<uint64_t> per_thread_delta_pulls_;
@@ -414,6 +436,10 @@ public:
                 mehcached_zipf_init(thread_zipf_states_[i].get(), kNumTuples, kZipfianTheta, zipf_seed);
             }
         }
+
+        if (strategy_ == DELTA_IN_GCL) {
+            InitializeDeltaInGCLState(static_cast<size_t>(max_threads));
+        }
         
         if (use_zipfian_) {
             printf("Initialized %d thread-local Zipfian generators with theta=%.2f, n=%lu\n", 
@@ -431,6 +457,7 @@ public:
     }
 
     ~MVCCBenchmark() {
+        // ShutdownDeltaInGCL();
         delete table_;
         delete schema_;
         if (delta_schema_ != nullptr) {
@@ -603,7 +630,6 @@ public:
             uint64_t random_lag = (lag_range > 0) ? (thread_randoms_[thread_id]->Next() % lag_range) : 0;
             uint64_t snapshot_ts = current_ts - random_lag;
 
-
             if (strategy_ == VERSION_CHAIN) {
                 ReadWithVersionChain(key, snapshot_ts, thread_id);
             } else if (strategy_ == DELTA_SECTION) {
@@ -621,6 +647,206 @@ public:
         } catch (const std::exception &e) {
             printf("Read operation exception: %s\n", e.what());
         }
+    }
+
+    void InitializeDeltaInGCLState(size_t max_threads) {
+        assert(delta_schema_ != nullptr);
+        thread_delta_histories_.resize(max_threads);
+        thread_history_mutexes_.resize(max_threads);
+        for (size_t i = 0; i < max_threads; ++i) {
+            thread_history_mutexes_[i] = std::make_unique<SpinMutex>();
+        }
+
+        size_t pages_to_prealloc = std::max<size_t>(max_threads * 16, 128);
+        PreallocateDeltaPages(pages_to_prealloc);
+        delta_gc_running_.store(true, std::memory_order_release);
+        delta_gc_thread_ = std::make_unique<std::thread>(&MVCCBenchmark::DeltaHistoryGCWorker, this);
+    }
+
+    void ShutdownDeltaInGCL() {
+        if (strategy_ != DELTA_IN_GCL) {
+            return;
+        }
+        delta_gc_running_.store(false, std::memory_order_release);
+        if (delta_gc_thread_ && delta_gc_thread_->joinable()) {
+            delta_gc_thread_->join();
+            delta_gc_thread_.reset();
+        }
+        DrainDeltaHistories();
+        std::atomic_thread_fence(std::memory_order_seq_cst);
+    }
+
+    void PreallocateDeltaPages(size_t count) {
+        for (size_t i = 0; i < count; ++i) {
+            GlobalAddress page_addr = AllocateAndInitializeDeltaPage();
+            {
+                std::lock_guard<SpinMutex> pool_lock(*delta_page_pool_mutex_);
+                free_delta_pages_.push_back(page_addr);
+            }
+        }
+    }
+
+    GlobalAddress AllocateAndInitializeDeltaPage() {
+        GlobalAddress page_addr = ddsm_->Allocate_Remote(Regular_Page);
+        Cache::Handle *handle = nullptr;
+        void *page_buffer = nullptr;
+        ddsm_->SELCC_Exclusive_Lock(page_buffer, page_addr, handle);
+        uint64_t cardinality = DataPage::calculate_cardinality(kLeafPageSize, delta_schema_->GetRecordTotalSize());
+        new (page_buffer) DataPage(page_addr, cardinality, 1);
+        ddsm_->SELCC_Exclusive_UnLock(page_addr, handle);
+
+        auto page_info = std::make_shared<DeltaPageInfo>();
+        page_info->page_addr = page_addr;
+        page_info->live_records.store(0, std::memory_order_relaxed);
+        page_info->sealed.store(false, std::memory_order_relaxed);
+
+        {
+            std::lock_guard<SpinMutex> map_lock(*delta_page_info_mutex_);
+            delta_page_infos_[page_addr.val] = page_info;
+        }
+        return page_addr;
+    }
+
+    GlobalAddress AcquireDeltaPage() {
+        GlobalAddress page_addr = GlobalAddress::Null();
+        {
+            std::lock_guard<SpinMutex> pool_lock(*delta_page_pool_mutex_);
+            if (!free_delta_pages_.empty()) {
+                page_addr = free_delta_pages_.front();
+                free_delta_pages_.pop_front();
+            }
+        }
+        if (page_addr == GlobalAddress::Null()) {
+            page_addr = AllocateAndInitializeDeltaPage();
+        }
+
+        auto page_info = GetOrCreateDeltaPageInfo(page_addr);
+        page_info->sealed.store(false, std::memory_order_release);
+        page_info->live_records.store(0, std::memory_order_release);
+        return page_addr;
+    }
+
+    std::shared_ptr<DeltaPageInfo> GetOrCreateDeltaPageInfo(GlobalAddress page_addr) {
+        uint64_t key = page_addr.val;
+        {
+            std::lock_guard<SpinMutex> map_lock(*delta_page_info_mutex_);
+            auto iter = delta_page_infos_.find(key);
+            if (iter != delta_page_infos_.end()) {
+                return iter->second;
+            }
+            auto page_info = std::make_shared<DeltaPageInfo>();
+            page_info->page_addr = page_addr;
+            delta_page_infos_[key] = page_info;
+            return page_info;
+        }
+    }
+
+    void SealDeltaPage(const std::shared_ptr<DeltaPageInfo> &page_info) {
+        if (!page_info) {
+            return;
+        }
+        page_info->sealed.store(true, std::memory_order_release);
+    }
+
+    void AppendDeltaHistory(int thread_id, uint64_t old_wts, GlobalAddress delta_addr,
+                            const std::shared_ptr<DeltaPageInfo> &page_info) {
+        if (!page_info) {
+            return;
+        }
+        if (thread_id < 0 || static_cast<size_t>(thread_id) >= thread_delta_histories_.size()) {
+            return;
+        }
+        DeltaHistoryEntry entry;
+        entry.old_wts = old_wts;
+        entry.delta_addr = delta_addr;
+        entry.page_info = page_info;
+
+        auto &mutex_ptr = thread_history_mutexes_[thread_id];
+        if (mutex_ptr) {
+            std::lock_guard<SpinMutex> lock(*mutex_ptr);
+            thread_delta_histories_[thread_id].push_back(std::move(entry));
+        }
+    }
+
+    void ReleaseDeltaHistoryEntry(DeltaHistoryEntry &entry) {
+        if (!entry.page_info) {
+            return;
+        }
+        uint32_t prev = entry.page_info->live_records.fetch_sub(1, std::memory_order_acq_rel);
+        assert(prev > 0);
+        if (prev == 1) {
+            if (entry.page_info->sealed.load(std::memory_order_acquire)) {
+                RecycleDeltaPage(entry.page_info);
+            }
+        }
+    }
+
+    void RecycleDeltaPage(const std::shared_ptr<DeltaPageInfo> &page_info) {
+        if (!page_info) {
+            return;
+        }
+        Cache::Handle *handle = nullptr;
+        void *page_buffer = nullptr;
+        ddsm_->SELCC_Exclusive_Lock(page_buffer, page_info->page_addr, handle);
+        uint64_t cardinality = DataPage::calculate_cardinality(kLeafPageSize, delta_schema_->GetRecordTotalSize());
+        new (page_buffer) DataPage(page_info->page_addr, cardinality, 1);
+        ddsm_->SELCC_Exclusive_UnLock(page_info->page_addr, handle);
+
+        page_info->sealed.store(false, std::memory_order_release);
+        page_info->live_records.store(0, std::memory_order_release);
+
+        {
+            std::lock_guard<SpinMutex> pool_lock(*delta_page_pool_mutex_);
+            free_delta_pages_.push_back(page_info->page_addr);
+        }
+    }
+
+    void DeltaHistoryGCWorker() {
+        while (delta_gc_running_.load(std::memory_order_acquire)) {
+            uint64_t local_ts = local_snapshot_ts_.load(std::memory_order_relaxed);
+            uint64_t lower_bound = (local_ts > 2 * kSnapshotLag) ? (local_ts - 2 * kSnapshotLag) : 0;
+
+            for (size_t tid = 0; tid < thread_delta_histories_.size(); ++tid) {
+                auto &mutex_ptr = thread_history_mutexes_[tid];
+                if (!mutex_ptr) {
+                    continue;
+                }
+
+                std::unique_lock<SpinMutex> history_lock(*mutex_ptr);
+                auto &history = thread_delta_histories_[tid];
+                while (!history.empty() && history.front().old_wts < lower_bound) {
+                    DeltaHistoryEntry entry = std::move(history.front());
+                    history.pop_front();
+                    history_lock.unlock();
+                    ReleaseDeltaHistoryEntry(entry);
+                    history_lock.lock();
+                }
+            }
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        }
+    }
+
+    void DrainDeltaHistories() {
+        if (strategy_ != DELTA_IN_GCL) {
+            return;
+        }
+        for (size_t tid = 0; tid < thread_delta_histories_.size(); ++tid) {
+            auto &mutex_ptr = thread_history_mutexes_[tid];
+            if (!mutex_ptr) {
+                continue;
+            }
+            std::unique_lock<SpinMutex> history_lock(*mutex_ptr);
+            auto &history = thread_delta_histories_[tid];
+            while (!history.empty()) {
+                DeltaHistoryEntry entry = std::move(history.front());
+                history.pop_front();
+                history_lock.unlock();
+                ReleaseDeltaHistoryEntry(entry);
+                history_lock.lock();
+            }
+        }
+
     }
 
 private:
@@ -925,19 +1151,37 @@ private:
             // This prevents reordering between multiple checks that need to be consistent
             // std::atomic_thread_fence(std::memory_order_seq_cst);
             
-            bool is_ok = delta_section->isvalidandnotdangerours(offset, meta.prev_delta_epoch_);
-            {
+            // bool is_ok = delta_section->isvalidandnotdangerours(offset, meta.prev_delta_epoch_);
+            // {
+            //     // std::shared_lock<RWSpinMutex> slck(delta_section->shadow_mtx_);
+            //     if (delta_section->inner_section->is_empty_ || !is_ok) {
+            //         // slck.unlock();
+            //         std::unique_lock<RWSpinMutex> lck(delta_section->shadow_mtx_);
+            //         pull_wait_count++;
+            //         if(pull_wait_count > 8){
+            //           printf("Pull wait count > 8 impossible\n");
+            //           assert(false);
+            //           fflush(stdout);
+            //           exit(1);
+            //         };
+            //         if (delta_section->inner_section->is_empty_ ||
+            //             !delta_section->isOffsetValid(offset, meta.prev_delta_epoch_)) {
+            //             // Pull updates from remote node
+            //             if (delta_section->owner_compute_node_id_ != RDMA_Manager::Get_Instance()->node_id) {
+            //                 delta_section->PullUpdates();
+
+            //                 // Update global statistics
+            //                 per_thread_delta_pulls_[thread_id]++;
+            //             }
+            //         }
+            //     }
+            // }
+            {   
                 // std::shared_lock<RWSpinMutex> slck(delta_section->shadow_mtx_);
-                if (delta_section->inner_section->is_empty_ || !is_ok) {
+                if (delta_section->inner_section->is_empty_ || 
+                    !delta_section->isOffsetValid(offset, meta.prev_delta_epoch_)) {
                     // slck.unlock();
                     std::unique_lock<RWSpinMutex> lck(delta_section->shadow_mtx_);
-                    pull_wait_count++;
-                    if(pull_wait_count > 8){
-                      printf("Pull wait count > 8 impossible\n");
-                      assert(false);
-                      fflush(stdout);
-                      exit(1);
-                    };
                     if (delta_section->inner_section->is_empty_ ||
                         !delta_section->isOffsetValid(offset, meta.prev_delta_epoch_)) {
                         // Pull updates from remote node
@@ -948,6 +1192,10 @@ private:
                             per_thread_delta_pulls_[thread_id]++;
                         }
                     }
+                }else{
+                  while (delta_section->isOffsetDangerous(offset, meta.prev_delta_epoch_)) {
+                    _mm_pause();
+                  }  
                 }
             }
 
@@ -987,65 +1235,33 @@ private:
     // - Causes SELCC invalidations when delta pages are modified (key difference from DELTA_SECTION)
     // - Reads must traverse delta chain in GCL pages to reconstruct old versions
 
-    // Helper function to allocate delta record in shared opened page
-    // All threads share the same opened page (one per compute node)
-    // Caller must acquire delta_page_mutex_ before calling this function
-    // Caller must unlock the delta page after filling the record
-    bool AllocateDeltaRecord(GlobalAddress &delta_gaddr, Cache::Handle *&delta_handle, 
-                             char *&delta_record_buffer) {
-        void *delta_page_buffer;
+    // Helper function to allocate delta record from per-thread delta page
+    bool AllocateDeltaRecord(int thread_id, GlobalAddress &delta_gaddr, Cache::Handle *&delta_handle,
+                             char *&delta_record_buffer, std::shared_ptr<DeltaPageInfo> &page_info_out) {
+        (void) thread_id;
+        GlobalAddress current_page = AcquireDeltaPage();
+        page_info_out = GetOrCreateDeltaPageInfo(current_page);
+        void *delta_page_buffer = nullptr;
         DataPage *delta_page = nullptr;
-        GlobalAddress current_page_gaddr;
-        
-        // Get or allocate the shared opened page
-        if (shared_delta_page_ == GlobalAddress::Null()) {
-            // First allocation - allocate new page
-            shared_delta_page_ = ddsm_->Allocate_Remote(Regular_Page);
-            current_page_gaddr = shared_delta_page_;
-            ddsm_->SELCC_Exclusive_Lock(delta_page_buffer, current_page_gaddr, delta_handle);
-            
-            // Initialize new DataPage
-            uint64_t cardinality = DataPage::calculate_cardinality(kLeafPageSize, delta_schema_->GetRecordTotalSize());
-            delta_page = new (delta_page_buffer) DataPage(current_page_gaddr, cardinality, 1); // table_id = 1
-        } else {
-            // Use existing opened page
-            current_page_gaddr = shared_delta_page_;
-            ddsm_->SELCC_Exclusive_Lock(delta_page_buffer, current_page_gaddr, delta_handle);
-            delta_page = reinterpret_cast<DataPage *>(delta_page_buffer);
-        }
-        
-        // Allocate record in the delta page
+        ddsm_->SELCC_Exclusive_Lock(delta_page_buffer, current_page, delta_handle);
+        delta_page = reinterpret_cast<DataPage *>(delta_page_buffer);
+
         int cnt = 0;
         bool alloc_success = delta_page->AllocateRecord(cnt, delta_schema_, delta_gaddr, delta_record_buffer);
-        
+
         if (!alloc_success) {
-            // Page is full - need to close it and allocate a new one
-            // Move filled page to GC tracking
-            filled_delta_pages_.push_back(current_page_gaddr);
-            ddsm_->SELCC_Exclusive_UnLock(current_page_gaddr, delta_handle);
-            
-            // Allocate new page
-            shared_delta_page_ = ddsm_->Allocate_Remote(Regular_Page);
-            current_page_gaddr = shared_delta_page_;
-            ddsm_->SELCC_Exclusive_Lock(delta_page_buffer, current_page_gaddr, delta_handle);
-            
-            uint64_t cardinality = DataPage::calculate_cardinality(kLeafPageSize, delta_schema_->GetRecordTotalSize());
-            delta_page = new (delta_page_buffer) DataPage(current_page_gaddr, cardinality, 1);
-            
-            // Retry allocation
-            alloc_success = delta_page->AllocateRecord(cnt, delta_schema_, delta_gaddr, delta_record_buffer);
-            if (!alloc_success) {
-                ddsm_->SELCC_Exclusive_UnLock(current_page_gaddr, delta_handle);
-                return false;
+            // Page is full before allocation – seal it and retry with a new page
+            ddsm_->SELCC_Exclusive_UnLock(current_page, delta_handle);
+            if (page_info_out) {
+                SealDeltaPage(page_info_out);
+                RecycleDeltaPage(page_info_out);
             }
+            page_info_out.reset();
+            return false;
         }
-        
-        // Check if page is now full and mark for closure next time
-        if (cnt == delta_page->hdr.kDataCardinality) {
-            // Page will be closed on next allocation
-            // Current caller still holds the lock and will unlock it
-        }
-        
+
+        page_info_out->live_records.store(1, std::memory_order_release);
+
         return true;
     }
 
@@ -1087,34 +1303,33 @@ private:
         // Release tuple lock to avoid deadlock (will re-acquire)
         ddsm_->SELCC_Exclusive_UnLock(TOPAGE(tuple_gaddr), tuple_handle);
 
-        // Step 2: Allocate and write delta record using delta_table_'s AllocateNewTuple
-        // This handles page allocation, locking, and record allocation automatically
-        // The delta table has one opened page per compute node (managed by Table)
+        // Step 2: Allocate and write delta record using centralized delta page pool
         GlobalAddress delta_gaddr;
         Cache::Handle *delta_handle;
         char *delta_record_buffer;
-        
-        // Acquire mutex to access shared delta page
-        {
-            std::unique_lock<SpinMutex> page_lck(*delta_page_mutex_);
-            bool alloc_success = AllocateDeltaRecord(delta_gaddr, delta_handle, delta_record_buffer);
-            if (!alloc_success) {
-                printf("ERROR: Failed to allocate delta record for key %lu\n", key);
-                return;
-            }
-            page_lck.unlock();
-            // Fill in delta record using Record API (while holding lock and page lock)
-            Record delta_record(delta_schema_, delta_record_buffer);
-            delta_record.SetColumn(0, &key);  // tuple_key
-            delta_record.SetColumn(1, &old_wts);  // old_wts
-            delta_record.SetColumn(2, &old_value);  // old_value
-            uint64_t next_delta_val = old_prev_delta.val;
-            delta_record.SetColumn(3, &next_delta_val);  // next_delta (GlobalAddress as UINT64)
-            
-            // Unlock delta page - THIS CAUSES SELCC INVALIDATIONS!
-            // Unlock before releasing mutex (mutex protects page allocation, SELCC lock protects page content)
-            ddsm_->SELCC_Exclusive_UnLock(TOPAGE(delta_gaddr), delta_handle);
-        } // Mutex released here - other threads can now access the shared page
+
+        std::shared_ptr<DeltaPageInfo> page_info;
+        bool alloc_success = AllocateDeltaRecord(thread_id, delta_gaddr, delta_handle, delta_record_buffer, page_info);
+        if (!alloc_success) {
+            printf("ERROR: Failed to allocate delta record for key %lu\n", key);
+            return;
+        }
+
+        // Fill in delta record using Record API (while holding page lock)
+        Record delta_record(delta_schema_, delta_record_buffer);
+        delta_record.SetColumn(0, &key);  // tuple_key
+        delta_record.SetColumn(1, &old_wts);  // old_wts
+        delta_record.SetColumn(2, &old_value);  // old_value
+        uint64_t next_delta_val = old_prev_delta.val;
+        delta_record.SetColumn(3, &next_delta_val);  // next_delta (GlobalAddress as UINT64)
+
+        // Unlock delta page - THIS CAUSES SELCC INVALIDATIONS!
+        ddsm_->SELCC_Exclusive_UnLock(TOPAGE(delta_gaddr), delta_handle);
+
+        SealDeltaPage(page_info);
+
+        // Track delta record for garbage collection
+        AppendDeltaHistory(thread_id, old_wts, delta_gaddr, page_info);
 
         // Step 3: Re-acquire tuple lock and update tuple with new values
         ddsm_->SELCC_Exclusive_Lock(tuple_page_buffer, TOPAGE(tuple_gaddr), tuple_handle);
@@ -1229,22 +1444,6 @@ private:
         }
     }
 
-    // Garbage collection for filled delta pages
-    // NOTE: In a full implementation, this would:
-    // 1. Check if any filled_delta_pages_ contain deltas older than the oldest active snapshot
-    // 2. Recycle those pages by freeing them back to the allocator
-    // 3. This requires tracking active snapshots across all transactions
-    void GarbageCollectDeltaPages() {
-        // TODO: Implement GC logic that:
-        // - Determines the oldest active snapshot timestamp
-        // - Identifies filled pages whose deltas are all older than the oldest snapshot
-        // - Recycles those pages (in this benchmark, we just track them for now)
-        std::lock_guard<SpinMutex> gc_lck(*gc_mutex_);
-        if (filled_delta_pages_.size() > 0) {
-            printf("Node %d: GC tracking %lu filled delta pages\n",
-                   RDMA_Manager::Get_Instance()->node_id, filled_delta_pages_.size());
-        }
-    }
 };
 
 // ==================== WORKER THREADS ====================
@@ -1369,10 +1568,12 @@ void ParseArgs(int argc, char *argv[]) {
                     "  --node_id N                Compute node ID (default: 0)\n"
                     "  --tcp_port N               TCP port (default: 19843)\n\n",
                     argv[0]);
+            fflush(stderr);
             exit(0);
         } else {
             fprintf(stderr, "Unknown argument: %s\n", argv[i]);
             fprintf(stderr, "Use --help for usage information\n");
+            fflush(stderr);
             exit(1);
         }
     }
@@ -1550,7 +1751,6 @@ int main(int argc, char *argv[]) {
     printf("========================================\n");
     printf("Running benchmark for %d seconds...\n", kBenchmarkDurationSec);
     printf("========================================\n");
-
     Timer bench_timer;
     bench_timer.begin();
 
@@ -1581,6 +1781,7 @@ int main(int argc, char *argv[]) {
     double actual_duration_sec = actual_duration_ns / 1e9;
 
     printf("\n[COMPLETE] Benchmark finished after %.2f seconds\n", actual_duration_sec);
+    fflush(stdout);
 
     // Stop threads
     benchmark_running.store(false);
@@ -1597,6 +1798,11 @@ int main(int argc, char *argv[]) {
         g_gc_thread = nullptr;
         printf("Node %d: GC thread stopped\n", ThisNodeID);
     }
+
+    benchmark.ShutdownDeltaInGCL();
+
+    // sync all nodes after stop the GC thread for storage type 3
+    RDMA_Manager::Get_Instance()->sync_with_computes_Cside();
 
     // Aggregate per-thread stats into global counters for reporting
     benchmark.AggregateThreadLocalStats();

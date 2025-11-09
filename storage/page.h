@@ -391,6 +391,13 @@ namespace DSMEngine {
             hdr.this_page_g_ptr = this_page_g_ptr;
             hdr.kDataCardinality = data_cardinality;
             hdr.table_id = id;
+            hdr.number_of_records = 0;
+            hdr.lsn_ = 0;
+            hdr.reset_dirty_bounds();
+
+            uint32_t bitmap_words = (data_cardinality + 63) / 64;
+            uint32_t bitmap_bytes = bitmap_words * sizeof(uint64_t);
+            std::memset(data_, 0, bitmap_bytes);
         }
 
         static uint64_t calculate_cardinality(uint64_t page_size, uint64_t record_size) {

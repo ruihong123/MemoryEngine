@@ -15,6 +15,11 @@ core_dump_dir="/mnt/core_dump"
 github_repo="https://github.com/ruihong123/MemoryEngine"
 gitbranch="reserved_branch1"
 function run_bench() {
+  results_dir="$SRC_HOME/scripts/results"
+  if [ -d "$results_dir" ]; then
+    echo "Cleaning results directory at $results_dir"
+    find "$results_dir" -mindepth 1 -delete
+  fi
   communication_port=()
 #	memory_port=()
 	memory_server=()
@@ -87,7 +92,7 @@ function run_bench() {
 #    ssh -o StrictHostKeyChecking=no $node "sudo apt-get install -y libnuma-dev numactl htop libmemcached-dev libboost-all-dev" &
 
 #    ssh -o StrictHostKeyChecking=no $node  "sudo umount /mnt/core_dump & rm /mnt/core_dump/core*"
-    ssh -o StrictHostKeyChecking=no $node  "rm /mnt/core_dump/core*"
+
     rsync -a $home_dir $node:$home_dir &
     rsync_pids+=($!)
     rsync -a $side_dir $node:$side_dir &
@@ -103,6 +108,7 @@ function run_bench() {
     ssh -o StrictHostKeyChecking=no $node "pkill -f memory_server" &
     ssh -o StrictHostKeyChecking=no $node "pkill -f btree_bench" &
     ssh -o StrictHostKeyChecking=no $node "rm $home_dir/scripts/log*" &
+    ssh -o StrictHostKeyChecking=no $node "rm $home_dir/scripts/results/*" &
     ssh -o StrictHostKeyChecking=no $node "rm $home_dir/debug/logdump.txt" &
     ssh -o StrictHostKeyChecking=no $node "rm $home_dir/release/logdump.txt" &
     ssh -o StrictHostKeyChecking=no $node "rm $core_dump_dir/core*" &
@@ -135,6 +141,7 @@ function run_bench() {
     ssh -o StrictHostKeyChecking=no $node "pkill -f memory_server" &
     ssh -o StrictHostKeyChecking=no $node "pkill -f btree_bench" &
     ssh -o StrictHostKeyChecking=no $node "rm $home_dir/scripts/log*" &
+    ssh -o StrictHostKeyChecking=no $node "rm $home_dir/scripts/results/*" &
     ssh -o StrictHostKeyChecking=no $node "rm $home_dir/debug/logdump.txt" &
     ssh -o StrictHostKeyChecking=no $node "rm $home_dir/release/logdump.txt" &
     ssh -o StrictHostKeyChecking=no $node "rm $core_dump_dir/core*" &

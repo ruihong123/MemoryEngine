@@ -321,11 +321,11 @@ run_mvcc_benchmark() {
   fi
   
   : ${node_range:="8"}
-  : ${threads_range:="8"}
+  : ${threads_range:="1 2 4 8 16"}
   
   # Workload mode configuration
-  : ${mixed_workload:=0}           # 1=mixed read/write, 0=separate writers/readers
-  : ${read_ratio_range:="0"}      # For mixed_workload=1: read percentage
+  : ${mixed_workload:=1}           # 1=mixed read/write, 0=separate writers/readers
+  : ${read_ratio_range:="0 50"}      # For mixed_workload=1: read percentage
   : ${writers:=1}                  # For mixed_workload=0: number of writer threads
   : ${readers:=1}                  # For mixed_workload=0: number of reader threads
   
@@ -333,7 +333,7 @@ run_mvcc_benchmark() {
   : ${workload_type_range:="1"}
   : ${zipfian_theta_range:="0.99"}
   : ${num_tuples:=10000000}
-  : ${snapshot_lag_range:="100 "} # 100000 (uniform) OR 100 (zipfian)
+  : ${snapshot_lag_range:="100"} # 100000 (uniform) OR 100 (zipfian)
   : ${warmup_duration:=10}
   : ${duration:=10}
   : ${size_grow:=0}
