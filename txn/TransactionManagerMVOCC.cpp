@@ -14,6 +14,9 @@ namespace DSMEngine{
 //        uint64_t TransactionManager::last_broadcasted_sp = 0;
         SpinMutex TransactionManager::c_l_mtx;
         std::map<uint16_t, uint64_t > TransactionManager::cluster_least_sp_;
+        SpinMutex TransactionManager::gc_thread_control_mtx;
+        std::atomic<bool> TransactionManager::gc_should_run{false};
+        std::atomic<uint32_t> TransactionManager::active_manager_count{0};
         std::thread* TransactionManager::gc_thread = nullptr;
         uint64_t delta_pull_num[MAX_APP_THREAD];
         uint64_t roll_back_num[MAX_APP_THREAD];
@@ -157,8 +160,10 @@ namespace DSMEngine{
         access->access_global_record_ = new Record(schema_ptr, tuple_buffer);
         record = new Record(schema_ptr);
         record->CopyFrom(access->access_global_record_);
-
+        access->txn_local_tuple_ = record;
+        access->access_addr_ = tuple_gaddr;
         volatile uint64_t ts = record->GetWTS();
+        RegisterSeenTs(ts);
         assert(buffer_is_not_all_zero(record->data_ptr_, schema_ptr->GetRecordTotalSize()));
         // todo: for serializable isolation level, a larger tuple timestamps means that we need to abort this txn.
 #ifdef EARLYABORT
@@ -260,7 +265,7 @@ namespace DSMEngine{
 #ifndef NDEBUG
                 bool need_pull_update = false;
 #endif
-                long offset = tuple_gaddr.offset - handle->gptr.offset - STRUCT_OFFSET(DeltaSection, local_addr_);
+                long offset = prev_delta.offset - delta_section->seg_addr_.offset - STRUCT_OFFSET(DeltaSection, local_addr_);
 
                 {
                     // Calculate offset from global address
@@ -269,24 +274,22 @@ namespace DSMEngine{
                     // the delta section validation in any way. In other word,  the new tail or epoch will not make the prev delta invalid.
                     // and the garbage collection shall never collect the delta record that this transaciton snapshot can still see.
                     // std::shared_lock<RWSpinMutex> slck(delta_section->shadow_mtx_);
-                    if (delta_section->inner_section->is_empty_ ||
-                        !delta_section->isvalidandnotdangerours(offset, meta.prev_delta_epoch_)) {
-#ifndef NDEBUG
-                        need_pull_update = true;
-#endif
+                    // std::shared_lock<RWSpinMutex> slck(delta_section->shadow_mtx_);
+                    if (delta_section->inner_section->is_empty_ || 
+                        !delta_section->isOffsetValid(offset, meta.prev_delta_epoch_)) {
                         // slck.unlock();
-                        // fetch the latest version of the delta section.
-                        // use double-checked locking to avoid conflict.
                         std::unique_lock<RWSpinMutex> lck(delta_section->shadow_mtx_);
                         if (delta_section->inner_section->is_empty_ ||
                             !delta_section->isOffsetValid(offset, meta.prev_delta_epoch_)) {
-                            assert(delta_section->owner_compute_node_id_ != RDMA_Manager::node_id);
-                            delta_section->PullUpdates();
-                            delta_pull_num[thread_id_]++;
-
-
+                            // Pull updates from remote node
+                            if (delta_section->owner_compute_node_id_ != RDMA_Manager::Get_Instance()->node_id) {
+                                delta_section->PullUpdates();
+                            }
                         }
-
+                    }else{
+                        while (delta_section->isOffsetDangerous(offset, meta.prev_delta_epoch_)) {
+                            _mm_pause();
+                        }  
                     }
                 }
 
@@ -323,8 +326,7 @@ namespace DSMEngine{
                 ts = record->GetWTS();
             }
             assert(buffer_is_not_all_zero(record->data_ptr_, schema_ptr->GetRecordTotalSize()));
-        access->txn_local_tuple_ = record;
-        access->access_addr_ = tuple_gaddr;
+
         if (access_type == DELETE_ONLY) {
             record->PutWTS(UINT64_MAX);
             record->SetVisible(false);
@@ -404,6 +406,7 @@ namespace DSMEngine{
 
                     }
                     if (access->access_global_record_->GetWTS() > access->txn_local_tuple_->GetWTS()){
+                        RegisterSeenTs(access->access_global_record_->GetWTS());
                         AbortTransaction();
                         return false;
                     }
@@ -436,6 +439,7 @@ namespace DSMEngine{
                         access->access_global_record_->ReSetRecordBuff(tuple_buffer, access->access_global_record_->GetRecordSize(), false);
                     }
                     if (access->access_global_record_->GetWTS() > access->txn_local_tuple_->GetWTS()){
+                        RegisterSeenTs(access->access_global_record_->GetWTS());
                         AbortTransaction();
                         return false;
                     }
@@ -443,6 +447,12 @@ namespace DSMEngine{
             }
         }
         // -----------------(commit stage)----------------------------------------------
+#ifdef USE_SNAPSHOT_MANAGER
+        uint64_t required_floor = max_seen_ts_;
+        if (required_floor != 0) {
+            GlobalTimestamp::EnsureCommitFloor(required_floor + 1);
+        }
+#endif
         // get the commit timestamp right before the commit phase.
         uint64_t commit_ts = GlobalTimestamp::FetchAddMonotoneTimestamp();
 
@@ -515,11 +525,21 @@ namespace DSMEngine{
             // unlock
         }
         ClearStates();
+#ifdef USE_SNAPSHOT_MANAGER
+        max_seen_ts_ = commit_ts;
+#endif
         PROFILE_TIME_END(thread_id_, CC_COMMIT);
         return true;
 		}
 
-		void TransactionManager::AbortTransaction() {
+#ifdef USE_SNAPSHOT_MANAGER
+        void TransactionManager::RegisterSeenTs(uint64_t ts) {
+            if (ts > max_seen_ts_) {
+                max_seen_ts_ = ts;
+            }
+        }
+#endif
+        void TransactionManager::AbortTransaction() {
             PROFILE_TIME_START(thread_id_, CC_ABORT);
             for (size_t i = 0; i < access_list_.access_count_; ++i) {
                 Access* access = access_list_.GetAccess(i);
@@ -550,6 +570,11 @@ namespace DSMEngine{
                 }
                 // unlock
             }
+#ifdef USE_SNAPSHOT_MANAGER
+            if (max_seen_ts_ != 0) {
+                GlobalTimestamp::EnsureCommitFloor(max_seen_ts_ + 1);
+            }
+#endif
             ClearStates();
             PROFILE_TIME_END(thread_id_, CC_ABORT);
 
@@ -667,15 +692,15 @@ namespace DSMEngine{
             // Calculate boundaries and danger_size without modifying delta section (holding shared lock)
             calculated_danger_size = ds_w->CalculateWriteBoundaries(boundaries, old_head_, old_tail_, old_epoch);
             
-            // // Print boundaries information
+            // Print boundaries information
             //  printf("[Delta Pull Handler] Node %d -> Node %d: old_head=%lu, old_tail=%lu, old_epoch=%lu, "
             //         "current_head=%lu, current_tail=%lu, current_epoch=%lu, danger_size=%lu, num_boundaries=%lu\n",
             //         rdma_mg->node_id, requester_node_id, old_head_, old_tail_, old_epoch,
-            //         ds_w->GetHead(), ds_w->GetTail(), ds_w->GetEpoch(), 
+            //         ds_w->GetHead(), ds_w->GetTail(), ds_w->GetEpoch(),
             //         calculated_danger_size, boundaries.size());
             //  for (size_t i = 0; i < boundaries.size(); i++) {
-            //      printf("  Boundary %lu: start=%lu, end=%lu, size=%lu bytes\n", 
-            //             i, boundaries[i].first, boundaries[i].second, 
+            //      printf("  Boundary %lu: start=%lu, end=%lu, size=%lu bytes\n",
+            //             i, boundaries[i].first, boundaries[i].second,
             //             boundaries[i].second - boundaries[i].first);
             //  }
             //  fflush(stdout);
@@ -769,7 +794,7 @@ namespace DSMEngine{
         uint64_t last_broadcasted_sp = 0;
         uint64_t last_gc_ts = 0;
         uint64_t largest_snapshot = largest_sp_acquired.load();
-        while(1){
+        while (gc_should_run.load(std::memory_order_acquire)){
             if (largest_snapshot < largest_sp_acquired.load()){
                 // Get the largest snapshot till now in this compute node.
                 largest_snapshot = largest_sp_acquired.load();
@@ -797,6 +822,16 @@ namespace DSMEngine{
                 last_broadcasted_sp = least_sp_this_node;
 
             }
+            {
+                std::unique_lock<SpinMutex> lck2(c_l_mtx);
+                // need to initialize the cluster_least_sp_.
+                if (cluster_least_sp_.empty()) {
+                    for (uint16_t i = 0; i < rdma_mg->GetComputeNodeNum(); i++) {
+                        cluster_least_sp_[2 * i] = 0;
+                    }
+                }
+            }
+
 
             //step 2: do garbage collection according to the least sp across the cluster.
             std::unique_lock<SpinMutex> cl_lck(c_l_mtx);
@@ -825,7 +860,7 @@ namespace DSMEngine{
 
             }
             // do garbage collection.
-            usleep(500); //todo: tune the sleep time or make the sleep time
+            usleep(5000); //todo: tune the sleep time or make the sleep time
         }
     }
     bool TransactionManager::CoordinatorPrepare() {

@@ -42,6 +42,9 @@ namespace DSMEngine {
               partition_end_(partition_end), num_items_per_partition_(num_items_per_partition),
               partition_key_bits_(partition_key_bits) {
             env_ = Env::Default();
+#if defined(MVOCC)
+            active_manager_count.fetch_add(1, std::memory_order_acq_rel);
+#endif
             if (wal_log) {
                 if (!log_file) {
                     //              Status ret = env_->NewWritableFile("/ssd_root/wang4996/logdump.txt", &log_file);
@@ -86,13 +89,13 @@ namespace DSMEngine {
             rdma_mg->Sync_Create_Delta_Section_RPC(remote_addr, rdma_mg->node_id);
             lck1.unlock();
 #endif
-            std::unique_lock<SpinMutex> lck2(c_l_mtx);
-            // need to initialize the cluster_least_sp_.
-            if (cluster_least_sp_.empty()) {
-                for (uint16_t i = 0; i < rdma_mg->GetComputeNodeNum(); i++) {
-                    cluster_least_sp_[2 * i] = 0;
-                }
-            }
+            // std::unique_lock<SpinMutex> lck2(c_l_mtx);
+            // // need to initialize the cluster_least_sp_.
+            // if (cluster_least_sp_.empty()) {
+            //     for (uint16_t i = 0; i < rdma_mg->GetComputeNodeNum(); i++) {
+            //         cluster_least_sp_[2 * i] = 0;
+            //     }
+            // }
 
 #endif
         }
@@ -101,6 +104,21 @@ namespace DSMEngine {
                 delete log_file;
             }
             // todo: exit the delta GC thread.
+#if defined(MVOCC)
+            uint32_t prev = active_manager_count.fetch_sub(1, std::memory_order_acq_rel);
+            if (prev == 1) {
+                gc_thread_control_mtx.lock();
+                gc_should_run.store(false, std::memory_order_release);
+                if (gc_thread != nullptr) {
+                    if (gc_thread->joinable()) {
+                        gc_thread->join();
+                    }
+                    delete gc_thread;
+                    gc_thread = nullptr;
+                }
+                gc_thread_control_mtx.unlock();
+            }
+#endif
         }
         //    static void Two_phase_commit_worker(uint16_t targe){
         //        TransactionManager *txn_manager = new TransactionManager(nullptr, 0, 0);
@@ -178,7 +196,9 @@ namespace DSMEngine {
             PROFILE_TIME_END(thread_id_, INDEX_READ);
             if (data_addr != GlobalAddress::Null()) {
                 bool ret = SelectRecordCC(table_id, record, data_addr, access_type);
-                assert(buffer_is_not_all_zero(record->data_ptr_, record->GetRecordSize()));
+                if (ret) {
+                    assert(buffer_is_not_all_zero(record->data_ptr_, record->GetRecordSize()));
+                }
                 return ret;
             } else {
                 printf("table_id=%d cannot find the record with  key=%s\n",
@@ -236,6 +256,11 @@ namespace DSMEngine {
 
     private:
         bool SelectRecordCC(size_t table_id, Record*& record, const GlobalAddress& tuple_gaddr, AccessType access_type);
+#ifdef USE_SNAPSHOT_MANAGER
+        void RegisterSeenTs(uint64_t ts);
+#else
+        inline void RegisterSeenTs(uint64_t) {}
+#endif
 
     public:
         TableDirectory* storage_manager_;
@@ -252,6 +277,9 @@ namespace DSMEngine {
                                                                       //    static uint64_t last_broadcasted_sp;
         static SpinMutex c_l_mtx;
         static std::map<uint16_t, uint64_t> cluster_least_sp_; // <node id, least snapshot id>
+        static SpinMutex gc_thread_control_mtx;
+        static std::atomic<bool> gc_should_run;
+        static std::atomic<uint32_t> active_manager_count;
         void GetSnapshot();
         void ReleaseSnapshot();
         static std::thread* gc_thread;
@@ -276,6 +304,9 @@ namespace DSMEngine {
         size_t thread_id_;
         size_t thread_count_;
         AccessList<kMaxAccessLimit> access_list_;
+#ifdef USE_SNAPSHOT_MANAGER
+        uint64_t max_seen_ts_ = 0;
+#endif
 
         bool log_enabled_ = false;
         bool sharding_    = false;

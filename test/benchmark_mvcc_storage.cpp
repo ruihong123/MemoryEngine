@@ -33,6 +33,7 @@
 #include "DDSM.h"
 #include "Timer.h"
 #include "storage/Meta.h"
+#include "storage/ColumnInfo.h"
 #include "storage/Record.h"
 #include "storage/Records.h"
 #include "storage/Table.h"
@@ -54,10 +55,15 @@ namespace DSMEngine {
 
 // Benchmark Configuration
 const int kMaxThreads = 32;
-uint64_t kNumTuples = 100000000; // Number of tuples to work with
+uint64_t kNumTuples = 10000000; // Number of tuples to work with (10 million)
 uint64_t kSnapshotLag = 1000000; // Max snapshot lag (read snapshot in [current_ts - kSnapshotLag, current_ts])
 int kBenchmarkDurationSec = 30;
 int kWarmupDurationSec = 10; // Warmup duration (same as normal run)
+
+// Baseline database size: 512 bytes * 10 million tuples = 5.12 GB
+const uint64_t kBaselineTupleSize = 512;
+const uint64_t kBaselineNumTuples = 10000000;
+const uint64_t kBaselineTotalSize = kBaselineTupleSize * kBaselineNumTuples;
 
 // Benchmark Parameters (set via command line)
 int kNumThreads = 8; // Total number of worker threads
@@ -71,6 +77,8 @@ double kZipfianTheta = 0.99; // Zipfian skew parameter (0.0 = uniform, 0.99 = hi
 uint16_t ThisNodeID = 0;
 uint16_t tcp_port = 19843;
 uint64_t kCacheSize = 8; // GB
+uint64_t kTupleSize = 512; // Tuple size in bytes (data + meta)
+bool kNumTuplesExplicitlySet = false; // Track if num_tuples was explicitly set by user
 
 // Statistics
 std::atomic<uint64_t> write_count{0};
@@ -177,11 +185,11 @@ void ProcessDeltaPull(void *args) {
         // Calculate boundaries and danger_size without modifying delta section (holding shared lock)
         calculated_danger_size = ds_w->CalculateWriteBoundaries(boundaries, old_head_, old_tail_, old_epoch);
 
-        // // Print boundaries information
+        // Print boundaries information
         // printf("[Delta Pull Handler] Node %d -> Node %d: old_head=%lu, old_tail=%lu, old_epoch=%lu, "
         //        "current_head=%lu, current_tail=%lu, current_epoch=%lu, danger_size=%lu, num_boundaries=%lu\n",
         //        rdma_mg->node_id, requester_node_id, old_head_, old_tail_, old_epoch,
-        //        ds_w->GetHead(), ds_w->GetTail(), ds_w->GetEpoch(), 
+        //        ds_w->GetHead(), ds_w->GetTail(), ds_w->GetEpoch(),
         //        calculated_danger_size, boundaries.size());
         // for (size_t i = 0; i < boundaries.size(); i++) {
         //   printf("  Boundary %lu: start=%lu, end=%lu, size=%lu bytes\n",
@@ -344,16 +352,43 @@ public:
         default_gallocator = ddsm_;
 
         // Create schema for benchmark table
-        // key (8B) + value (8B) + padding (496B) + meta = 512B data + meta
+        // key (8B) + value (8B) + padding (variable) + meta = kTupleSize bytes total
+        // Calculate padding size: tuple_size - key_size - value_size - meta_size
+        size_t key_size = sizeof(uint64_t); // 8 bytes
+        size_t value_size = sizeof(uint64_t); // 8 bytes
+        size_t meta_size = kMetaSize; // MetaColumn size
+        size_t min_tuple_size = key_size + value_size + meta_size;
+        
+        if (kTupleSize < min_tuple_size) {
+            printf("Warning: tuple_size (%lu) is too small, minimum is %lu. Using minimum size.\n",
+                   kTupleSize, min_tuple_size);
+            kTupleSize = min_tuple_size;
+        }
+        
+        size_t padding_size = kTupleSize - key_size - value_size - meta_size;
+        
+        printf("Node %d: Creating schema with tuple_size=%lu bytes (key=%lu, value=%lu, padding=%lu, meta=%lu)\n",
+               ThisNodeID, kTupleSize, key_size, value_size, padding_size, meta_size);
+        
         schema_ = new RecordSchema(0);
         std::vector<ColumnInfo *> columns;
         columns.push_back(new ColumnInfo("key", ValueType::UINT64));
         columns.push_back(new ColumnInfo("value", ValueType::UINT64));
-        columns.push_back(new ColumnInfo("padding", ValueType::FIXCHAR, 496)); // 496 bytes padding
+        columns.push_back(new ColumnInfo("padding", ValueType::FIXCHAR, padding_size));
         columns.push_back(new ColumnInfo("meta", ValueType::META)); // MetaColumn for MVCC
         schema_->BulkloadColumns(columns);
         size_t column_ids[1] = {0};
         schema_->SetPrimaryColumns(column_ids, 1);
+        
+        // Verify the actual record size matches the requested tuple size
+        size_t actual_record_size = schema_->GetRecordTotalSize();
+        if (actual_record_size != kTupleSize) {
+            printf("Warning: Requested tuple_size=%lu but actual record size=%lu\n",
+                   kTupleSize, actual_record_size);
+        } else {
+            printf("Node %d: Schema created successfully, record size=%lu bytes\n",
+                   ThisNodeID, actual_record_size);
+        }
 
         // Create table with primary index
         table_ = new Table();
@@ -500,27 +535,59 @@ public:
     }
 
 private:
+    // Hash function to distribute frequent keys across different pages
+    // This ensures that zipfian hot keys (0, 1, 2, ...) are not clustered on the same page
+    static uint64_t HashKeyForAllocation(uint64_t key) {
+        // Use a good hash function to distribute keys
+        // This is a simple but effective hash: multiply by a large prime and mix bits
+        key ^= key >> 33;
+        key *= 0xff51afd7ed558ccdULL;
+        key ^= key >> 33;
+        key *= 0xc4ceb9fe1a85ec53ULL;
+        key ^= key >> 33;
+        return key;
+    }
+    
     void CreateTuplesWithIndex() {
         // Distribute tuple creation across all compute nodes
         auto *rdma_mg = RDMA_Manager::Get_Instance();
         int compute_num = rdma_mg->GetComputeNodeNum();
         int my_compute_rank = ThisNodeID / 2; // Compute nodes are 0, 2, 4, ...
-
+        
         uint64_t tuples_per_node = kNumTuples / compute_num;
         uint64_t start_key = tuples_per_node * my_compute_rank;
         uint64_t end_key = (my_compute_rank == compute_num - 1) ? kNumTuples : (start_key + tuples_per_node);
-
+        
         printf("Node %d: Creating tuples %lu to %lu (total %lu)\n",
                ThisNodeID, start_key, end_key - 1, end_key - start_key);
-
+        
+        // For zipfian workloads, we need to distribute frequent keys across different pages
+        // Create a vector of keys and sort by hash value to interleave allocation
+        std::vector<uint64_t> keys_to_allocate;
+        keys_to_allocate.reserve(end_key - start_key);
         for (uint64_t key = start_key; key < end_key; key++) {
+            keys_to_allocate.push_back(key);
+        }
+        
+        // Sort by hash value to distribute frequent keys across different pages
+        // This ensures keys 0, 1, 2 (most frequent in zipfian) are allocated to different pages
+        std::sort(keys_to_allocate.begin(), keys_to_allocate.end(),
+                  [](uint64_t a, uint64_t b) {
+                      return HashKeyForAllocation(a) < HashKeyForAllocation(b);
+                  });
+        
+        printf("Node %d: Allocating tuples in hashed order to distribute frequent keys across pages\n",
+               ThisNodeID);
+        
+        uint64_t allocated_count = 0;
+        for (uint64_t key : keys_to_allocate) {
             char tuple_buffer[schema_->GetRecordTotalSize()];
             memset(tuple_buffer, 0, schema_->GetRecordTotalSize());
 
             // Set key and initial value
             *(uint64_t *) (tuple_buffer) = key;
             *(uint64_t *) (tuple_buffer + 8) = key * 2; // Initial value
-            // Padding bytes (496) are already zeroed by memset
+            // Padding bytes are already zeroed by memset
 
             GlobalAddress tuple_gaddr;
             Cache::Handle *handle;
@@ -556,8 +623,9 @@ private:
             // Unlock page
             ddsm_->SELCC_Exclusive_UnLock(TOPAGE(tuple_gaddr), handle);
 
-            if ((key - start_key) % 1000000 == 0 && key > start_key) {
-                printf("Node %d: Initialized %lu / %lu tuples\n", ThisNodeID, key - start_key, end_key - start_key);
+            allocated_count++;
+            if (allocated_count % 1000000 == 0 && allocated_count > 0) {
+                printf("Node %d: Initialized %lu / %lu tuples\n", ThisNodeID, allocated_count, end_key - start_key);
             }
         }
     }
@@ -1144,8 +1212,7 @@ private:
             // Use double-checked locking to avoid conflict
             // Check if delta section is stale and pull updates if needed
             // Calculate offset from data_ in the delta section
-            long offset = prev_delta.offset - delta_section->seg_addr_.offset - STRUCT_OFFSET(
-                              DeltaSection, local_addr_);
+            long offset = prev_delta.offset - delta_section->seg_addr_.offset - STRUCT_OFFSET(DeltaSection, local_addr_);
             
             // Sequential consistency fence ensures we see the latest state before checking validity/danger
             // This prevents reordering between multiple checks that need to be consistent
@@ -1177,7 +1244,7 @@ private:
             //     }
             // }
             {   
-                // std::shared_lock<RWSpinMutex> slck(delta_section->shadow_mtx_);
+                // std::shared_lock<std::shared_mutex> slck(delta_section->shadow_mtx_);
                 if (delta_section->inner_section->is_empty_ || 
                     !delta_section->isOffsetValid(offset, meta.prev_delta_epoch_)) {
                     // slck.unlock();
@@ -1538,11 +1605,24 @@ void ParseArgs(int argc, char *argv[]) {
         } else if (strcmp(argv[i], "--tcp_port") == 0 && i + 1 < argc) {
             tcp_port = atoi(argv[++i]);
         } else if (strcmp(argv[i], "--num_tuples") == 0 && i + 1 < argc) {
-            kNumTuples = atol(argv[++i]);
+            uint64_t num_tuples_arg = atol(argv[++i]);
+            // Special case: num_tuples=0 means "don't treat as explicitly set"
+            // This allows automatic adjustment based on tuple_size
+            if (num_tuples_arg == 0) {
+                kNumTuplesExplicitlySet = false;
+                // Use baseline default - will be adjusted if tuple_size changes
+                kNumTuples = kBaselineNumTuples;
+                printf("Note: --num_tuples 0 specified, enabling auto-adjustment based on tuple_size\n");
+            } else {
+                kNumTuples = num_tuples_arg;
+                kNumTuplesExplicitlySet = true;
+            }
         } else if (strcmp(argv[i], "--duration") == 0 && i + 1 < argc) {
             kBenchmarkDurationSec = atoi(argv[++i]);
         } else if (strcmp(argv[i], "--cache_size") == 0 && i + 1 < argc) {
             kCacheSize = atol(argv[++i]);
+        } else if (strcmp(argv[i], "--tuple_size") == 0 && i + 1 < argc) {
+            kTupleSize = atol(argv[++i]);
         } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             fprintf(stderr,
                     "MVCC Storage Benchmark\n\n"
@@ -1559,7 +1639,15 @@ void ParseArgs(int argc, char *argv[]) {
                     "Storage Strategy:\n"
                     "  --storage_type 1|2|3       1=Delta Section, 2=Version Chain, 3=Delta In GCL (default: 1)\n\n"
                     "Benchmark Configuration:\n"
-                    "  --num_tuples N             Number of tuples (default: 100000)\n"
+                    "  --num_tuples N             Number of tuples (default: 10000000)\n"
+                    "                             Special: --num_tuples 0 means 'not explicitly set',\n"
+                    "                             allowing auto-adjustment based on tuple_size\n"
+                    "                             Note: If tuple_size is changed and num_tuples is not\n"
+                    "                             explicitly set (or set to 0), num_tuples will be\n"
+                    "                             auto-adjusted to maintain constant database size (5.12 GB baseline)\n"
+                    "  --tuple_size N             Tuple size in bytes including meta (default: 512)\n"
+                    "                             When changed, num_tuples is auto-adjusted to maintain\n"
+                    "                             constant total database size unless --num_tuples is set\n"
                     "  --snapshot_lag N           Max snapshot lag (default: 10000)\n"
                     "  --warmup_duration N        Warmup duration in seconds (same as normal run, default: 10)\n"
                     "  --duration N               Benchmark duration in seconds (default: 30)\n"
@@ -1576,6 +1664,24 @@ void ParseArgs(int argc, char *argv[]) {
             fflush(stderr);
             exit(1);
         }
+    }
+
+    // Adjust num_tuples to maintain constant total database size when tuple_size changes
+    // Total size = baseline: 512 bytes * 10M tuples = 5.12 GB
+    if (!kNumTuplesExplicitlySet && kTupleSize != kBaselineTupleSize) {
+        // Calculate new num_tuples to maintain same total database size
+        uint64_t new_num_tuples = kBaselineTotalSize / kTupleSize;
+        if (new_num_tuples == 0) {
+            new_num_tuples = 1; // Ensure at least 1 tuple
+        }
+        printf("Adjusting num_tuples to maintain constant database size:\n");
+        printf("  Baseline: %lu bytes * %lu tuples = %.2f GB\n",
+               kBaselineTupleSize, kBaselineNumTuples,
+               (double)kBaselineTotalSize / (1024.0 * 1024.0 * 1024.0));
+        printf("  New: %lu bytes * %lu tuples = %.2f GB\n",
+               kTupleSize, new_num_tuples,
+               (double)(kTupleSize * new_num_tuples) / (1024.0 * 1024.0 * 1024.0));
+        kNumTuples = new_num_tuples;
     }
 
     printf("Configuration:\n");
@@ -1604,6 +1710,7 @@ void ParseArgs(int argc, char *argv[]) {
     printf("  Warmup Duration: %d seconds\n", kWarmupDurationSec);
     printf("  Node ID: %d\n", ThisNodeID);
     printf("  Num Tuples: %lu\n", kNumTuples);
+    printf("  Tuple Size: %lu bytes\n", kTupleSize);
     printf("  Benchmark Duration: %d seconds\n", kBenchmarkDurationSec);
     printf("  Cache Size: %lu GB\n", kCacheSize);
 }
@@ -2001,6 +2108,7 @@ int main(int argc, char *argv[]) {
     }
     printf("\n");
     printf("  Num Tuples: %lu\n", kNumTuples);
+    printf("  Tuple Size: %lu bytes\n", kTupleSize);
     printf("  Snapshot Lag: %lu (randomized)\n", kSnapshotLag);
     printf("  Warmup Duration: %d seconds\n", kWarmupDurationSec);
     printf("  Benchmark Duration: %d seconds\n", kBenchmarkDurationSec);

@@ -43,7 +43,24 @@ DSMEngine::Memory_Node_Keeper::Memory_Node_Keeper(bool use_sub_compaction,
   myfile.open(config_file_name, std::ios_base::in);
   std::string space_delimiter = " ";
 
-  std::getline(myfile, connection_conf);
+  // Helper function to skip comments and empty lines
+  auto skip_comments_and_empty = [&](std::string &line) -> bool {
+    while (std::getline(myfile, line)) {
+      // Find first non-whitespace character
+      auto p = line.find_first_not_of(" \t\r\n");
+      // Skip if line is empty or starts with '#'
+      if (p != std::string::npos && line[p] != '#') {
+        return true; // Found valid line
+      }
+    }
+    return false; // End of file
+  };
+
+  // Parse compute nodes (first non-comment, non-empty line)
+  if (!skip_comments_and_empty(connection_conf)) {
+    fprintf(stderr, "Error: No compute nodes found in config file\n");
+    assert(false);
+  }
   uint8_t i = 0;
   uint8_t id;
   while ((pos = connection_conf.find(space_delimiter)) != std::string::npos) {
@@ -54,8 +71,13 @@ DSMEngine::Memory_Node_Keeper::Memory_Node_Keeper(bool use_sub_compaction,
   }
   rdma_mg->compute_nodes.insert({2 * i, connection_conf});
   assert((rdma_mg->node_id - 1) / 2 < rdma_mg->GetComputeNodeNum());
+  
+  // Parse memory nodes (next non-comment, non-empty line)
   i = 0;
-  std::getline(myfile, connection_conf);
+  if (!skip_comments_and_empty(connection_conf)) {
+    fprintf(stderr, "Error: No memory nodes found in config file\n");
+    assert(false);
+  }
   while ((pos = connection_conf.find(space_delimiter)) != std::string::npos) {
     id = 2 * i + 1;
     rdma_mg->memory_nodes.insert({id, connection_conf.substr(0, pos)});
@@ -384,6 +406,12 @@ void Memory_Node_Keeper::server_communication_thread(std::string client_ip,
       rdma_mg->post_receive<RDMA_Request>(&recv_mr[buffer_position],
                                           compute_node_id, client_ip);
       sync_option_handler(receive_msg_buf, client_ip, compute_node_id);
+#ifdef USE_SNAPSHOT_MANAGER
+    } else if (receive_msg_buf->command == snapshot_range_request) {
+      rdma_mg->post_receive<RDMA_Request>(&recv_mr[buffer_position],
+                                          compute_node_id, client_ip);
+      snapshot_range_request_handler(receive_msg_buf, client_ip, compute_node_id);
+#endif
     } else if (receive_msg_buf->command == put_qp_info) {
       //          printf("Put QP information for
       //          %u\n",receive_msg_buf->content.qp_config_xcompute.node_id_pairs);
@@ -781,6 +809,26 @@ void Memory_Node_Keeper::sync_option_handler(RDMA_Request *request,
   delete request;
 }
 
+#ifdef USE_SNAPSHOT_MANAGER
+void Memory_Node_Keeper::snapshot_range_request_handler(RDMA_Request *request,
+                                                        std::string &client_ip,
+                                                        uint8_t target_node_id) {
+  ibv_mr send_mr;
+  rdma_mg->Allocate_Local_RDMA_Slot(send_mr, Message);
+  RDMA_Reply *send_pointer = reinterpret_cast<RDMA_Reply *>(send_mr.addr);
+  *send_pointer = {};
+  send_pointer->content.snapshot_range_reply =
+      rdma_mg->HandleSnapshotSyncRequest(request->content.snapshot_range_req);
+  send_pointer->received = true;
+
+  rdma_mg->RDMA_Write(request->buffer, request->rkey, &send_mr,
+                      sizeof(RDMA_Reply), client_ip, IBV_SEND_SIGNALED, 1,
+                      target_node_id);
+  rdma_mg->Deallocate_Local_RDMA_Slot(send_mr.addr, Message);
+  delete request;
+}
+#endif
+
 void Memory_Node_Keeper::Get_qp_info_handler(RDMA_Request *request,
                                              std::string &client_ip,
                                              uint8_t target_node_id) {
@@ -835,10 +883,12 @@ void DSMEngine::Memory_Node_Keeper::broadcastReplicaMetadata(
 
   // Create value: combined format "base_ptr:rkey"
   char value[64];
-  snprintf(value, sizeof(value), "%lu:%u", base_ptr, rkey);
-
+  size_t value_len = snprintf(value, sizeof(value), "%lu:%u", base_ptr, rkey);
+  
   // Use RDMA_Manager's memcached interface
-  rdma_mg->memcachedSet(key, strlen(key), value, strlen(value));
+  // Set with actual string length (not sizeof buffer) - this ensures memcachedGet
+  // will return the same size when retrieving
+  rdma_mg->memcachedSet(key, strlen(key), value, value_len);
   // printf("Broadcasted metadata: logical_id=%u, physical_id=%u, base_ptr=%lu, "
   //        "rkey=%u\n",
   //        logical_id, physical_id, base_ptr, rkey);

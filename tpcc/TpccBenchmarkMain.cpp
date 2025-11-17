@@ -96,6 +96,7 @@ int main(int argc, char *argv[]) {
     // warm up
     INIT_PROFILE_TIME(gThreadCount);
     TpccExecutor executor(&redirector, &storage_manager, gThreadCount, false);
+    executor.EnableProgressReporting(true);
     executor.Start();
     REPORT_PROFILE_TIME(gThreadCount);
   }
@@ -107,6 +108,7 @@ int main(int argc, char *argv[]) {
     INIT_PROFILE_TIME(gThreadCount);
     TpccExecutor executor(&redirector1, &storage_manager, gThreadCount, LOGGING,
                           enable_latency_recording);
+    executor.EnableProgressReporting(true);
 
     // Set transaction type names for latency tracking (if enabled)
     if (enable_latency_recording) {

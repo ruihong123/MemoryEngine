@@ -7,8 +7,8 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CXX_STANDARD 17)
 
 # Toggle between custom lock implementations and std:: mutex-based versions.
-option(USE_STD_LOCKS "Use std::mutex-based locks instead of custom user-space locks" ON)
-set(USE_STD_LOCKS ON)
+option(USE_STD_LOCKS "Use std::mutex-based locks instead of custom user-space locks" OFF)
+# set(USE_STD_LOCKS ON)
 if(USE_STD_LOCKS)
     add_definitions(-DUSE_STD_LOCKS)
 endif()

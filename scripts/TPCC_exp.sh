@@ -126,6 +126,10 @@ launch () {
   echo "start tpcc for dist_ratio ${dist_ratio}"
   output_file="${output_dir}/${dist_ratio}_tpcc.log"
   memory_file="${output_dir}/Memory.log"
+  tpcc_args="${compute_ARGS}"
+  if [[ " ${tpcc_args} " != *" -cs"* ]]; then
+    tpcc_args="${tpcc_args} -cs${cache_mem_size}"
+  fi
   for ((i=0;i<${#memory_nodes[@]};i++)); do
         memory=${memory_nodes[$i]}
         script_memory="ulimit -c unlimited && cd ${bin_dir} && ./memory_server_tpcc $port $(($remote_mem_size)) $((2*$i +1)) > ${output_file} 2>&1"
@@ -134,7 +138,7 @@ launch () {
         ssh ${ssh_opts} ${memory} " $script_memory" &
         sleep 1
   done
-  script_compute="cd ${bin_dir} && ./tpcc ${compute_ARGS} -d${dist_ratio}"
+  script_compute="cd ${bin_dir} && ./tpcc ${tpcc_args} -d${dist_ratio}"
   echo "start master: ssh ${ssh_opts} ${master_host} '$script_compute -sn$master_host  -nid0 | tee -a ${output_file} "
   ssh ${ssh_opts} ${master_host} "echo '$core_dump_dir/core$master_host' | sudo tee /proc/sys/kernel/core_pattern"
 
@@ -168,16 +172,16 @@ run_tpcc () {
 vary_query_ratio () {
   #read_ratios=(0 30 50 70 90 100)
   thread_number=(8)
-  WarehouseNum=(80 256)
+  WarehouseNum=(40)
   FREQUENCY_DELIVERY=(100 0 0 0 0 1 33 0 0)
   FREQUENCY_PAYMENT=(0 100 0 0 0 10 33 0 50)
   FREQUENCY_NEW_ORDER=(0 0 100 0 0 10 33 0 50)
   FREQUENCY_ORDER_STATUS=(0 0 0 100 0 1 0 50 0)
   FREQUENCY_STOCK_LEVEL=(0 0 0 0 100 1 0 50 0)
   for ware_num in ${WarehouseNum[@]}; do
-    for qr_index in 5; do
+    for qr_index in 0 1 2 3 4 5; do
       for thread_n in ${thread_number[@]}; do
-        compute_ARGS="-p$port -sf$ware_num -sf1 -c$thread_n -rde${FREQUENCY_DELIVERY[$qr_index]} -rpa${FREQUENCY_PAYMENT[$qr_index]} -rne${FREQUENCY_NEW_ORDER[$qr_index]} -ror${FREQUENCY_ORDER_STATUS[$qr_index]} -rst${FREQUENCY_STOCK_LEVEL[$qr_index]} -t4000000 -f${conf_file} -lat"
+    compute_ARGS="-p$port -sf$ware_num -sf1 -c$thread_n -rde${FREQUENCY_DELIVERY[$qr_index]} -rpa${FREQUENCY_PAYMENT[$qr_index]} -rne${FREQUENCY_NEW_ORDER[$qr_index]} -ror${FREQUENCY_ORDER_STATUS[$qr_index]} -rst${FREQUENCY_STOCK_LEVEL[$qr_index]} -t4000000 -f${conf_file} -lat"
         run_tpcc
       done
     done

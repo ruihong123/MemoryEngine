@@ -16,6 +16,8 @@
 #include <stdexcept>
 #include <thread>
 #include <vector>
+#include <cerrno>
+#include <cstring>
 // #include "port/port_posix.h"
 // #include "DSMEngine/env.h"
 #ifdef RDMAPROCESSANALYSIS
@@ -60,6 +62,50 @@ namespace DSMEngine {
     thread_local int RDMA_Manager::thread_id = 0;
     thread_local int RDMA_Manager::qp_inc_ticket = 0;
     thread_local uint64_t RDMA_Manager::round_robin_cur = 0;
+
+#ifdef USE_SNAPSHOT_MANAGER
+    namespace {
+        constexpr uint16_t kSnapshotManagerNodeId = 1;
+
+        struct SnapshotComputeState {
+            uint64_t reported_local_ts_next = 0;
+        };
+
+        struct SnapshotManagerState {
+            std::map<uint16_t, SnapshotComputeState> compute_states;
+            uint64_t global_read_snapshot = 0;
+            uint64_t global_forced_ts_next = 0;
+        };
+
+        RWSpinMutex snapshot_manager_mutex;
+        SnapshotManagerState snapshot_manager_state;
+
+        void RecomputeSnapshotStateLocked(SnapshotManagerState& state) {
+            if (state.compute_states.empty()) {
+                state.global_read_snapshot = 0;
+                state.global_forced_ts_next = 0;
+                return;
+            }
+            uint64_t min_report = std::numeric_limits<uint64_t>::max();
+            uint64_t max_report = 0;
+            bool have_value = false;
+            for (const auto& entry : state.compute_states) {
+                uint64_t reported = entry.second.reported_local_ts_next;
+                have_value = true;
+                if (reported < min_report) {
+                    min_report = reported;
+                }
+                if (reported > max_report) {
+                    max_report = reported;
+                }
+            }
+            if (have_value) {
+                state.global_read_snapshot = min_report;
+                state.global_forced_ts_next = max_report;
+            }
+        }
+    } // namespace
+#endif
 
     // #endif
 
@@ -355,6 +401,63 @@ namespace DSMEngine {
         return *(uint64_t *) local_cas_buffer->addr;
     }
 
+#ifdef USE_SNAPSHOT_MANAGER
+    uint64_t RDMA_Manager::SnapshotManagerFetchAdd(uint64_t add_value) {
+        assert(timestamp_oracle != nullptr);
+        auto* oracle_value = reinterpret_cast<std::atomic<uint64_t>*>(timestamp_oracle->addr);
+        return oracle_value->fetch_add(add_value, std::memory_order_acq_rel);
+    }
+
+    bool RDMA_Manager::SyncSnapshotInfo(uint64_t reported_local_ts_next, SnapshotRangeReply* reply) {
+        ibv_mr send_mr = {};
+        Allocate_Local_RDMA_Slot(send_mr, Message);
+        auto* request_pointer = reinterpret_cast<RDMA_Request*>(send_mr.addr);
+        *request_pointer = {};
+        request_pointer->command = snapshot_range_request;
+        request_pointer->content.snapshot_range_req.reported_local_ts_next = reported_local_ts_next;
+        request_pointer->content.snapshot_range_req.node_id = node_id;
+
+        ibv_mr receive_mr = {};
+        Allocate_Local_RDMA_Slot(receive_mr, Message);
+        auto* reply_pointer = reinterpret_cast<RDMA_Reply*>(receive_mr.addr);
+        *reply_pointer = {};
+        reply_pointer->received = false;
+
+        request_pointer->buffer = receive_mr.addr;
+        request_pointer->rkey = receive_mr.rkey;
+
+        post_send<RDMA_Request>(&send_mr, kSnapshotManagerNodeId, std::string("main"));
+        ibv_wc wc = {};
+        bool success = poll_completion(&wc, 1, std::string("main"), true, kSnapshotManagerNodeId) == 0;
+        if (!success) {
+            Deallocate_Local_RDMA_Slot(send_mr.addr, Message);
+            Deallocate_Local_RDMA_Slot(receive_mr.addr, Message);
+            return false;
+        }
+
+        poll_reply_buffer(reply_pointer);
+        success = reply_pointer->received;
+        if (success && reply != nullptr) {
+            *reply = reply_pointer->content.snapshot_range_reply;
+        }
+
+        Deallocate_Local_RDMA_Slot(send_mr.addr, Message);
+        Deallocate_Local_RDMA_Slot(receive_mr.addr, Message);
+        return success;
+    }
+
+    SnapshotRangeReply RDMA_Manager::HandleSnapshotSyncRequest(const SnapshotRangeRequest& request) {
+        std::lock_guard<RWSpinMutex> guard(snapshot_manager_mutex);
+        auto& compute_state = snapshot_manager_state.compute_states[request.node_id];
+        compute_state.reported_local_ts_next = request.reported_local_ts_next;
+        RecomputeSnapshotStateLocked(snapshot_manager_state);
+        SnapshotRangeReply reply{};
+        reply.global_read_snapshot = snapshot_manager_state.global_read_snapshot;
+        reply.forced_ts_next = snapshot_manager_state.global_forced_ts_next;
+        return reply;
+    }
+#endif
+
     uint64_t RDMA_Manager::GetTimestamp() {
         ibv_mr *local_cas_buffer = Get_local_CAS_mr();
         // THis RDMA read may have some lag with the RDMA faa, BUT this should be
@@ -498,9 +601,23 @@ namespace DSMEngine {
                 if (servername) {
                     /* Client mode. Initiate connection to remote */
                     if ((tmp = connect(sockfd, iterator->ai_addr, iterator->ai_addrlen))) {
-                        fprintf(stdout, "failed connect \n");
+                        int saved_errno = errno;
+                        char host[NI_MAXHOST] = {};
+                        char serv[NI_MAXSERV] = {};
+                        getnameinfo(iterator->ai_addr, iterator->ai_addrlen, host, sizeof(host), serv, sizeof(serv),
+                                    NI_NUMERICHOST | NI_NUMERICSERV);
+                        fprintf(stderr,
+                                "connect() to %s (resolved %s:%s) failed: errno=%d (%s)\n",
+                                servername,
+                                host[0] ? host : "unknown",
+                                serv[0] ? serv : service,
+                                saved_errno,
+                                std::strerror(saved_errno));
+                        fflush(stderr);
                         close(sockfd);
                         sockfd = -1;
+                        assert(false);
+                        exit(1);
                     }
                     printf("Success to connect to %s\n", servername);
                 } else {
@@ -1018,8 +1135,24 @@ namespace DSMEngine {
         myfile.open(config_file_name, std::ios_base::in);
         std::string space_delimiter = " ";
 
-        // Parse compute nodes (first line)
-        std::getline(myfile, connection_conf);
+        // Helper function to skip comments and empty lines
+        auto skip_comments_and_empty = [&](std::string &line) -> bool {
+            while (std::getline(myfile, line)) {
+                // Find first non-whitespace character
+                auto p = line.find_first_not_of(" \t\r\n");
+                // Skip if line is empty or starts with '#'
+                if (p != std::string::npos && line[p] != '#') {
+                    return true; // Found valid line
+                }
+            }
+            return false; // End of file
+        };
+
+        // Parse compute nodes (first non-comment, non-empty line)
+        if (!skip_comments_and_empty(connection_conf)) {
+            fprintf(stderr, "Error: No compute nodes found in config file\n");
+            assert(false);
+        }
         uint16_t i = 0;
         uint16_t id;
         while ((pos = connection_conf.find(space_delimiter)) != std::string::npos) {
@@ -1031,9 +1164,12 @@ namespace DSMEngine {
         compute_nodes.insert({2 * i, connection_conf});
         assert((node_id - 1) / 2 < compute_nodes.size());
 
-        // Parse memory nodes (second line)
+        // Parse memory nodes (next non-comment, non-empty line)
         i = 0;
-        std::getline(myfile, connection_conf);
+        if (!skip_comments_and_empty(connection_conf)) {
+            fprintf(stderr, "Error: No memory nodes found in config file\n");
+            assert(false);
+        }
         while ((pos = connection_conf.find(space_delimiter)) != std::string::npos) {
             id = 2 * i + 1;
             memory_nodes.insert({id, connection_conf.substr(0, pos)});
@@ -2821,8 +2957,8 @@ namespace DSMEngine {
         memset(&attr, 0, sizeof(attr));
         attr.qp_state = IBV_QPS_RTS;
         attr.timeout = 0xe;
-        attr.retry_cnt = 7;
-        attr.rnr_retry = 7;
+        attr.retry_cnt = 5;
+        attr.rnr_retry = 5;
         attr.sq_psn = 0;
         attr.max_rd_atomic =
                 ATOMIC_OUTSTANDING_SIZE; // allow RDMA atomic andn RDMA read batched.
@@ -8369,6 +8505,7 @@ namespace DSMEngine {
             default:
                 assert(false);
         }
+        auto* bit_map_debug = Bitmap_map->at(target_region_id);
         // If the Remote buffer is empty, register one from the remote memory.
         //  remote_mr = new ibv_mr;
         if (Bitmap_map->at(target_region_id)->empty()) {
@@ -8586,7 +8723,7 @@ namespace DSMEngine {
             return;
         } else {
             ibv_mr *mr_to_allocate = new ibv_mr();
-            char *buff = new char[chunk_size];
+            char *buff;
             Local_Memory_Register(&buff, &mr_to_allocate,
                                   name_to_allocated_size.at(pool_name) == 0
                                       ? 1024 * 1024 * 1024
@@ -10073,10 +10210,12 @@ namespace DSMEngine {
                                  logical_id, phys_reg.phys_id);
 
                         size_t value_size = 0;
+                        // Get value with actual size (matches what was set in broadcastReplicaMetadata)
                         char *value = memcachedGet(key, strlen(key), &value_size);
 
                         if (value != nullptr && value_size > 0) {
                             // Parse combined metadata format: "base_ptr:rkey"
+                            // Use the actual value_size returned by memcachedGet, not a fixed size
                             std::string value_str(value, value_size);
                             size_t colon_pos = value_str.find(':');
 
@@ -10207,8 +10346,10 @@ namespace DSMEngine {
                 memcached_server_list_append(servers, addr.c_str(), std::stoi(port), &rc);
         rc = memcached_server_push(memc, servers);
         if (rc != MEMCACHED_SUCCESS) {
+            
             fprintf(stderr, "Couldn't add memcached server:%s\n",
                     memcached_strerror(memc, rc));
+            assert(false);
             return false;
         }
         memcached_behavior_set(memc, MEMCACHED_BEHAVIOR_BINARY_PROTOCOL, 1);
@@ -10227,6 +10368,7 @@ namespace DSMEngine {
     void RDMA_Manager::memcachedSet(const char *key, uint32_t klen, const char *val,
                                     uint32_t vlen) {
         if (!memc) {
+            assert(false);
             return;
         }
 
@@ -10234,6 +10376,7 @@ namespace DSMEngine {
         memcached_return rc =
                 memcached_set(memc, key, klen, val, vlen, (time_t) 0, (uint32_t) 0);
         if (rc != MEMCACHED_SUCCESS) {
+            assert(false);
             fprintf(stderr, "Failed to set memcached key: %s\n",
                     memcached_strerror(memc, rc));
         }
@@ -10245,7 +10388,7 @@ namespace DSMEngine {
             return nullptr;
         }
 
-        size_t l;
+        size_t l;  // Actual size returned by memcached_get (matches the size that was set)
         char *res;
         uint32_t flags;
         memcached_return rc;
@@ -10256,6 +10399,8 @@ namespace DSMEngine {
                 std::lock_guard<std::mutex> lock(memc_mutex);
                 res = memcached_get(memc, key, klen, &l, &flags, &rc);
                 if (rc == MEMCACHED_SUCCESS) {
+                    // Return the actual size of the value (not a fixed size)
+                    // This size matches exactly what was set via memcachedSet
                     if (v_size != nullptr) {
                         *v_size = l;
                     }

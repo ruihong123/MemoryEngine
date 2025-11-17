@@ -211,6 +211,7 @@ namespace DSMEngine
         pull_delta_section,
         push_least_snapshot,
         pull_least_snapshot,
+        snapshot_range_request,
         tuple_read_2pc,
         prepare_2pc,
         commit_2pc,
@@ -269,6 +270,18 @@ namespace DSMEngine
     {
     };
 
+    struct SnapshotRangeRequest
+    {
+        uint64_t reported_local_ts_next;
+        uint16_t node_id;
+    };
+
+    struct SnapshotRangeReply
+    {
+        uint64_t global_read_snapshot;
+        uint64_t forced_ts_next;
+    };
+
     struct MRRequest
     {
         size_t mem_size;
@@ -299,6 +312,7 @@ namespace DSMEngine
         PullDS pull_ds;
         PushSP snapshot_push;
         PullSP snapshot_pull;
+        SnapshotRangeRequest snapshot_range_req;
         Tuple_info tuple_info;
         Prepare prepare;
         Commit commit;
@@ -311,6 +325,7 @@ namespace DSMEngine
         Registered_qp_config qp_config;
         Registered_qp_config_xcompute qp_config_xcompute;
         install_versionedit ive;
+        SnapshotRangeReply snapshot_range_reply;
     };
 
     struct RDMA_Request
@@ -1195,6 +1210,12 @@ namespace DSMEngine
         void Set_message_handling_func(std::function<void(void*)>&& func, Registered_F_type func_name);
 
         void register_message_handling_thread(uint32_t handler_id, Registered_F_type func_name);
+
+#ifdef USE_SNAPSHOT_MANAGER
+        bool SyncSnapshotInfo(uint64_t reported_local_ts_next, SnapshotRangeReply* reply);
+        SnapshotRangeReply HandleSnapshotSyncRequest(const SnapshotRangeRequest& request);
+        uint64_t SnapshotManagerFetchAdd(uint64_t add_value);
+#endif
 
         void join_all_handling_thread();
 

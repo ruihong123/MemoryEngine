@@ -45,6 +45,7 @@ run() {
     : ${workload_type:=0}
     : ${zipfian_theta:=0.99}
     : ${num_tuples:=100000}
+    : ${tuple_size:=512}
     : ${snapshot_lag:=10000}
     : ${warmup_duration:=10}
     : ${duration:=30}
@@ -54,7 +55,7 @@ run() {
     echo "result_file=$result_file"
     echo "nodes=$node, threads=$threads, read_ratio=$read_ratio"
     echo "storage_type=$storage_type, workload_type=$workload_type"
-    echo "num_tuples=$num_tuples, snapshot_lag=$snapshot_lag"
+    echo "num_tuples=$num_tuples, tuple_size=$tuple_size, snapshot_lag=$snapshot_lag"
     echo "mixed_workload=$mixed_workload, zipfian_theta=$zipfian_theta"
     echo "duration=$duration"
     echo "========================================="
@@ -221,6 +222,7 @@ run() {
 --workload_type $workload_type \
 --zipfian_theta $zipfian_theta \
 --num_tuples $num_tuples \
+--tuple_size $tuple_size \
 --snapshot_lag $snapshot_lag \
 --warmup_duration $warmup_duration \
 --duration $duration \
@@ -236,6 +238,7 @@ run() {
 --workload_type $workload_type \
 --zipfian_theta $zipfian_theta \
 --num_tuples $num_tuples \
+--tuple_size $tuple_size \
 --snapshot_lag $snapshot_lag \
 --warmup_duration $warmup_duration \
 --duration $duration \
@@ -245,7 +248,7 @@ run() {
       echo "$cmd"
       
       # Create unique log file name for this run (includes parameter values)
-      local_log_file="${result_file}.node${i}.n${node}.t${threads}.r${read_ratio}.st${storage_type}.wt${workload_type}.zip${zipfian_theta}.snap${snapshot_lag}"
+      local_log_file="${result_file}.node${i}.n${node}.t${threads}.r${read_ratio}.st${storage_type}.wt${workload_type}.zip${zipfian_theta}.tsz${tuple_size}.snap${snapshot_lag}"
       
       # Execute on remote node with both remote log and copy the output back
       # For node 0 (master), also show output in terminal
@@ -300,6 +303,7 @@ run() {
 #   workload_type_range - Access pattern: 0=Uniform, 1=Zipfian (default: "0")
 #   zipfian_theta_range - Zipfian theta values (default: "0.99")
 #   num_tuples          - Number of tuples (default: 100000)
+#   tuple_size_range    - Tuple size values in bytes (default: "512")
 #   snapshot_lag_range  - Snapshot lag values (default: "10000")
 #   warmup_duration     - Warmup seconds (default: 10)
 #   duration            - Benchmark duration seconds (default: 30)
@@ -321,18 +325,19 @@ run_mvcc_benchmark() {
   fi
   
   : ${node_range:="8"}
-  : ${threads_range:="1 2 4 8 16"}
+  : ${threads_range:="16"}
   
   # Workload mode configuration
   : ${mixed_workload:=1}           # 1=mixed read/write, 0=separate writers/readers
-  : ${read_ratio_range:="0 50"}      # For mixed_workload=1: read percentage
+  : ${read_ratio_range:="50 95 0"}      # For mixed_workload=1: read percentage
   : ${writers:=1}                  # For mixed_workload=0: number of writer threads
   : ${readers:=1}                  # For mixed_workload=0: number of reader threads
   
-  : ${storage_type_range:="1 2 3"}
-  : ${workload_type_range:="1"}
+  : ${storage_type_range:="1 2"}
+  : ${workload_type_range:="0 1"}
   : ${zipfian_theta_range:="0.99"}
-  : ${num_tuples:=10000000}
+  : ${num_tuples:=0}
+  : ${tuple_size_range:="64 256 512 1024"}
   : ${snapshot_lag_range:="100"} # 100000 (uniform) OR 100 (zipfian)
   : ${warmup_duration:=10}
   : ${duration:=10}
@@ -362,6 +367,7 @@ run_mvcc_benchmark() {
   echo "  workload_type_range: $workload_type_range"
   echo "  zipfian_theta_range: $zipfian_theta_range"
   echo "  num_tuples: $num_tuples"
+  echo "  tuple_size_range: $tuple_size_range"
   echo "  snapshot_lag_range: $snapshot_lag_range"
   echo "  warmup_duration: $warmup_duration"
   echo "  duration: $duration"
@@ -378,11 +384,14 @@ run_mvcc_benchmark() {
       do
         for zipfian_theta in $zipfian_theta_range
         do
-          for snapshot_lag in $snapshot_lag_range
+          for tuple_size in $tuple_size_range
           do
-            for threads in $threads_range
+            for snapshot_lag in $snapshot_lag_range
             do
-                run
+              for threads in $threads_range
+              do
+                  run
+                done
               done
             done
           done

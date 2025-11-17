@@ -5,6 +5,9 @@
 #include <cstdint>
 #include <queue>
 #include <atomic>
+#include <thread>
+#include <mutex>
+#include <chrono>
 #include "storage/rdma.h"
 //#include "../Meta/MetaTypes.h"
 
@@ -17,14 +20,22 @@ namespace DSMEngine{
                 if (!rdma_mg){
                     rdma_mg = RDMA_Manager::Get_Instance();
                 }
-
-
+#ifdef USE_SNAPSHOT_MANAGER
+                EnsureSnapshotThreadStarted();
+                return local_ts_next.fetch_add(1, std::memory_order_acq_rel);
+#else
 				return rdma_mg->FetchAddNextTimestamp(1);
+#endif
 			}
             static uint64_t GetMonotoneTimestamp(){
                 if (!rdma_mg){
                     rdma_mg = RDMA_Manager::Get_Instance();
                 }
+#ifdef USE_SNAPSHOT_MANAGER
+                EnsureSnapshotThreadStarted();
+                // return global_read_snapshot.load(std::memory_order_acquire);
+                return local_ts_next.load(std::memory_order_relaxed);
+#else
 #ifdef BETTER_TS_ACQUIRE
                 // this optimization can reduce unnecessary RDMA read over the network.
                 uint64_t to_ret = 0;
@@ -43,6 +54,7 @@ namespace DSMEngine{
 
 #else
                 return rdma_mg->GetTimestamp();
+#endif
 #endif
             }
 
@@ -90,6 +102,22 @@ namespace DSMEngine{
             static GlobalAddress time_stamp_gaddr;
             static uint64_t latest_snapshot;
             static RWSpinMutex time_stamp_mtx;
+#ifdef USE_SNAPSHOT_MANAGER
+            // Snapshot manager mode: commit IDs are allocated from ranges provided
+            // by memory node 1. A per-node background thread keeps the range cache
+            // fresh and updates the global read snapshot without issuing RDMA reads
+            // on every transaction.
+            static std::once_flag snapshot_thread_once;
+            static std::atomic<bool> snapshot_thread_running;
+            static std::atomic<uint64_t> local_ts_next;
+            static std::atomic<uint64_t> global_read_snapshot;
+            static constexpr uint64_t kSnapshotPollingIntervalUs = 5;
+            static void EnsureSnapshotThreadStarted();
+            static void SnapshotPollingLoop();
+            static void EnsureCommitFloor(uint64_t minimum);
+#else
+            static void EnsureCommitFloor(uint64_t) {}
+#endif
 //			static std::atomic<uint64_t> *thread_timestamp_[kMaxThreadNum];
 			static size_t thread_count_;
 		};

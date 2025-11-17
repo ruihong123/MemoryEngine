@@ -13,9 +13,14 @@
 #include "TimeMeasurer.h"
 #include "TxnParam.h"
 #include <atomic>
+#include <inttypes.h>
 #include <boost/thread.hpp>
 #include <chrono>
+#include <functional>
 #include <iostream>
+#include <memory>
+#include <string>
+#include <thread>
 #include <unordered_map>
 #include <xmmintrin.h>
 
@@ -27,7 +32,9 @@ public:
                       bool log_enabled, bool enable_latency_recording = false)
       : thread_count_(thread_count), storage_manager_(storage_manager),
         redirector_ptr_(redirector), log_enabled_(log_enabled),
-        enable_latency_recording_(enable_latency_recording) {
+        enable_latency_recording_(enable_latency_recording),
+        progress_reporting_enabled_(false), hot_scan_should_run_(false),
+        hot_scan_thread_started_(false), enable_hot_scan_(false) {
     is_begin_ = false;
     is_finish_ = false;
     total_count_ = 0;
@@ -54,6 +61,7 @@ public:
   }
 
   ~TransactionExecutor() {
+    StopHotTableScanner();
     delete[] is_ready_;
     is_ready_ = NULL;
     if (per_thread_latency_trackers_ != nullptr) {
@@ -65,6 +73,10 @@ public:
     PrepareProcedures();
     ProcessQuery();
   }
+  void EnableProgressReporting(bool enabled) {
+    progress_reporting_enabled_ = enabled;
+  }
+
 
   // Set transaction type names for latency reporting
   void SetTxnTypeNames(const std::map<size_t, std::string> &names) {
@@ -244,6 +256,9 @@ private:
       thread_group.create_thread(
           boost::bind(&TransactionExecutor::ProcessQueryThread, this, i));
     }
+    if (enable_hot_scan_) {
+      StartHotTableScanner();
+    }
     // TODO: set the message handling function for the RDMA manager, need to
     // develp an more elegant way.
     bool is_all_ready = true;
@@ -264,6 +279,9 @@ private:
     is_begin_ = true;
     start_timestamp_ = timer_.GetTimePoint();
     thread_group.join_all();
+    if (enable_hot_scan_) {
+      StopHotTableScanner();
+    }
     long long elapsed_time =
         timer_.CalcMilliSecondDiff(start_timestamp_, end_timestamp_);
     double throughput = total_count_ * 1.0 / elapsed_time;
@@ -307,13 +325,13 @@ private:
     while (is_begin_ == false)
       ;
 #if defined(MVOCC)
-    static SpinMutex spin_mutex;
-    spin_mutex.lock();
+    TransactionManager::gc_thread_control_mtx.lock();
     if (TransactionManager::gc_thread == nullptr) {
+      TransactionManager::gc_should_run.store(true, std::memory_order_release);
       TransactionManager::gc_thread =
           new std::thread(&TransactionManager::GarbageCollection);
     }
-    spin_mutex.unlock();
+    TransactionManager::gc_thread_control_mtx.unlock();
 #endif
     int count = 0;
     int abort_count = 0;
@@ -395,12 +413,16 @@ private:
                                                                 latency_ns);
         }
 
-        PROFILE_TIME_END(thread_id, TXN_EXECUTE);
-        if (count % 10000 == 0) {
-          printf("Node %u Thread %zu finished %d\n",
-                 default_gallocator->rdma_mg->node_id, thread_id, count);
-          fflush(stdout);
+        // Print progress (only thread 0 prints using its own count)
+        if (progress_reporting_enabled_ && thread_id == 0) {
+          if (count % kProgressInterval == 0 && count > 0) {
+            printf("[TPCC] Node %u executed %d transactions (thread 0 count)\n",
+                   default_gallocator->rdma_mg->node_id, count);
+            fflush(stdout);
+          }
         }
+
+        PROFILE_TIME_END(thread_id, TXN_EXECUTE);
         if (is_finish_ == true) {
           total_count_ += count;
           total_abort_count_ += abort_count;
@@ -422,6 +444,16 @@ private:
   }
 
 protected:
+  struct HotTableScanTask {
+    std::string name;
+    std::function<void(TransactionManager &)> run_once;
+    uint32_t pause_us = 0;
+  };
+
+  virtual void
+  ConfigureHotTableScanner(std::vector<HotTableScanTask> &tasks) {}
+  void EnableHotTableScanner(bool enabled);
+
   size_t thread_count_;
   TableDirectory *storage_manager_;
   IORedirector *const redirector_ptr_;
@@ -430,6 +462,10 @@ protected:
       deregisters_;
 
 private:
+  void StartHotTableScanner();
+  void StopHotTableScanner();
+  void HotTableScannerMain();
+
   // perf measurement
   TimeMeasurer timer_;
   system_clock::time_point start_timestamp_;
@@ -446,6 +482,7 @@ private:
   PerfStatistics perf_statistics_;
   bool log_enabled_;
   bool enable_latency_recording_;
+  bool progress_reporting_enabled_;
 
   // Latency tracking
   PerThreadLatencyTracker<16> *per_thread_latency_trackers_;
@@ -456,6 +493,14 @@ private:
   static int static_partition_end_;
   static int static_num_items_per_partition_;
   static int static_partition_key_bits_;
+
+  inline static constexpr uint64_t kProgressInterval = 10000;
+
+  std::vector<HotTableScanTask> hot_scan_tasks_;
+  std::thread hot_scan_thread_;
+  std::atomic<bool> hot_scan_should_run_;
+  bool hot_scan_thread_started_;
+  bool enable_hot_scan_;
 };
 } // namespace DSMEngine
 

@@ -61,8 +61,7 @@ namespace DSMEngine {
 
         DeltaSection *inner_section;
 
-        DeltaSectionWrap(uint8_t compute_node_id, GlobalAddress seg_addr, size_t seg_size, ibv_mr *seg_local_mr)
-            : main_mtx_(false) // Initialize as reader-prioritized
+        DeltaSectionWrap(uint8_t compute_node_id, GlobalAddress seg_addr, size_t seg_size, ibv_mr *seg_local_mr)// Initialize as reader-prioritized
         {
             seg_local_mr_ = seg_local_mr;
             inner_section = (DeltaSection *) seg_local_mr_->addr;
@@ -132,6 +131,7 @@ namespace DSMEngine {
         void fill_in_delta_record_single(Record *new_record, Record *old_record, GlobalAddress &delta_gadd,
                                          size_t &delta_size,
                                          uint64_t commit_ts) {
+            // std::unique_lock<RWSpinMutex> lck(main_mtx_);
             delta_size = new_record->estimate_delta_size(); // delta size include both delta header and delta content.
             assert(delta_size <10000);
             uint64_t prev_offset;
@@ -170,7 +170,8 @@ namespace DSMEngine {
                 // Memory barrier: ensure serialize_to_delta writes are visible before tail update
                 // This prevents RDMA readers from seeing updated tail but uninitialized buffer
                 std::atomic_thread_fence(std::memory_order_seq_cst);
-                if (next_offset < prev_offset && prev_offset < seg_real_size_) {
+                if (next_offset < prev_offset) {
+                    assert(prev_offset <= seg_real_size_);
                     inner_section->epoch_.fetch_add(1, std::memory_order_release);
                 }
                 // NOTE: epoch increment was removed here - epoch should only increment when tail wraps around to 0
@@ -283,7 +284,7 @@ namespace DSMEngine {
                 if (delta_record->next_delta_wts_ < snapshot) {
                     int record_size = delta_record->current_record_data_size_;
 #ifndef NDEBUG
-                    memset(inner_section->local_addr_ + inner_section->head_, 0, record_size);
+                    memset(inner_section->local_addr_ + inner_section->head_, 2, record_size);
 #endif
                     std::atomic_thread_fence(std::memory_order_seq_cst);
                     inner_section->head_ += record_size;
@@ -331,10 +332,10 @@ namespace DSMEngine {
             }
 
             // Print GC runtime statistics
-            printf("[GC] GC #%lu took %lu us, avg=%lu us, min=%lu us, max=%lu us\n",
-                   runs, elapsed_us, total_time_us.load() / runs,
-                   min_time_us.load(), max_time_us.load());
-            fflush(stdout);
+            // printf("[GC] GC #%lu took %lu us, avg=%lu us, min=%lu us, max=%lu us\n",
+            //        runs, elapsed_us, total_time_us.load() / runs,
+            //        min_time_us.load(), max_time_us.load());
+            // fflush(stdout);
 
             cv.notify_all();
         }
@@ -369,29 +370,37 @@ namespace DSMEngine {
         }
 #endif
         bool isOffsetDangerous(long offset, uint64_t epoch) {
-            // Use acquire to observe updates published with release in PullUpdates
-            if (inner_section->danger_size.load(std::memory_order_relaxed) == 0) {
+            uint64_t danger_size = inner_section->danger_size.load(std::memory_order_relaxed);
+            if (danger_size == 0) {
                 return false;
             }
+
+            assert(offset >= 0);
+            uint64_t pos = static_cast<uint64_t>(offset);
+            uint64_t head = inner_section->head_.load(std::memory_order_relaxed);
             uint64_t tail = inner_section->tail_.load(std::memory_order_relaxed);
-            uint64_t danger_size = inner_section->danger_size.load(std::memory_order_relaxed);
-            
-            if (offset <= tail) {
-                // offset is in the lower part [0, tail]
-                // Dangerous if offset is within danger_size of tail
-                return offset >= tail - danger_size;
-            } else {
-                // offset > tail (wrapped case - in the upper part)
-                // Dangerous only if danger_size extends beyond tail into the upper part
-                if (danger_size > tail) {
-                    // Calculate where the upper dangerous region starts
-                    uint64_t upper_danger_start = seg_real_size_ - (danger_size - tail);
-                    return offset >= upper_danger_start && offset < seg_real_size_;
-                } else {
-                    // danger_size doesn't extend into upper part
-                    return false;
-                }
+            uint64_t capacity = seg_real_size_;
+
+            assert(danger_size < capacity);
+
+            if (tail >= head) {
+                uint64_t danger_start = (danger_size >= tail) ? 0 : tail - danger_size;
+                return pos >= danger_start && pos <= tail;
             }
+
+            if (danger_size <= tail) {
+                uint64_t lower_start = tail - danger_size;
+                return pos >= lower_start && pos <= tail;
+            }
+
+            if (pos <= tail) {
+                return true;
+            }
+
+            uint64_t upper_span = danger_size - tail;
+            assert(upper_span < capacity);
+            uint64_t upper_start = capacity - upper_span;
+            return pos >= upper_start && pos < capacity;
         }
 
         bool isOffsetValid(long offset, uint64_t epoch) {
@@ -454,18 +463,24 @@ namespace DSMEngine {
             // Danger check (same as isOffsetDangerous), but inverted result
             if (danger_sz == 0) return true;
 
-            if (offset <= tail) {
-                // Lower part [0, tail]
-                if (offset >= tail - danger_sz) {
-                    return false; // dangerous
-                }
+            uint64_t pos = static_cast<uint64_t>(offset);
+            uint64_t capacity = seg_real_size_;
+
+            assert(danger_sz < capacity);
+
+            if (tail >= head) {
+                uint64_t danger_start = (danger_sz >= tail) ? 0 : tail - danger_sz;
+                if (pos >= danger_start && pos <= tail) return false;
             } else {
-                // Upper part (wrapped case)
-                if (danger_sz > tail) {
-                    uint64_t upper_danger_start = seg_real_size_ - (danger_sz - tail);
-                    if (offset >= upper_danger_start && offset < seg_real_size_) {
-                        return false; // dangerous
-                    }
+                if (danger_sz <= tail) {
+                    uint64_t lower_start = tail - danger_sz;
+                    if (pos >= lower_start && pos <= tail) return false;
+                } else {
+                    if (pos <= tail) return false;
+                    uint64_t upper_span = danger_sz - tail;
+                    assert(upper_span < capacity);
+                    uint64_t upper_start = capacity - upper_span;
+                    if (pos >= upper_start && pos < capacity) return false;
                 }
             }
             return true;
@@ -539,11 +554,11 @@ namespace DSMEngine {
             asm volatile ("sfence\n" : : );
             asm volatile ("lfence\n" : : );
             asm volatile ("mfence\n" : : );
-            assert(
-                ((DeltaSection*)recv_mr->addr)->local_addr_[inner_section->head_] == '&' || ((DeltaSection*)recv_mr->
-                    addr)->local_addr_[inner_section->head_] == '^');
-            assert(((DeltaSection*)recv_mr->addr)->tail_!=0);
-
+#ifndef NDEBUG
+            char* head_buff = inner_section->local_addr_ + inner_section->head_;
+            // assert(*head_buff == '&' || *head_buff == '^');
+            // assert(((DeltaSection*)recv_mr->addr)->tail_!=0);
+#endif
             // End timing and print statistics
             uint64_t end_time = Timer::get_time_ns();
             uint64_t elapsed_us = (end_time - start_time) / 1000;

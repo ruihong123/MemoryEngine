@@ -14,6 +14,46 @@ BIN_HOME=$bin/../release
 core_dump_dir="/mnt/core_dump"
 github_repo="https://github.com/ruihong123/MemoryEngine"
 gitbranch="reserved_branch1"
+
+cleanup_memory_node() {
+  local node="$1"
+  ssh ${ssh_opts} "${node}" bash <<EOF
+pkill -f micro_bench >/dev/null 2>&1 || true
+pkill -f mvcc_storage_bench >/dev/null 2>&1 || true
+sudo pkill -f motor_mempool >/dev/null 2>&1 || true
+pkill -f memory_server_term >/dev/null 2>&1 || true
+pkill -f tpcc >/dev/null 2>&1 || true
+pkill -f memory_server_tpcc >/dev/null 2>&1 || true
+pkill -f memory_server >/dev/null 2>&1 || true
+pkill -f btree_bench >/dev/null 2>&1 || true
+rm -f ${home_dir}/scripts/log* >/dev/null 2>&1 || true
+rm -f ${home_dir}/scripts/results/* >/dev/null 2>&1 || true
+rm -f ${home_dir}/debug/logdump.txt >/dev/null 2>&1 || true
+rm -f ${home_dir}/release/logdump.txt >/dev/null 2>&1 || true
+rm -f ${core_dump_dir}/core* >/dev/null 2>&1 || true
+EOF
+}
+
+cleanup_compute_node() {
+  local node="$1"
+  ssh ${ssh_opts} "${node}" bash <<EOF
+rm -f /mnt/core_dump/core* >/dev/null 2>&1 || true
+pkill -f motor_mempool >/dev/null 2>&1 || true
+pkill -f micro_bench >/dev/null 2>&1 || true
+pkill -f mvcc_storage_bench >/dev/null 2>&1 || true
+pkill -f memory_server_term >/dev/null 2>&1 || true
+pkill -f tpcc >/dev/null 2>&1 || true
+pkill -f memory_server_tpcc >/dev/null 2>&1 || true
+pkill -f memory_server >/dev/null 2>&1 || true
+pkill -f btree_bench >/dev/null 2>&1 || true
+rm -f ${home_dir}/scripts/log* >/dev/null 2>&1 || true
+rm -f ${home_dir}/scripts/results/* >/dev/null 2>&1 || true
+rm -f ${home_dir}/debug/logdump.txt >/dev/null 2>&1 || true
+rm -f ${home_dir}/release/logdump.txt >/dev/null 2>&1 || true
+rm -f ${core_dump_dir}/core* >/dev/null 2>&1 || true
+EOF
+}
+
 function run_bench() {
   results_dir="$SRC_HOME/scripts/results"
   if [ -d "$results_dir" ]; then
@@ -85,7 +125,6 @@ function run_bench() {
 #    n=$((n+1))
 #    sleep 1
 #  done
-  rsync_pids=()
   for node in ${memory_shard[@]}
   do
     echo "Rsync the $node rsync -a $home_dir $node:$home_dir"
@@ -93,25 +132,14 @@ function run_bench() {
 
 #    ssh -o StrictHostKeyChecking=no $node  "sudo umount /mnt/core_dump & rm /mnt/core_dump/core*"
 
-    rsync -a $home_dir $node:$home_dir &
-    rsync_pids+=($!)
-    rsync -a $side_dir $node:$side_dir &
-    rsync_pids+=($!)
+    
 #    ssh -o StrictHostKeyChecking=no $node "killall micro_bench memory_server_term > /dev/null 2>&1"
 #    ssh -o StrictHostKeyChecking=no $node "sudo apt install libtbb-dev -y" &
-    ssh -o StrictHostKeyChecking=no $node "pkill -f micro_bench" &
-    ssh -o StrictHostKeyChecking=no $node "pkill -f mvcc_storage_bench" &
-    ssh -o StrictHostKeyChecking=no $node "sudo pkill -f motor_mempool" &
-    ssh -o StrictHostKeyChecking=no $node "pkill -f memory_server_term" &
-    ssh -o StrictHostKeyChecking=no $node "pkill -f tpcc" &
-    ssh -o StrictHostKeyChecking=no $node "pkill -f memory_server_tpcc" &
-    ssh -o StrictHostKeyChecking=no $node "pkill -f memory_server" &
-    ssh -o StrictHostKeyChecking=no $node "pkill -f btree_bench" &
-    ssh -o StrictHostKeyChecking=no $node "rm $home_dir/scripts/log*" &
-    ssh -o StrictHostKeyChecking=no $node "rm $home_dir/scripts/results/*" &
-    ssh -o StrictHostKeyChecking=no $node "rm $home_dir/debug/logdump.txt" &
-    ssh -o StrictHostKeyChecking=no $node "rm $home_dir/release/logdump.txt" &
-    ssh -o StrictHostKeyChecking=no $node "rm $core_dump_dir/core*" &
+    # ssh -o StrictHostKeyChecking=no $node "pkill -f memory_server_tpcc" &
+    #  ssh -o StrictHostKeyChecking=no $node "pkill -f tpcc" &
+    cleanup_memory_node "${node}"
+    rsync -a "$home_dir" "$node:$home_dir" &
+    rsync -a "$side_dir" "$node:$side_dir" &
 #    ssh ${ssh_opts} $node "sudo mkdir /mnt/core_dump && sudo mkfs.ext4 /dev/sda4 && sudo mount /dev/sda4 /mnt/core_dump"
 
     ssh ${ssh_opts} $node "echo '$core_dump_dir/core$node.%p' | sudo tee /proc/sys/kernel/core_pattern ;  sudo chown -R Ruihong:purduedb-PG0 /mnt/core_dump" &
@@ -126,25 +154,11 @@ function run_bench() {
     echo "Rsync the $node rsync -a $home_dir $node:$home_dir"
 #    ssh -o StrictHostKeyChecking=no $node "sudo apt-get install -y libnuma-dev numactl htop libmemcached-dev libboost-all-dev" &
 #    ssh -o StrictHostKeyChecking=no $node  "sudo umount /mnt/core_dump & rm /mnt/core_dump/core*"
-    ssh -o StrictHostKeyChecking=no $node  "rm /mnt/core_dump/core*"
-    rsync -a $home_dir $node:$home_dir &
-    rsync_pids+=($!)
-    rsync -a $side_dir $node:$side_dir &
-    rsync_pids+=($!)
-#    ssh -o StrictHostKeyChecking=no $node "killall micro_bench memory_server_term > /dev/null 2>&1"
-    ssh -o StrictHostKeyChecking=no $node "pkill -f motor_mempool" &
-    ssh -o StrictHostKeyChecking=no $node "pkill -f micro_bench" &
-    ssh -o StrictHostKeyChecking=no $node "pkill -f mvcc_storage_bench" &
-    ssh -o StrictHostKeyChecking=no $node "pkill -f memory_server_term" &
-    ssh -o StrictHostKeyChecking=no $node "pkill -f tpcc" &
-    ssh -o StrictHostKeyChecking=no $node "pkill -f memory_server_tpcc" &
-    ssh -o StrictHostKeyChecking=no $node "pkill -f memory_server" &
-    ssh -o StrictHostKeyChecking=no $node "pkill -f btree_bench" &
-    ssh -o StrictHostKeyChecking=no $node "rm $home_dir/scripts/log*" &
-    ssh -o StrictHostKeyChecking=no $node "rm $home_dir/scripts/results/*" &
-    ssh -o StrictHostKeyChecking=no $node "rm $home_dir/debug/logdump.txt" &
-    ssh -o StrictHostKeyChecking=no $node "rm $home_dir/release/logdump.txt" &
-    ssh -o StrictHostKeyChecking=no $node "rm $core_dump_dir/core*" &
+    #  ssh -o StrictHostKeyChecking=no $node "pkill -f memory_server_tpcc" &
+    #  ssh -o StrictHostKeyChecking=no $node "pkill -f tpcc" &
+    cleanup_compute_node "${node}"
+    rsync -a "$home_dir" "$node:$home_dir" &
+    rsync -a "$side_dir" "$node:$side_dir" &
 #    ssh ${ssh_opts} $node "sudo mkdir /mnt/core_dump && sudo mkfs.ext4 /dev/sda4 && sudo mount /dev/sda4 /mnt/core_dump"
 
     ssh ${ssh_opts} $node "echo '$core_dump_dir/core$node.%p' | sudo tee /proc/sys/kernel/core_pattern ; sudo chown -R Ruihong:purduedb-PG0 /mnt/core_dump" &
@@ -156,12 +170,6 @@ function run_bench() {
 #    ssh -o StrictHostKeyChecking=no $node "echo '/proj/purduedb-PG0/logs/core$node' | sudo tee /proc/sys/kernel/core_pattern"
 
 
-  done
-  
-  # Wait for all background rsync jobs to complete
-  echo "Waiting for all rsync operations to complete..."
-  for pid in ${rsync_pids[@]}; do
-    wait $pid
   done
   echo "All rsync operations completed."
   

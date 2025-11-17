@@ -107,6 +107,10 @@ class Memory_Node_Keeper {
                         int socket_fd, uint8_t target_node_id);
   void sync_option_handler(RDMA_Request* request, std::string& client_ip,
                            uint8_t target_node_id);
+#ifdef USE_SNAPSHOT_MANAGER
+  void snapshot_range_request_handler(RDMA_Request* request, std::string& client_ip,
+                                      uint8_t target_node_id);
+#endif
     void Get_qp_info_handler(RDMA_Request* request, std::string& client_ip,
                              uint8_t target_node_id);
 //  void version_unpin_handler(RDMA_Request* request, std::string& client_ip);
