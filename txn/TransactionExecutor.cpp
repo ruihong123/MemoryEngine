@@ -51,10 +51,13 @@ void TransactionExecutor::HotTableScannerMain() {
         break;
       }
       task.run_once(scanner_manager);
-      if (task.pause_us > 0) {
-        std::this_thread::sleep_for(std::chrono::microseconds(task.pause_us));
-      }
     }
+  }
+  
+  // Commit any pending transaction before exiting
+  if (scanner_manager.HasActiveTransaction()) {
+    CharArray ret;
+    scanner_manager.CommitTransaction(ret);
   }
 }
 

@@ -58,6 +58,7 @@ namespace DSMEngine {
         Page_Type p_type = P_Plain;
         uint16_t dirty_upper_bound = 0;
         uint16_t dirty_lower_bound = 0;
+        uint64_t p_version = 0;
         GlobalAddress this_page_g_ptr;
         //=============================
         GlobalAddress leftmost_ptr;
@@ -336,7 +337,7 @@ namespace DSMEngine {
         Page_Type p_type = P_Data;
         uint16_t dirty_upper_bound = 0;
         uint16_t dirty_lower_bound = 0;
-//        uint64_t p_version = 0;
+        uint64_t p_version = 0;
         GlobalAddress this_page_g_ptr;
         // =============================
         int32_t number_of_records;

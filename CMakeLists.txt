@@ -26,6 +26,16 @@ list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DROCKSDB_SUPPORT_THREAD_LOCAL -DMVOCC -DBACKOFF -Wall -Wextra  -pthread -ggdb -Wno-error") #-fsanitize=address -fsanitize=leak -fstack-protector
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused -Wno-format -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits -Wno-unused-variable -Wno-unused-value -Wno-unused-parameter")
+
+# Check if MVOCC is enabled via compile flag
+string(FIND "${CMAKE_CXX_FLAGS}" "-DMVOCC" MVOCC_FLAG_POS)
+if(MVOCC_FLAG_POS EQUAL -1)
+    string(FIND "${CMAKE_CXX_FLAGS}" " -DMVOCC" MVOCC_FLAG_POS_SPACE)
+endif()
+set(MVOCC_ENABLED FALSE)
+if(MVOCC_FLAG_POS GREATER_EQUAL 0 OR MVOCC_FLAG_POS_SPACE GREATER_EQUAL 0)
+    set(MVOCC_ENABLED TRUE)
+endif()
 #-DLOCK
 #add_compile_options(-fsanitize=address)
 #add_link_options(-fsanitize=address)
@@ -95,6 +105,7 @@ target_sources(DSMEngine
         "txn/DeltaSection.cpp"
         "txn/DeltaRecord.cpp"
         "txn/GlobalTimestamp.cpp"
+        "memory_node/LogReplayerManager.cpp"
 
 
         # Only CMake 3.3+ supports PUBLIC sources in targets exported by "install".
@@ -111,6 +122,9 @@ target_sources(DSMEngine
         "txn/TransactionManager.h"
         "txn/DeltaRecord.h"
         "txn/DeltaSection.h"
+        "txn/RedoLogger.h"
+        "txn/LogCodec.h"
+        "memory_node/LogReplayerManager.h"
         )
 # add more target sources for DSMEngine here
 #        "include/ThreadPool.h"
@@ -126,6 +140,7 @@ target_include_directories(DSMEngine
         ${PROJECT_SOURCE_DIR}/utils
         ${PROJECT_SOURCE_DIR}/btr
         ${PROJECT_SOURCE_DIR}/port
+        ${PROJECT_SOURCE_DIR}/memory_node
         # NOTE: benchmark directories (tpcc, smallbank, tatp) are NOT included here
         # They will be added per-target to prevent cross-contamination
         )
@@ -160,7 +175,9 @@ add_executable(cpu_scale_test "CPU_cache_scalability.cpp")
 add_executable(btree_bench test/benchmark_btree.cpp)
 add_executable(second_btree_bench test/benchmark_btree_secondary.cpp)
 add_executable(micro_bench test/benchmark_micro.cpp)
-add_executable(mvcc_storage_bench test/benchmark_mvcc_storage.cpp)
+if(MVOCC_ENABLED)
+    add_executable(mvcc_storage_bench test/benchmark_mvcc_storage.cpp)
+endif()
 
 file(GLOB TPCC_DEPENDENCY
         "${PROJECT_SOURCE_DIR}/storage/*.h"
@@ -218,8 +235,10 @@ target_link_libraries(memory_server_tpcc DSMEngine)
 target_link_libraries(btree_bench DSMEngine)
 target_link_libraries(second_btree_bench DSMEngine)
 target_link_libraries(micro_bench DSMEngine)
-target_compile_definitions(mvcc_storage_bench PRIVATE MVCC_STORAGE_BENCH)
-target_link_libraries(mvcc_storage_bench DSMEngine)
+if(MVOCC_ENABLED)
+    target_compile_definitions(mvcc_storage_bench PRIVATE MVCC_STORAGE_BENCH)
+    target_link_libraries(mvcc_storage_bench DSMEngine)
+endif()
 target_link_libraries(cpu_scale_test -lnuma)
 
 add_subdirectory(Rtree)

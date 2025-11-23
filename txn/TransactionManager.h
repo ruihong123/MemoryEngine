@@ -16,9 +16,14 @@
 #include "TxnContext.h"
 #include "TxnParam.h"
 #include "env_posix.h"
+#include "RedoLogger.h"
+#include "LogCodec.h"
+#include <unordered_map>
 //#include "log.h"
 #define TWO_PHASE_COMMIT
 #define EARLYABORT
+// Enable optimization for retried transactions: use local_ts_next for snapshot and treat READ_ONLY as READ_WRITE
+
 
 
 namespace DSMEngine {
@@ -217,6 +222,9 @@ namespace DSMEngine {
         }
 
         bool CommitTransaction(CharArray& ret_str);
+        bool HasActiveTransaction() const {
+            return access_list_.access_count_ > 0;
+        }
         bool CoordinatorPrepare();
         void WritePrepareLog() {
             // TODO: WE can accumulate the REDO log in thread local buffer and then allocate a log buffer
@@ -249,6 +257,14 @@ namespace DSMEngine {
             log_file->Sync();
         }
         void AbortTransaction();
+        
+        // Direct redo logging per page update
+        void LogDataUpdateOperation(Access* access, uint64_t commit_ts);
+        void LogIndexInsertOperation(Access* access, const DynamicCompoundKey& primary_key, uint64_t commit_ts);
+        
+        // Page version management for redo logging (using already locked pages)
+        uint64_t GetCurrentPageVersion(void* page_buffer);
+        void SetCurrentPageVersion(void* page_buffer, uint64_t version);
 
         size_t GetThreadId() const {
             return thread_id_;
@@ -266,6 +282,9 @@ namespace DSMEngine {
         TableDirectory* storage_manager_;
         Env* env_;
         static WritableFile* log_file;
+        
+        // RedoLogger is now shared across all threads via DDSM (singleton)
+        // Access it through: default_gallocator->GetRedoLogger(log_enabled_)
         static std::atomic<uint64_t> largest_sp_acquired;
 
 #if defined(MVOCC)
@@ -297,13 +316,16 @@ namespace DSMEngine {
             have_rolled_back = false;
             snapshot_ts      = 0;
             plain_occ        = false;
+#ifdef ENABLE_MVOCC_RETRY_OPTIMIZATION
+            is_retry_        = false;
+#endif
         }
 #endif
     protected:
         //  Env* env_;
         size_t thread_id_;
         size_t thread_count_;
-        AccessList<kMaxAccessLimit> access_list_;
+        AccessList access_list_;
 #ifdef USE_SNAPSHOT_MANAGER
         uint64_t max_seen_ts_ = 0;
 #endif
@@ -341,6 +363,9 @@ namespace DSMEngine {
         bool pure_read_txn    = true;
         bool have_rolled_back = false;
         bool plain_occ        = false;
+#ifdef ENABLE_MVOCC_RETRY_OPTIMIZATION
+        bool is_retry_        = false;
+#endif
 #ifdef SINGLE_DELTA_PER_NODE
         static DeltaSectionWrap* ds_for_write;
 #else

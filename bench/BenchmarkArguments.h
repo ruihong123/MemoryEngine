@@ -20,11 +20,12 @@
 // Partitioned true with workload as random source.
 // NOTE: LOGGING and TWOPHASECOMMIT are now defined in BenchmarkArguments.h
 //#define WORKLOAD_PATTERN SourceType::PARTITION_SOURCE
-#define LOGGING false
 #define TWOPHASECOMMIT false
 #define WORKLOAD_PATTERN SourceType::RANDOM_SOURCE
 namespace DSMEngine {
 extern int app_type;
+extern bool enable_logging;  // Runtime variable for enabling redo logging (set via -log argument)
+extern bool enable_hot_table_scanner;  // Runtime variable for enabling hot table scanner (long-running transactions)
 extern double scale_factors[2];
 extern int factor_count;
 extern int dist_ratio;
@@ -64,6 +65,10 @@ static void PrintUsage() {
   std::cout << "\t-rINT: READ_RATIO(optional, [0,100])" << std::endl;
   std::cout << "\t-lINT: TIME_LOCALITY(optional, [0,100])" << std::endl;
   std::cout << "\t-lat: ENABLE_LATENCY_RECORDING (optional, default=false)"
+            << std::endl;
+  std::cout << "\t-log: ENABLE_REDO_LOGGING (optional, default=false)"
+            << std::endl;
+  std::cout << "\t-hot: ENABLE_HOT_TABLE_SCANNER (optional, default=false)"
             << std::endl;
   std::cout << "===========================" << std::endl;
   std::cout << "==========[EXAMPLES]==========" << std::endl;
@@ -151,6 +156,10 @@ static void ArgumentsParser(int argc, char *argv[]) {
       gStandard = false;
     } else if (argv[i][1] == 'l' && argv[i][2] == 'a' && argv[i][3] == 't') {
       enable_latency_recording = true;
+    } else if (argv[i][1] == 'l' && argv[i][2] == 'o' && argv[i][3] == 'g') {
+      enable_logging = true;
+    } else if (argv[i][1] == 'h' && argv[i][2] == 'o' && argv[i][3] == 't') {
+      enable_hot_table_scanner = true;
     } else if (argv[i][1] == 'l') {
       gTimeLocality = atoi(&argv[i][2]);
       gStandard = false;

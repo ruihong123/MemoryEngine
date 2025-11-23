@@ -110,7 +110,7 @@ int main(int argc, char *argv[]) {
     std::cout << "Running benchmark..." << std::endl;
     INIT_PROFILE_TIME(gThreadCount);
     SmallBankExecutor executor(&redirector1, &storage_manager, gThreadCount,
-                               LOGGING, enable_latency_recording);
+                               enable_logging, enable_latency_recording);
 
     // Set transaction type names for latency tracking (if enabled)
     if (enable_latency_recording) {
@@ -123,6 +123,7 @@ int main(int argc, char *argv[]) {
       txn_names[WRITE_CHECK] = "WRITE_CHECK";
       executor.SetTxnTypeNames(txn_names);
     }
+    executor.EnableHotTableScanner(enable_hot_table_scanner);
 
     executor.Start();
     REPORT_PROFILE_TIME(gThreadCount);

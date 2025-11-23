@@ -81,10 +81,18 @@ namespace DSMEngine {
         if (locked_handles_.find(page_gaddr) == locked_handles_.end()) {
             if (access_type == READ_ONLY) {
                 PROFILE_TIME_START(thread_id_, LOCK_READ);
-                //              default_gallocator->SELCC_Shared_Lock(page_buff, page_gaddr, handle);
-                if (!default_gallocator->TrySELCC_Shared_Lock(page_buff, page_gaddr, handle)) {
-                    this->AbortTransaction();
-                    return false;
+                // Hot scanner thread (thread_id_ == thread_count_) uses blocking locks for long-running reads
+                // All other threads use try locks
+                bool is_hot_scanner = (thread_id_ == thread_count_);
+                if (is_hot_scanner) {
+                    // Use blocking lock for hot scanner thread - will retry until success
+                    default_gallocator->SELCC_Shared_Lock(page_buff, page_gaddr, handle);
+                } else {
+                    // Use try lock for normal transactions
+                    if (!default_gallocator->TrySELCC_Shared_Lock(page_buff, page_gaddr, handle)) {
+                        this->AbortTransaction();
+                        return false;
+                    }
                 }
                 assert((tuple_gaddr.offset - handle->gptr.offset) > STRUCT_OFFSET(DataPage, data_));
                 tuple_buffer = (char*) page_buff + (tuple_gaddr.offset - handle->gptr.offset);

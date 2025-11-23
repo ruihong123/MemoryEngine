@@ -5,6 +5,8 @@
 #include "TATPParams.h"
 #include "TATPKeyGenerator.h"
 #include "TransactionExecutor.h"
+#include <chrono>
+#include <xmmintrin.h>
 
 namespace DSMEngine {
 namespace TATPBenchmark {
@@ -63,187 +65,146 @@ protected:
       return;
     }
 
-    struct SubscriberCursor {
-      int64_t subscriber;
-      int64_t start;
-      int64_t end;
-      void Advance() {
-        ++subscriber;
-        if (subscriber > end) {
-          subscriber = start;
-        }
-      }
-    };
-
-    auto subscriber_it = storage_manager_->tables_.find(SUBSCRIBER_TABLE_ID);
-    if (subscriber_it != storage_manager_->tables_.end()) {
-      auto schema = subscriber_it->second->GetPrimaryIndexSchema();
-      if (schema != nullptr) {
-        auto cursor = std::make_shared<SubscriberCursor>(
-            SubscriberCursor{start_sub, start_sub, end_sub});
-        tasks.push_back(HotTableScanTask{
-            "tatp_subscriber_scan",
-            [cursor, schema](TransactionManager &mgr) {
-              Record *record = nullptr;
-              DynamicCompoundKey key =
-                  TATPKeyGenerator::GenerateSubscriberKey(cursor->subscriber,
-                                                          schema);
-              if (!mgr.SearchRecord(SUBSCRIBER_TABLE_ID, key, record,
-                                    READ_ONLY)) {
-                return;
-              }
-              CharArray ret;
-              if (mgr.CommitTransaction(ret)) {
-                cursor->Advance();
-              }
-            },
-            10});
-      }
-    }
-
-    struct AccessInfoCursor {
-      int64_t subscriber;
-      int ai_type;
-      int64_t start;
-      int64_t end;
-      int max_type;
-      void Advance() {
-        ++ai_type;
-        if (ai_type > max_type) {
-          ai_type = AI_TYPE_MIN;
-          ++subscriber;
-          if (subscriber > end) {
-            subscriber = start;
-          }
-        }
-      }
-    };
-
+    // Create alternating scan between ACCESS_INFO and SPECIAL_FACILITY tables
+    // Each node scans only its own partition (start_sub to end_sub) to avoid starvation
+    // Each transaction scans ONE subscriber's records before committing (long-running transaction)
     auto access_it = storage_manager_->tables_.find(ACCESS_INFO_TABLE_ID);
-    if (access_it != storage_manager_->tables_.end()) {
-      auto schema = access_it->second->GetPrimaryIndexSchema();
-      if (schema != nullptr) {
-        auto cursor = std::make_shared<AccessInfoCursor>(
-            AccessInfoCursor{start_sub, AI_TYPE_MIN, start_sub, end_sub,
-                             ACCESS_TYPES_PER_SUBSCRIBER});
-        tasks.push_back(HotTableScanTask{
-            "tatp_access_info_scan",
-            [cursor, schema](TransactionManager &mgr) {
-              Record *record = nullptr;
-              DynamicCompoundKey key =
-                  TATPKeyGenerator::GenerateAccessInfoKey(cursor->subscriber,
-                                                          cursor->ai_type,
-                                                          schema);
-              if (!mgr.SearchRecord(ACCESS_INFO_TABLE_ID, key, record,
-                                    READ_ONLY)) {
-                return;
-              }
-              CharArray ret;
-              if (mgr.CommitTransaction(ret)) {
-                cursor->Advance();
-              }
-            },
-            10});
-      }
-    }
-
-    struct SpecialFacilityCursor {
-      int64_t subscriber;
-      int sf_type;
-      int64_t start;
-      int64_t end;
-      int max_type;
-      void Advance() {
-        ++sf_type;
-        if (sf_type > SF_TYPE_MAX) {
-          sf_type = SF_TYPE_MIN;
-          ++subscriber;
-          if (subscriber > end) {
-            subscriber = start;
-          }
-        }
-      }
-    };
-
     auto sf_it = storage_manager_->tables_.find(SPECIAL_FACILITY_TABLE_ID);
-    if (sf_it != storage_manager_->tables_.end()) {
-      auto schema = sf_it->second->GetPrimaryIndexSchema();
-      if (schema != nullptr) {
-        auto cursor = std::make_shared<SpecialFacilityCursor>(
-            SpecialFacilityCursor{start_sub, SF_TYPE_MIN, start_sub, end_sub,
-                                  SF_TYPES_PER_SUBSCRIBER});
-        tasks.push_back(HotTableScanTask{
-            "tatp_special_facility_scan",
-            [cursor, schema](TransactionManager &mgr) {
-              Record *record = nullptr;
-              DynamicCompoundKey key =
-                  TATPKeyGenerator::GenerateSpecialFacilityKey(
-                      cursor->subscriber, cursor->sf_type, schema);
-              if (!mgr.SearchRecord(SPECIAL_FACILITY_TABLE_ID, key, record,
-                                    READ_ONLY)) {
-                return;
-              }
-              CharArray ret;
-              if (mgr.CommitTransaction(ret)) {
-                cursor->Advance();
-              }
-            },
-            12});
-      }
+    if (access_it == storage_manager_->tables_.end() || 
+        sf_it == storage_manager_->tables_.end()) {
+      return;
     }
-
-    struct CallForwardingCursor {
-      int64_t subscriber;
-      int sf_type;
-      int start_time;
-      int64_t start;
-      int64_t end;
-      int max_sf;
-      int max_start_time;
-      void Advance() {
-        ++start_time;
-        if (start_time > max_start_time) {
-          start_time = START_TIME_MIN;
-          ++sf_type;
-          if (sf_type > SF_TYPE_MAX) {
-            sf_type = SF_TYPE_MIN;
-            ++subscriber;
-            if (subscriber > end) {
-              subscriber = start;
-            }
-          }
-        }
-      }
+    auto access_schema = access_it->second->GetPrimaryIndexSchema();
+    auto sf_schema = sf_it->second->GetPrimaryIndexSchema();
+    
+    // State tracking for subscriber-by-subscriber scans
+    enum ScanTableType {
+      SCAN_ACCESS_INFO = 0,
+      SCAN_SPECIAL_FACILITY = 1
     };
-
-    auto cf_it = storage_manager_->tables_.find(CALL_FORWARDING_TABLE_ID);
-    if (cf_it != storage_manager_->tables_.end()) {
-      auto schema = cf_it->second->GetPrimaryIndexSchema();
-      if (schema != nullptr) {
-        auto cursor = std::make_shared<CallForwardingCursor>(
-            CallForwardingCursor{start_sub, SF_TYPE_MIN, START_TIME_MIN,
-                                 start_sub, end_sub, SF_TYPES_PER_SUBSCRIBER,
-                                 START_TIME_MAX});
-        tasks.push_back(HotTableScanTask{
-            "tatp_call_forwarding_scan",
-            [cursor, schema](TransactionManager &mgr) {
-              Record *record = nullptr;
-              DynamicCompoundKey key =
-                  TATPKeyGenerator::GenerateCallForwardingKey(
-                      cursor->subscriber, cursor->sf_type, cursor->start_time,
-                      schema);
-              if (!mgr.SearchRecord(CALL_FORWARDING_TABLE_ID, key, record,
-                                    READ_ONLY)) {
-                return;
-              }
-              CharArray ret;
-              if (mgr.CommitTransaction(ret)) {
-                cursor->Advance();
-              }
-            },
-            12});
-      }
-    }
+    auto current_subscriber = std::make_shared<int64_t>(start_sub); // Current subscriber being scanned
+    auto access_scan_state = std::make_shared<int>(AI_TYPE_MIN); // Current access info type
+    auto sf_scan_state = std::make_shared<int>(SF_TYPE_MIN); // Current special facility type
+    auto scan_table = std::make_shared<int>(SCAN_ACCESS_INFO); // Which table to scan (0=access_info, 1=special_facility)
+    auto in_scan = std::make_shared<bool>(false); // true if currently scanning a subscriber
+    
+    tasks.push_back(
+        HotTableScanTask{"tatp_access_info_special_facility_alternating_scan",
+                         [current_subscriber, access_scan_state, sf_scan_state, 
+                          access_schema, sf_schema, scan_table, in_scan, 
+                          start_sub, end_sub](TransactionManager &mgr) {
+                           Record *record = nullptr;
+                           
+                           if (!(*in_scan)) {
+                             // Start a new subscriber scan
+                             *in_scan = true;
+                             switch (*scan_table) {
+                               case SCAN_ACCESS_INFO:
+                                 // Reset access info scan to beginning of current subscriber
+                                 *access_scan_state = AI_TYPE_MIN;
+                                 break;
+                               case SCAN_SPECIAL_FACILITY:
+                                 // Reset special facility scan to beginning of current subscriber
+                                 *sf_scan_state = SF_TYPE_MIN;
+                                 break;
+                             }
+                           }
+                           
+                           switch (*scan_table) {
+                             case SCAN_ACCESS_INFO: {
+                               // Scan all access info records for ONE subscriber in one transaction
+                               int64_t sub = *current_subscriber;
+                               int &ai_type = *access_scan_state;
+                               
+                               // Read current access info record
+                               DynamicCompoundKey key =
+                                   TATPKeyGenerator::GenerateAccessInfoKey(sub, ai_type, access_schema);
+                               if (!mgr.SearchRecord(ACCESS_INFO_TABLE_ID, key, record, READ_ONLY)) {
+                                 // If read fails, abort and retry
+                                 mgr.AbortTransaction();
+                                 *in_scan = false;
+                                 return;
+                               }
+                               
+                               // Advance to next access info type
+                               ++ai_type;
+                               if (ai_type > AI_TYPE_MAX) {
+                                 // Finished scanning all access info records for current subscriber
+                                 // Now commit
+                                 CharArray ret;
+                                 if (mgr.CommitTransaction(ret)) {
+                                   *in_scan = false;
+                                   *scan_table = SCAN_SPECIAL_FACILITY; // Switch to special facility next
+                                   // Move to next subscriber (wrap around if needed)
+                                   ++(*current_subscriber);
+                                   if (*current_subscriber > end_sub) {
+                                     *current_subscriber = start_sub;
+                                   }
+                                   // Break time after scan commit (500us)
+                                   auto break_start = std::chrono::high_resolution_clock::now();
+                                   while (std::chrono::duration_cast<std::chrono::microseconds>(
+                                             std::chrono::high_resolution_clock::now() - break_start)
+                                             .count() < 500) {
+                                     _mm_pause(); // CPU pause hint for spin loop
+                                   }
+                                 } else {
+                                   // Commit failed, abort and retry
+                                   mgr.AbortTransaction();
+                                   *in_scan = false;
+                                 }
+                                 return;
+                               }
+                               // Continue scanning (don't commit yet)
+                               break;
+                             }
+                             case SCAN_SPECIAL_FACILITY: {
+                               // Scan all special facility records for ONE subscriber in one transaction
+                               int64_t sub = *current_subscriber;
+                               int &sf_type = *sf_scan_state;
+                               
+                               // Read current special facility record
+                               DynamicCompoundKey key =
+                                   TATPKeyGenerator::GenerateSpecialFacilityKey(sub, sf_type, sf_schema);
+                               if (!mgr.SearchRecord(SPECIAL_FACILITY_TABLE_ID, key, record, READ_ONLY)) {
+                                 // If read fails, abort and retry
+                                 mgr.AbortTransaction();
+                                 *in_scan = false;
+                                 return;
+                               }
+                               
+                               // Advance to next special facility type
+                               ++sf_type;
+                               if (sf_type > SF_TYPE_MAX) {
+                                 // Finished scanning all special facility records for current subscriber
+                                 // Now commit
+                                 CharArray ret;
+                                 if (mgr.CommitTransaction(ret)) {
+                                   *in_scan = false;
+                                   *scan_table = SCAN_ACCESS_INFO; // Switch to access info next
+                                   // Move to next subscriber (wrap around if needed)
+                                   ++(*current_subscriber);
+                                   if (*current_subscriber > end_sub) {
+                                     *current_subscriber = start_sub;
+                                   }
+                                   // Break time after scan commit (500us)
+                                   auto break_start = std::chrono::high_resolution_clock::now();
+                                   while (std::chrono::duration_cast<std::chrono::microseconds>(
+                                             std::chrono::high_resolution_clock::now() - break_start)
+                                             .count() < 500) {
+                                     _mm_pause(); // CPU pause hint for spin loop
+                                   }
+                                 } else {
+                                   // Commit failed, abort and retry
+                                   mgr.AbortTransaction();
+                                   *in_scan = false;
+                                 }
+                                 return;
+                               }
+                               // Continue scanning (don't commit yet)
+                               break;
+                             }
+                           }
+                         }});
   }
 };
 

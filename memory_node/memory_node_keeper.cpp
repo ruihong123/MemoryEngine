@@ -2,6 +2,7 @@
 // Created by ruihong on 7/29/21.
 //
 #include "memory_node/memory_node_keeper.h"
+#include "memory_node/LogReplayerManager.h"
 
 //#include "db/filename.h"
 //#include "db/table_cache.h"
@@ -35,6 +36,9 @@ DSMEngine::Memory_Node_Keeper::Memory_Node_Keeper(bool use_sub_compaction,
   rdma_mg = std::make_shared<RDMA_Manager>(
       config, table_size); // set memory server node id as 1.
   Compactor_pool_.SetBackgroundThreads(0);
+  
+  // Initialize log replayer manager
+  log_replayer_mgr_ = std::make_unique<LogReplayerManager>(rdma_mg.get());
 
   // Set up the connection information.
   std::string connection_conf;
@@ -342,26 +346,45 @@ void Memory_Node_Keeper::server_communication_thread(std::string client_ip,
     if (rdma_mg->try_poll_completions(wc, 1, client_ip, false,
                                       compute_node_id) == 0) {
       // exponetial back off to save cpu cycles.
-      if (++miss_poll_counter < 256) {
-        continue;
-      }
-      if (++miss_poll_counter < 512) {
-        usleep(16);
+      // if (++miss_poll_counter < 256) {
+      //   continue;
+      // }
+      // if (++miss_poll_counter < 512) {
+      //   usleep(16);
 
-        continue;
-      }
-      if (++miss_poll_counter < 1024) {
-        usleep(256);
+      //   continue;
+      // }
+      // if (++miss_poll_counter < 1024) {
+      //   usleep(256);
 
-        continue;
-      } else {
-        usleep(1024);
-        continue;
-      }
+      //   continue;
+      // } else {
+      //   usleep(1024);
+      //   continue;
+      // }
+#if defined(__i386__) || defined(__x86_64__)
+      asm volatile("pause");
+#elif defined(__aarch64__)
+      asm volatile("wfe");
+#elif defined(__powerpc64__)
+      asm volatile("or 27,27,27");
+#endif
+      continue;
     }
     miss_poll_counter = 0;
     if (wc[0].wc_flags & IBV_WC_WITH_IMM) {
-      wc[0].imm_data; // use this to find the correct condition variable.
+      // RDMA write with immediate data - this is likely a log flush notification
+      // imm_data contains the transferred size (bytes received)
+      // wr_id contains the logical_region_id (encoded by compute node)
+      uint32_t imm_data = wc[0].imm_data;
+      uint64_t wr_id = wc[0].wr_id;
+      
+      // Extract logical_region_id from wr_id
+      uint16_t logical_region_id = static_cast<uint16_t>(wr_id);
+      
+      // Notify log replayer manager about received data
+      log_replayer_mgr_->HandleWriteWithImm(compute_node_id, logical_region_id, imm_data);
+      
       cv_temp.notify_all();
       rdma_mg->post_receive<RDMA_Request>(&recv_mr[buffer_position],
                                           compute_node_id, "main");
@@ -412,6 +435,10 @@ void Memory_Node_Keeper::server_communication_thread(std::string client_ip,
                                           compute_node_id, client_ip);
       snapshot_range_request_handler(receive_msg_buf, client_ip, compute_node_id);
 #endif
+    } else if (receive_msg_buf->command == log_segment_request) {
+      rdma_mg->post_receive<RDMA_Request>(&recv_mr[buffer_position],
+                                          compute_node_id, client_ip);
+      log_segment_request_handler(receive_msg_buf, client_ip, compute_node_id);
     } else if (receive_msg_buf->command == put_qp_info) {
       //          printf("Put QP information for
       //          %u\n",receive_msg_buf->content.qp_config_xcompute.node_id_pairs);
@@ -828,6 +855,24 @@ void Memory_Node_Keeper::snapshot_range_request_handler(RDMA_Request *request,
   delete request;
 }
 #endif
+
+void Memory_Node_Keeper::log_segment_request_handler(RDMA_Request* request,
+                                                      std::string& client_ip,
+                                                      uint8_t target_node_id) {
+  // Handle log_segment_request RPC
+  // This creates a new log stream or adds a new segment to an existing stream
+  const LogSegmentRequest& req = request->content.log_segment_request;
+  
+  // Extract logical region ID from memory_node_id in the request
+  // The memory_node_id in the request is actually the logical memory region ID
+  uint16_t logical_region_id = req.logical_region_id;
+  uint16_t compute_node_id = req.compute_node_id;
+  
+  // Handle the request through log replayer manager
+  log_replayer_mgr_->HandleLogSegmentRequest(req);
+  
+  // TODO: Send reply if needed (currently the request doesn't expect a reply)
+}
 
 void Memory_Node_Keeper::Get_qp_info_handler(RDMA_Request *request,
                                              std::string &client_ip,

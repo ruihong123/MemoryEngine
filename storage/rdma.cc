@@ -5,6 +5,8 @@
 #include "Tools/env.h"
 #include "include/cache.h"
 #include "storage/page.h"
+#include "include/DDSM.h"
+#include "txn/RedoLogger.h"
 #include <cassert>
 #include <cctype>
 #include <chrono>
@@ -191,6 +193,9 @@ namespace DSMEngine {
         //  assert(read_block_size <table_size);
         res = new resources();
         node_id = config.node_id;
+        
+        // Initialize replica type from macro (can be changed at runtime)
+        replica_type_.store(REPLICA_TYPE_DEFAULT, std::memory_order_release);
         //  std::string ipString();
         //  struct in_addr inaddr{};
         //  char buf[INET_ADDRSTRLEN];
@@ -384,8 +389,9 @@ namespace DSMEngine {
             return rdma_mg;
         }
         lock.unlock();
-        while (rdma_mg->main_comm_thread_ready_num.load() !=
-               rdma_mg->memory_nodes.size());
+        // Wait for the consolidated message handling thread to be ready
+        // (now there's only one thread handling all memory nodes, not one per node)
+        while (rdma_mg->main_comm_thread_ready_num.load() < 1);
         return rdma_mg;
     }
 
@@ -453,7 +459,7 @@ namespace DSMEngine {
         RecomputeSnapshotStateLocked(snapshot_manager_state);
         SnapshotRangeReply reply{};
         reply.global_read_snapshot = snapshot_manager_state.global_read_snapshot;
-        reply.forced_ts_next = snapshot_manager_state.global_forced_ts_next;
+        reply.forced_ts_next = snapshot_manager_state.global_forced_ts_next + 64;
         return reply;
     }
 #endif
@@ -764,6 +770,33 @@ namespace DSMEngine {
                            (receive_msg_buf->content.psu.buffer_size - 1) / sizeof(uint64_t),
                            duration.count());
 #endif
+            } else if (receive_msg_buf->command == log_segment_recycle) {
+                // Handle log segment recycle RPC from memory nodes
+                post_receive<RDMA_Request>(&recv_mr[buffer_counter], shard_target_node_id, "main");
+                
+                // Get the recycle request
+                const auto& recycle_req = receive_msg_buf->content.log_segment_recycle;
+                uint16_t logical_region_id = recycle_req.logical_region_id;
+                uint16_t memory_node_id = recycle_req.memory_node_id;
+                uint32_t num_segments = recycle_req.num_segments;
+                
+                // Extract segment addresses
+                std::vector<GlobalAddress> segment_addrs;
+                segment_addrs.reserve(num_segments);
+                for (uint32_t i = 0; i < num_segments && i < 16; ++i) {
+                    segment_addrs.push_back(recycle_req.segment_addrs[i]);
+                }
+                
+                // Access RedoLogger through DDSM
+                // Use a function pointer approach to avoid linking issues with default_gallocator
+                // The handler will be set by the benchmark initialization code
+                if (log_segment_recycle_handler_) {
+                    log_segment_recycle_handler_(logical_region_id, memory_node_id, segment_addrs);
+                } else {
+                    // Handler not set - this is expected on memory nodes or when logging is disabled
+                    // Just log a warning for debugging
+                    printf("RedoLogger: log_segment_recycle_handler not set, ignoring recycle request\n");
+                }
             } else {
                 printf("corrupt message from client.");
                 assert(false);
@@ -777,6 +810,158 @@ namespace DSMEngine {
             }
         }
         comm_thread_buffer.insert({shard_target_node_id, buffer_counter});
+    }
+
+    void RDMA_Manager::compute_message_handling_thread_consolidated() {
+        // Consolidated thread that handles RPCs from all memory nodes
+        printf("Consolidated compute message handling thread started\n");
+        
+        ibv_wc wc[3] = {};
+        uint64_t miss_poll_counter = 0;
+        std::string q_id = "main";
+        
+        // Get list of all memory node IDs
+        std::vector<uint16_t> memory_node_ids;
+        {
+            std::unique_lock<std::mutex> l(global_resources_mtx);
+            for (const auto& kv : res->qp_main_connection_info) {
+                memory_node_ids.push_back(kv.first);
+            }
+        }
+        
+        if (memory_node_ids.empty()) {
+            fprintf(stderr, "compute_message_handling_thread_consolidated: no memory nodes found\n");
+            return;
+        }
+        
+        // Initialize receive buffers for all memory nodes if not already done
+        for (uint16_t target_node_id : memory_node_ids) {
+            if (comm_thread_recv_mrs.find(target_node_id) == comm_thread_recv_mrs.end()) {
+                ibv_mr* recv_mr = new ibv_mr[RECEIVE_OUTSTANDING_SIZE]();
+                for (int i = 0; i < RECEIVE_OUTSTANDING_SIZE; i++) {
+                    Allocate_Local_RDMA_Slot(recv_mr[i], Message);
+                    post_receive<RDMA_Request>(&recv_mr[i], target_node_id, q_id);
+                }
+                comm_thread_recv_mrs.insert({target_node_id, recv_mr});
+                comm_thread_buffer.insert({target_node_id, 0});
+            }
+        }
+        
+        main_comm_thread_ready_num.fetch_add(1);
+        
+        size_t current_node_idx = 0;
+        
+        while (1) {
+            bool found_message = false;
+            
+            // Round-robin through all memory nodes
+            for (size_t i = 0; i < memory_node_ids.size(); ++i) {
+                uint16_t target_node_id = memory_node_ids[current_node_idx];
+                current_node_idx = (current_node_idx + 1) % memory_node_ids.size();
+                
+                // Try to poll for completions from this node
+                if (try_poll_completions(wc, 1, q_id, false, target_node_id) > 0) {
+                    found_message = true;
+                    miss_poll_counter = 0;
+                    
+                    // Get per-node data structures
+                    ibv_mr* recv_mr = comm_thread_recv_mrs.at(target_node_id);
+                    int& buffer_counter = comm_thread_buffer.at(target_node_id);
+                    std::mutex* mtx_imme = mtx_imme_map.at(target_node_id);
+                    std::atomic<uint32_t>* imm_gen = imm_gen_map.at(target_node_id);
+                    uint32_t* imme_data = imme_data_map.at(target_node_id);
+                    uint32_t* byte_len = byte_len_map.at(target_node_id);
+                    std::condition_variable* cv_imme = cv_imme_map.at(target_node_id);
+                    
+                    if (wc[0].wc_flags & IBV_WC_WITH_IMM) {
+                        // Handle immediate data (RDMA write with imm)
+                        std::unique_lock<std::mutex> lck(*mtx_imme);
+                        assert(*imme_data == 0);
+                        assert(*byte_len == 0);
+                        *imme_data = wc[0].imm_data;
+                        *byte_len = wc[0].byte_len;
+                        cv_imme->notify_all();
+                        lck.unlock();
+                        while (*imme_data != 0 || *byte_len != 0) {
+                            cv_imme->notify_one();
+                        }
+                        post_receive<RDMA_Request>(&recv_mr[buffer_counter], target_node_id, q_id);
+                        if (buffer_counter == RECEIVE_OUTSTANDING_SIZE - 1) {
+                            buffer_counter = 0;
+                        } else {
+                            buffer_counter++;
+                        }
+                        continue;
+                    }
+                    
+                    // Handle regular RPC message
+                    RDMA_Request* receive_msg_buf = new RDMA_Request();
+                    memcpy(receive_msg_buf, recv_mr[buffer_counter].addr, sizeof(RDMA_Request));
+                    
+                    if (receive_msg_buf->command == install_version_edit) {
+                        ((RDMA_Request*)recv_mr[buffer_counter].addr)->command = invalid_command_;
+                        assert(false);
+                        post_receive<RDMA_Request>(&recv_mr[buffer_counter], target_node_id, q_id);
+#ifdef WITHPERSISTENCE
+                    } else if (receive_msg_buf->command == persist_unpin_) {
+                        post_receive<RDMA_Request>(&recv_mr[buffer_counter], target_node_id, q_id);
+                        // TODO: implement handler
+#endif
+                    } else if (receive_msg_buf->command == log_segment_recycle) {
+                        // Handle log segment recycle RPC from memory nodes
+                        post_receive<RDMA_Request>(&recv_mr[buffer_counter], target_node_id, q_id);
+                        
+                        const auto& recycle_req = receive_msg_buf->content.log_segment_recycle;
+                        uint16_t logical_region_id = recycle_req.logical_region_id;
+                        uint16_t memory_node_id = recycle_req.memory_node_id;
+                        uint32_t num_segments = recycle_req.num_segments;
+                        
+                        std::vector<GlobalAddress> segment_addrs;
+                        segment_addrs.reserve(num_segments);
+                        for (uint32_t i = 0; i < num_segments && i < 16; ++i) {
+                            segment_addrs.push_back(recycle_req.segment_addrs[i]);
+                        }
+                        
+                        if (log_segment_recycle_handler_) {
+                            log_segment_recycle_handler_(logical_region_id, memory_node_id, segment_addrs);
+                        }
+                    } else {
+                        printf("corrupt message from client node %u, command %d\n", target_node_id, receive_msg_buf->command);
+                        assert(false);
+                        post_receive<RDMA_Request>(&recv_mr[buffer_counter], target_node_id, q_id);
+                    }
+                    
+                    delete receive_msg_buf;
+                    
+                    // Update buffer counter
+                    if (buffer_counter == RECEIVE_OUTSTANDING_SIZE - 1) {
+                        buffer_counter = 0;
+                    } else {
+                        buffer_counter++;
+                    }
+                    
+                    break; // Process one message at a time
+                }
+            }
+            
+            if (!found_message) {
+                // Exponential backoff when no messages found
+                if (++miss_poll_counter < 1024) {
+                    continue;
+                }
+                if (++miss_poll_counter < 2048) {
+                    usleep(10);
+                    continue;
+                }
+                if (++miss_poll_counter < 4096) {
+                    usleep(32);
+                    continue;
+                } else {
+                    usleep(512);
+                    continue;
+                }
+            }
+        }
     }
 
     void RDMA_Manager::ConnectQPThroughSocket(std::string qp_type, int socket_fd,
@@ -1365,6 +1550,12 @@ namespace DSMEngine {
             memory_handler_threads.back().detach();
         }
         while (memory_connection_counter.load() != memory_nodes.size());
+        
+        // Spawn a single consolidated thread to handle RPCs from all memory nodes
+        std::thread consolidated_handler_thread(
+            &RDMA_Manager::compute_message_handling_thread_consolidated, this);
+        consolidated_handler_thread.detach();
+        
 #if ACCESS_MODE == 1 || ACCESS_MODE == 2
         for (size_t i = 0; i < compute_nodes.size(); i++) {
             uint16_t target_node_id = 2 * i;
@@ -1686,7 +1877,8 @@ namespace DSMEngine {
 
         memory_connection_counter.fetch_add(1);
 
-        compute_message_handling_thread(qp_type, target_node_id);
+        // Don't spawn individual thread here - will use consolidated thread instead
+        // compute_message_handling_thread(qp_type, target_node_id);
         return false;
     }
 
@@ -4848,6 +5040,87 @@ namespace DSMEngine {
         //  duration = std::chrono::duration_cast<std::chrono::nanoseconds>(stop -
         //  start); printf("RDMA Write post send and poll size: %zu elapse: %ld\n",
         //  msg_size, duration.count());
+        return rc;
+    }
+
+    int RDMA_Manager::RDMA_Write_Imme_WithWrId(void *addr, uint32_t rkey, ibv_mr *local_mr,
+                                               size_t msg_size, std::string qp_type,
+                                               size_t send_flag, int poll_num,
+                                               unsigned int imme, uint64_t wr_id,
+                                               uint16_t target_node_id) {
+        // Same as RDMA_Write_Imme but allows setting custom wr_id
+        struct ibv_send_wr sr;
+        struct ibv_sge sge;
+        struct ibv_send_wr *bad_wr = NULL;
+        int rc;
+        /* prepare the scatter/gather entry */
+        memset(&sge, 0, sizeof(sge));
+        sge.addr = (uintptr_t) local_mr->addr;
+        sge.length = msg_size;
+        sge.lkey = local_mr->lkey;
+        /* prepare the send work request */
+        memset(&sr, 0, sizeof(sr));
+        sr.next = NULL;
+        sr.wr_id = wr_id;  // Use provided wr_id (e.g., to encode logical_region_id)
+        sr.sg_list = &sge;
+        sr.num_sge = 1;
+        sr.imm_data = imme;
+        sr.opcode = IBV_WR_RDMA_WRITE_WITH_IMM;
+        if (send_flag != 0) {
+            sr.send_flags = send_flag;
+        }
+        sr.wr.rdma.remote_addr = (uint64_t) addr;
+        sr.wr.rdma.rkey = rkey;
+        
+        ibv_qp *qp;
+        if (qp_type == "default") {
+            qp = static_cast<ibv_qp *>(qp_data_default.at(target_node_id)->Get());
+            if (qp == NULL) {
+                Remote_Query_Pair_Connection(qp_type, target_node_id);
+                qp = static_cast<ibv_qp *>(qp_data_default.at(target_node_id)->Get());
+            }
+            rc = ibv_post_send(qp, &sr, &bad_wr);
+        } else if (qp_type == "write_local_flush") {
+            qp = static_cast<ibv_qp *>(qp_local_write_flush.at(target_node_id)->Get());
+            if (qp == NULL) {
+                Remote_Query_Pair_Connection(qp_type, target_node_id);
+                qp = static_cast<ibv_qp *>(
+                    qp_local_write_flush.at(target_node_id)->Get());
+            }
+            rc = ibv_post_send(qp, &sr, &bad_wr);
+        } else if (qp_type == "write_local_compact") {
+            qp = static_cast<ibv_qp *>(
+                qp_local_write_compact.at(target_node_id)->Get());
+            if (qp == NULL) {
+                assert(false);
+                Remote_Query_Pair_Connection(qp_type, target_node_id);
+                qp = static_cast<ibv_qp *>(
+                    qp_local_write_compact.at(target_node_id)->Get());
+            }
+            rc = ibv_post_send(qp, &sr, &bad_wr);
+        } else {
+            assert(false);
+            std::shared_lock<std::shared_mutex> l(qp_cq_map_mutex);
+            qp = res->qp_map.at(target_node_id);
+            rc = ibv_post_send(qp, &sr, &bad_wr);
+            l.unlock();
+        }
+        assert(rc == 0);
+        if (rc) {
+            fprintf(stderr, "failed to post SR, return is %d\n", rc);
+        }
+        if (poll_num != 0) {
+            ibv_wc *wc = new ibv_wc[poll_num]();
+            rc = poll_completion(wc, poll_num, qp_type, true, target_node_id);
+            if (rc != 0) {
+                std::cout << "RDMA Write with Imm Failed" << std::endl;
+                std::cout << "q id is" << qp_type << std::endl;
+                fprintf(stdout, "QP number=0x%x\n", res->qp_map[target_node_id]->qp_num);
+            } else {
+                DEBUG_PRINT("RDMA write with imm successfully\n");
+            }
+            delete[] wc;
+        }
         return rc;
     }
 

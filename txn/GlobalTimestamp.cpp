@@ -10,8 +10,9 @@ namespace DSMEngine{
 //		std::atomic<uint64_t> *GlobalTimestamp::thread_timestamp_[kMaxThreadNum];
 		size_t GlobalTimestamp::thread_count_ = 0;
     RDMA_Manager* GlobalTimestamp::rdma_mg = nullptr;
-    uint64_t GlobalTimestamp::latest_snapshot = 0;
-    RWSpinMutex GlobalTimestamp::time_stamp_mtx;
+    std::atomic<uint64_t> GlobalTimestamp::latest_timestamp = 0;
+    RWSpinMutex GlobalTimestamp::RTS_mtx;
+    RWSpinMutex GlobalTimestamp::CTS_mtx;
 #ifdef USE_SNAPSHOT_MANAGER
     std::once_flag GlobalTimestamp::snapshot_thread_once;
     std::atomic<bool> GlobalTimestamp::snapshot_thread_running{false};
@@ -31,7 +32,7 @@ namespace DSMEngine{
             if (manager == nullptr){
                 // manager = rdma_mg;
                 
-                std::this_thread::sleep_for(std::chrono::microseconds(kSnapshotPollingIntervalUs));
+                // std::this_thread::sleep_for(std::chrono::microseconds(kSnapshotPollingIntervalUs));
                 continue;
             }
             SnapshotRangeReply reply{};

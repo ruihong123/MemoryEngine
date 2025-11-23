@@ -15,6 +15,7 @@
 //#include "db/version_set.h"
 #include "Tools/options.h"
 #include <libmemcached/memcached.h>
+#include "memory_node/LogReplayerManager.h"
 
 namespace DSMEngine {
 
@@ -113,10 +114,15 @@ class Memory_Node_Keeper {
 #endif
     void Get_qp_info_handler(RDMA_Request* request, std::string& client_ip,
                              uint8_t target_node_id);
+    void log_segment_request_handler(RDMA_Request* request, std::string& client_ip,
+                                     uint8_t target_node_id);
 //  void version_unpin_handler(RDMA_Request* request, std::string& client_ip);
 
   // Memcached helper method for broadcasting metadata (uses RDMA_Manager)
   void broadcastReplicaMetadata(uint16_t logical_id, uint16_t physical_id, uint64_t base_ptr, uint32_t rkey);
+  
+  // Log replayer manager
+  std::unique_ptr<LogReplayerManager> log_replayer_mgr_;
 
 };
 }

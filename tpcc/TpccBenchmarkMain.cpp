@@ -106,7 +106,7 @@ int main(int argc, char *argv[]) {
   {
     // run workload
     INIT_PROFILE_TIME(gThreadCount);
-    TpccExecutor executor(&redirector1, &storage_manager, gThreadCount, LOGGING,
+    TpccExecutor executor(&redirector1, &storage_manager, gThreadCount, enable_logging,
                           enable_latency_recording);
     executor.EnableProgressReporting(true);
 
@@ -120,6 +120,7 @@ int main(int argc, char *argv[]) {
       txn_names[STOCK_LEVEL] = "STOCK_LEVEL";
       executor.SetTxnTypeNames(txn_names);
     }
+    executor.EnableHotTableScanner(enable_hot_table_scanner);
 
     executor.Start();
     REPORT_PROFILE_TIME(gThreadCount);
@@ -159,6 +160,8 @@ void ExchPerfStatistics(ClusterConfig *config, ClusterSync *synchronizer,
     // Move (not copy) latency data from master node's local data
     stats[0].latency_trackers_ = std::move(local_latency_trackers);
     stats[0].txn_type_names_ = std::move(local_txn_type_names);
+    // Calculate percentiles before printing
+    stats[0].CalculateLatencyPercentiles();
     stats[0].PrintAgg();
   }
   delete[] stats;

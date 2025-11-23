@@ -19,6 +19,8 @@ unsigned int conn_port = -1;
 std::string config_filename = "../connection.conf";
 bool enable_latency_recording = false; // Disabled by default to minimize
                                        // overhead To modify tpcc workload
+bool enable_logging = false;  // Disabled by default, enable redo logging via -log argument
+bool enable_hot_table_scanner = false;  // Disabled by default, enable hot table scanner (long-running transactions) via -hot argument
 size_t gReadRatio = 0;
 size_t gTimeLocality = 0;
 bool gForceRandomAccess = false; // fixed

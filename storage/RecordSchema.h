@@ -258,12 +258,6 @@ namespace DSMEngine {
          size_t GetMetaColumnId() const {
             return column_count_ - 1;
         }
-        size_t GetWTSColumnId() const {
-            return column_count_ - 2;
-        }
-        size_t GetRTSColumnId() const {
-            return column_count_ - 3;
-        }
 
 
     private:

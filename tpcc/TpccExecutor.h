@@ -116,222 +116,177 @@ protected:
       }
     };
 
+    // District table is the best choice for long-running reads because it's
+    // updated by both NewOrder (45%) and Payment (43%) transactions, so a
+    // long-running read will block ~88% of all write transactions
+    struct DistrictCursor {
+      int warehouse;
+      int district;
+      int start_wh;
+      int end_wh;
+      int max_district;
+      void Advance() {
+          ++district;
+          if (district > max_district) {
+            district = 1;
+            ++warehouse;
+            if (warehouse > end_wh) {
+              warehouse = start_wh;
+          }
+        }
+      }
+    };
+
+    // Create alternating scan between district and stock tables
+    // Each node scans only its own partition (start_wh to end_wh) to avoid starvation
+    // Each transaction scans ONE warehouse before committing (long-running transaction)
+    auto district_table_it = storage_manager_->tables_.find(DISTRICT_TABLE_ID);
     auto stock_table_it = storage_manager_->tables_.find(STOCK_TABLE_ID);
-    if (stock_table_it != storage_manager_->tables_.end()) {
-      auto stock_schema = stock_table_it->second->GetPrimaryIndexSchema();
-      if (stock_schema != nullptr && max_items > 0) {
-        auto stock_cursor = std::make_shared<StockCursor>(StockCursor{
-            start_wh, 1, start_wh, end_wh, max_items});
-        tasks.push_back(
-            HotTableScanTask{"tpcc_stock_scan",
-                             [stock_cursor, stock_schema](TransactionManager &mgr) {
-                               Record *record = nullptr;
+    auto district_schema = district_table_it->second->GetPrimaryIndexSchema();
+    auto stock_schema = stock_table_it->second->GetPrimaryIndexSchema();
+    
+    // State tracking for warehouse-by-warehouse scans
+    enum ScanTableType {
+      SCAN_DISTRICT = 0,
+      SCAN_STOCK = 1
+    };
+    auto current_warehouse = std::make_shared<int>(start_wh); // Current warehouse being scanned
+    auto district_scan_state = std::make_shared<int>(1); // Current district (1 to max_district)
+    auto stock_scan_state = std::make_shared<int>(1); // Current item (1 to max_items)
+    auto scan_table = std::make_shared<int>(SCAN_DISTRICT); // Which table to scan (0=district, 1=stock)
+    auto in_scan = std::make_shared<bool>(false); // true if currently scanning a warehouse
+    
+    tasks.push_back(
+        HotTableScanTask{"tpcc_district_stock_alternating_scan",
+                         [current_warehouse, district_scan_state, stock_scan_state, 
+                          district_schema, stock_schema, scan_table, in_scan, 
+                          start_wh, end_wh, max_district, max_items](TransactionManager &mgr) {
+                           Record *record = nullptr;
+                           
+                           if (!(*in_scan)) {
+                             // Start a new warehouse scan
+                             *in_scan = true;
+                             switch (*scan_table) {
+                               case SCAN_DISTRICT:
+                                 // Reset district scan to beginning of current warehouse
+                                 *district_scan_state = 1;
+                                 break;
+                               case SCAN_STOCK:
+                                 // Reset stock scan to beginning of current warehouse
+                                 *stock_scan_state = 1;
+                                 break;
+                             }
+                           }
+                           
+                           switch (*scan_table) {
+                             case SCAN_DISTRICT: {
+                               // Scan all districts in ONE warehouse in one transaction
+                               int wh = *current_warehouse;
+                               int &d = *district_scan_state;
+                               
+                               // Read current district record
                                DynamicCompoundKey key =
-                                   GetStockPrimaryKey(stock_cursor->item,
-                                                      stock_cursor->warehouse,
-                                                      stock_schema);
-                               if (!mgr.SearchRecord(STOCK_TABLE_ID, key, record,
-                                                     READ_ONLY)) {
+                                   GetDistrictPrimaryKey(d, wh, district_schema);
+                               if (!mgr.SearchRecord(DISTRICT_TABLE_ID, key, record, READ_ONLY)) {
+                                 // If read fails, abort and retry
+                                 mgr.AbortTransaction();
+                                 *in_scan = false;
                                  return;
                                }
-                               CharArray ret;
-                               if (mgr.CommitTransaction(ret)) {
-                                 stock_cursor->Advance();
+                               
+                               // Advance to next district
+                               ++d;
+                               if (d > max_district) {
+                                 // Finished scanning all districts in current warehouse
+                                 // Spin for 10us to simulate aggregation/processing work
+                                //  auto spin_start = std::chrono::high_resolution_clock::now();
+                                //  while (std::chrono::duration_cast<std::chrono::microseconds>(
+                                //            std::chrono::high_resolution_clock::now() - spin_start)
+                                //            .count() < 100) {
+                                //    _mm_pause(); // CPU pause hint for spin loop
+                                //  }
+                                 // Now commit
+                                 CharArray ret;
+                                 if (mgr.CommitTransaction(ret)) {
+                                   *in_scan = false;
+                                   *scan_table = SCAN_STOCK; // Switch to stock next
+                                   // Move to next warehouse (wrap around if needed)
+                                   ++(*current_warehouse);
+                                   if (*current_warehouse > end_wh) {
+                                     *current_warehouse = start_wh;
+                                   }
+                                   // Break time after scan commit (100us)
+                                   auto break_start = std::chrono::high_resolution_clock::now();
+                                   while (std::chrono::duration_cast<std::chrono::microseconds>(
+                                             std::chrono::high_resolution_clock::now() - break_start)
+                                             .count() < 500) {
+                                     _mm_pause(); // CPU pause hint for spin loop
+                                   }
+                                 } else {
+                                   // Commit failed, abort and retry
+                                   mgr.AbortTransaction();
+                                   *in_scan = false;
+                                 }
+                                 return;
                                }
-                             },
-                             5});
-      }
-    }
-
-    struct CustomerCursor {
-      int warehouse;
-      int district;
-      int customer;
-      int start_wh;
-      int end_wh;
-      int max_district;
-      int max_customer;
-      void Advance() {
-        ++customer;
-        if (customer > max_customer) {
-          customer = 1;
-          ++district;
-          if (district > max_district) {
-            district = 1;
-            ++warehouse;
-            if (warehouse > end_wh) {
-              warehouse = start_wh;
-            }
-          }
-        }
-      }
-    };
-
-    auto customer_table_it =
-        storage_manager_->tables_.find(CUSTOMER_TABLE_ID);
-    if (customer_table_it != storage_manager_->tables_.end()) {
-      auto customer_schema =
-          customer_table_it->second->GetPrimaryIndexSchema();
-      if (customer_schema != nullptr) {
-        auto customer_cursor = std::make_shared<CustomerCursor>(
-            CustomerCursor{start_wh, 1, 1, start_wh, end_wh, max_district,
-                           max_customer});
-        tasks.push_back(HotTableScanTask{
-            "tpcc_customer_scan",
-            [customer_cursor, customer_schema](TransactionManager &mgr) {
-              Record *record = nullptr;
-              DynamicCompoundKey key = GetCustomerPrimaryKey(
-                  customer_cursor->customer, customer_cursor->district,
-                  customer_cursor->warehouse, customer_schema);
-              if (!mgr.SearchRecord(CUSTOMER_TABLE_ID, key, record,
-                                    READ_ONLY)) {
-                return;
-              }
-              CharArray ret;
-              if (mgr.CommitTransaction(ret)) {
-                customer_cursor->Advance();
-              }
-            },
-            5});
-      }
-    }
-
-    struct OrderCursor {
-      int warehouse;
-      int district;
-      int order;
-      int start_wh;
-      int end_wh;
-      int max_district;
-      int max_order;
-      void Advance() {
-        ++order;
-        if (order > max_order) {
-          order = 1;
-          ++district;
-          if (district > max_district) {
-            district = 1;
-            ++warehouse;
-            if (warehouse > end_wh) {
-              warehouse = start_wh;
-            }
-          }
-        }
-      }
-    };
-
-    auto order_table_it = storage_manager_->tables_.find(ORDER_TABLE_ID);
-    if (order_table_it != storage_manager_->tables_.end()) {
-      auto order_schema = order_table_it->second->GetPrimaryIndexSchema();
-      if (order_schema != nullptr) {
-        auto order_cursor = std::make_shared<OrderCursor>(OrderCursor{
-            start_wh, 1, 1, start_wh, end_wh, max_district, max_order});
-        tasks.push_back(HotTableScanTask{
-            "tpcc_order_scan",
-            [order_cursor, order_schema](TransactionManager &mgr) {
-              Record *record = nullptr;
-              DynamicCompoundKey key = GetOrderPrimaryKey(
-                  order_cursor->order, order_cursor->district,
-                  order_cursor->warehouse, order_schema);
-              if (!mgr.SearchRecord(ORDER_TABLE_ID, key, record, READ_ONLY)) {
-                return;
-              }
-              CharArray ret;
-              if (mgr.CommitTransaction(ret)) {
-                order_cursor->Advance();
-              }
-            },
-            5});
-      }
-    }
-
-    auto new_order_table_it =
-        storage_manager_->tables_.find(NEW_ORDER_TABLE_ID);
-    if (new_order_table_it != storage_manager_->tables_.end()) {
-      auto new_order_schema =
-          new_order_table_it->second->GetPrimaryIndexSchema();
-      if (new_order_schema != nullptr && max_new_order > 0) {
-        auto new_order_cursor = std::make_shared<OrderCursor>(OrderCursor{
-            start_wh, 1, 1, start_wh, end_wh, max_district, max_new_order});
-        tasks.push_back(HotTableScanTask{
-            "tpcc_new_order_scan",
-            [new_order_cursor, new_order_schema](TransactionManager &mgr) {
-              Record *record = nullptr;
-              DynamicCompoundKey key = GetNewOrderPrimaryKey(
-                  new_order_cursor->order, new_order_cursor->district,
-                  new_order_cursor->warehouse, new_order_schema);
-              if (!mgr.SearchRecord(NEW_ORDER_TABLE_ID, key, record,
-                                    READ_ONLY)) {
-                return;
-              }
-              CharArray ret;
-              if (mgr.CommitTransaction(ret)) {
-                new_order_cursor->Advance();
-              }
-            },
-            5});
-      }
-    }
-
-    struct OrderLineCursor {
-      int warehouse;
-      int district;
-      int order;
-      int line;
-      int start_wh;
-      int end_wh;
-      int max_district;
-      int max_order;
-      int max_line;
-      void Advance() {
-        ++line;
-        if (line > max_line) {
-          line = 1;
-          ++order;
-          if (order > max_order) {
-            order = 1;
-            ++district;
-            if (district > max_district) {
-              district = 1;
-              ++warehouse;
-              if (warehouse > end_wh) {
-                warehouse = start_wh;
-              }
-            }
-          }
-        }
-      }
-    };
-
-    auto order_line_table_it =
-        storage_manager_->tables_.find(ORDER_LINE_TABLE_ID);
-    if (order_line_table_it != storage_manager_->tables_.end()) {
-      auto order_line_schema =
-          order_line_table_it->second->GetPrimaryIndexSchema();
-      if (order_line_schema != nullptr) {
-        auto order_line_cursor = std::make_shared<OrderLineCursor>(
-            OrderLineCursor{start_wh, 1, 1, 1, start_wh, end_wh, max_district,
-                            max_order, MAX_OL_CNT});
-        tasks.push_back(HotTableScanTask{
-            "tpcc_order_line_scan",
-            [order_line_cursor, order_line_schema](TransactionManager &mgr) {
-              Record *record = nullptr;
-              DynamicCompoundKey key = GetOrderLinePrimaryKey(
-                  order_line_cursor->order, order_line_cursor->district,
-                  order_line_cursor->warehouse, order_line_cursor->line,
-                  order_line_schema);
-              if (!mgr.SearchRecord(ORDER_LINE_TABLE_ID, key, record,
-                                    READ_ONLY)) {
-                return;
-              }
-              CharArray ret;
-              if (mgr.CommitTransaction(ret)) {
-                order_line_cursor->Advance();
-              }
-            },
-            5});
-      }
-    }
+                               // Continue scanning (don't commit yet)
+                               break;
+                             }
+                             case SCAN_STOCK: {
+                               // Scan all stock items in ONE warehouse in one transaction
+                               int wh = *current_warehouse;
+                               int &item = *stock_scan_state;
+                               
+                               // Read current stock record
+                               DynamicCompoundKey key =
+                                   GetStockPrimaryKey(item, wh, stock_schema);
+                               if (!mgr.SearchRecord(STOCK_TABLE_ID, key, record, READ_ONLY)) {
+                                 // If read fails, abort and retry
+                                 mgr.AbortTransaction();
+                                 *in_scan = false;
+                                 return;
+                              }
+                               
+                               // Advance to next stock item
+                               ++item;
+                               if (item > max_items) {
+                                 // Finished scanning all stock items in current warehouse
+                                 // Spin for 10us to simulate aggregation/processing work
+                                //  auto spin_start = std::chrono::high_resolution_clock::now();
+                                //  while (std::chrono::duration_cast<std::chrono::microseconds>(
+                                //            std::chrono::high_resolution_clock::now() - spin_start)
+                                //            .count() < 100) {
+                                //    _mm_pause(); // CPU pause hint for spin loop
+                                //  }
+                                 // Now commit
+                                CharArray ret;
+                                if (mgr.CommitTransaction(ret)) {
+                                   *in_scan = false;
+                                   *scan_table = SCAN_DISTRICT; // Switch to district next
+                                   // Move to next warehouse (wrap around if needed)
+                                   ++(*current_warehouse);
+                                   if (*current_warehouse > end_wh) {
+                                     *current_warehouse = start_wh;
+                                   }
+                                   // Break time after scan commit (100us)
+                                   auto break_start = std::chrono::high_resolution_clock::now();
+                                   while (std::chrono::duration_cast<std::chrono::microseconds>(
+                                             std::chrono::high_resolution_clock::now() - break_start)
+                                             .count() < 500) {
+                                     _mm_pause(); // CPU pause hint for spin loop
+                                   }
+                                 } else {
+                                   // Commit failed, abort and retry
+                                   mgr.AbortTransaction();
+                                   *in_scan = false;
+                                 }
+                                 return;
+                               }
+                               // Continue scanning (don't commit yet)
+                               break;
+                             }
+                           }
+                         }});
   }
 };
 } // namespace TpccBenchmark

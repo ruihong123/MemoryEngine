@@ -94,6 +94,8 @@ public:
 
   PerfStatistics &GetPerfStatistics() { return perf_statistics_; }
 
+  void EnableHotTableScanner(bool enabled);
+
   static void ProcessQueryThread_2PC_Participant(void *storage_ptr,
                                                  void *id_p) {
     uint32_t handler_id = *((uint32_t *)id_p);
@@ -102,7 +104,7 @@ public:
     TableDirectory *storage_manager_ = (TableDirectory *)storage_ptr;
     size_t thread_count = 0;
     TransactionManager *txn_manager = new TransactionManager(
-        storage_manager_, thread_count, 0, LOGGING, false,
+        storage_manager_, thread_count, 0, enable_logging, false,
         static_partition_start_, static_partition_end_,
         static_num_items_per_partition_, static_partition_key_bits_);
     auto rdma_mg = default_gallocator->rdma_mg;
@@ -447,12 +449,10 @@ protected:
   struct HotTableScanTask {
     std::string name;
     std::function<void(TransactionManager &)> run_once;
-    uint32_t pause_us = 0;
   };
 
   virtual void
   ConfigureHotTableScanner(std::vector<HotTableScanTask> &tasks) {}
-  void EnableHotTableScanner(bool enabled);
 
   size_t thread_count_;
   TableDirectory *storage_manager_;

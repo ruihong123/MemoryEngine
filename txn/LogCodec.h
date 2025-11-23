@@ -120,7 +120,7 @@ struct DecodedOp {
 // ---- Encoder ----
 class Encoder {
 public:
-  Encoder() { buf_.reserve(128); buf_.push_back(kCodecVersion); }
+  Encoder() { buf_.reserve(256); buf_.push_back(kCodecVersion); }
 
   void Clear() { buf_.clear(); buf_.push_back(kCodecVersion); }
 

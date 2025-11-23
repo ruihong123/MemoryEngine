@@ -7,7 +7,10 @@
 #include "cache.h"
 #include "storage/page.h"
 #include <libmemcached/memcached.h>
+#include <mutex>
+// Forward declaration for RedoLogger
 namespace DSMEngine {
+    class RedoLogger;
     static void Deallocate_MR_WITH_CCP(Cache::Handle *handle) {
         // TOFIX: The code below is not protected by the lock shared mutex. It is Okay because,
         // there is definitely no other thread accessing it if a page is destroyed (refs == 0)
@@ -80,6 +83,10 @@ namespace DSMEngine {
         RDMA_Manager *rdma_mg = nullptr;
         //TODO: implement a thread local cache line hold memo.
         GlobalAddress catalog_ptr = GlobalAddress::Null();
+        
+        // Shared RedoLogger for all threads on this compute node
+        ::DSMEngine::RedoLogger* redo_logger_ = nullptr;
+        mutable std::mutex redo_logger_mtx_;  // Protects redo_logger_ initialization
         DDSM(Cache *page_cache, RDMA_Manager *rdma_mg = nullptr) : page_cache(page_cache), rdma_mg(rdma_mg) {
             // Memcached connection is now handled by RDMA_Manager
             // No need to connect here as RDMA_Manager provides the memcached interface
@@ -97,6 +104,11 @@ namespace DSMEngine {
         }
         ~DDSM(){
             // Memcached disconnection is now handled by RDMA_Manager
+            // Cleanup shared RedoLogger
+            if (redo_logger_) {
+                delete redo_logger_;
+                redo_logger_ = nullptr;
+            }
         }
         void Update_Root_GCL(uint16_t tree_id, GlobalAddress new_root_gptr){
             if (catalog_ptr == GlobalAddress::Null()){
@@ -166,6 +178,11 @@ namespace DSMEngine {
             static std::atomic<uint64_t> index_id = {0};
             return index_id.fetch_add(1);
         }
+        
+        // Get or initialize the shared RedoLogger for this compute node
+        // Thread-safe lazy initialization
+        ::DSMEngine::RedoLogger* GetRedoLogger(bool enable_logging = false) const;
+        
     private:
 //        std::atomic<uint64_t > target_node_counter = {0};
     };

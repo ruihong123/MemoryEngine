@@ -106,7 +106,7 @@ int main(int argc, char *argv[]) {
     // run workload
     std::cout << "Running benchmark..." << std::endl;
     INIT_PROFILE_TIME(gThreadCount);
-    TATPExecutor executor(&redirector1, &storage_manager, gThreadCount, LOGGING,
+    TATPExecutor executor(&redirector1, &storage_manager, gThreadCount, enable_logging,
                           enable_latency_recording);
 
     // Set transaction type names for latency tracking (if enabled)
@@ -121,6 +121,7 @@ int main(int argc, char *argv[]) {
       txn_names[DELETE_CALL_FORWARDING] = "DELETE_CALL_FORWARDING";
       executor.SetTxnTypeNames(txn_names);
     }
+    executor.EnableHotTableScanner(enable_hot_table_scanner);
 
     executor.Start();
     REPORT_PROFILE_TIME(gThreadCount);

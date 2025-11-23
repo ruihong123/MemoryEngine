@@ -2,6 +2,16 @@
 # Updated script to work with replication-aware config format
 # Uses connection_dbservers.conf as source
 # Creates connection.conf as the working config
+# 
+# Usage: ./db_TPCC_exp.sh [benchmark_args...]
+# Example: ./db_TPCC_exp.sh -p11111 -c4 -sf10 -sf100 -t100000 -hot
+# 
+# Benchmark arguments:
+#   -hot: Enable hot table scanner (long-running transactions)
+#   -log: Enable redo logging
+#   -lat: Enable latency recording
+#   See BenchmarkArguments.h for full list of arguments
+#
 set -o nounset
 bin=`dirname "$0"`
 bin=`cd "$bin"; pwd`
@@ -211,18 +221,22 @@ vary_read_ratios () {
 
 vary_query_ratio () {
   #read_ratios=(0 30 50 70 90 100)
-  thread_number=(1 8)
+  thread_number=(8)
   WarehouseNum=(40)
   FREQUENCY_DELIVERY=(100 0 0 0 0 1 33 0 0)
   FREQUENCY_PAYMENT=(0 100 0 0 0 10 33 0 50)
   FREQUENCY_NEW_ORDER=(0 0 100 0 0 10 33 0 50)
   FREQUENCY_ORDER_STATUS=(0 0 0 100 0 1 0 50 0)
   FREQUENCY_STOCK_LEVEL=(0 0 0 0 100 1 0 50 0)
+  # Logging options: empty string for disabled, "-log" for enabled
+  logging_options=("" "-log")
   for ware_num in ${WarehouseNum[@]}; do
-    for qr_index in 0 1 2 3 4 5; do
+    for qr_index in 5; do
       for thread_n in ${thread_number[@]}; do
-        compute_ARGS="-p$port -sf$ware_num -sf1 -c$thread_n -rde${FREQUENCY_DELIVERY[$qr_index]} -rpa${FREQUENCY_PAYMENT[$qr_index]} -rne${FREQUENCY_NEW_ORDER[$qr_index]} -ror${FREQUENCY_ORDER_STATUS[$qr_index]} -rst${FREQUENCY_STOCK_LEVEL[$qr_index]} -t1000000 -f${conf_file}"
-        run_tpcc
+        for logging_opt in "${logging_options[@]}"; do
+          compute_ARGS="-p$port -sf$ware_num -sf1 -c$thread_n -rde${FREQUENCY_DELIVERY[$qr_index]} -rpa${FREQUENCY_PAYMENT[$qr_index]} -rne${FREQUENCY_NEW_ORDER[$qr_index]} -ror${FREQUENCY_ORDER_STATUS[$qr_index]} -rst${FREQUENCY_STOCK_LEVEL[$qr_index]} -t1000000 -f${conf_file} ${logging_opt}"
+          run_tpcc
+        done
       done
     done
   done

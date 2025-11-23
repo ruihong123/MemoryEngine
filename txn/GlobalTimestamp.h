@@ -20,12 +20,43 @@ namespace DSMEngine{
                 if (!rdma_mg){
                     rdma_mg = RDMA_Manager::Get_Instance();
                 }
+#ifdef BETTER_TS_ACQUIRE
 #ifdef USE_SNAPSHOT_MANAGER
                 EnsureSnapshotThreadStarted();
                 return local_ts_next.fetch_add(1, std::memory_order_acq_rel);
 #else
-				return rdma_mg->FetchAddNextTimestamp(1);
+                uint64_t ts_start = 0;
+                uint64_t ts_end = 0;
+            retry:
+				if (!CTS_mtx.try_lock()){
+                    if (ts_start == ts_end) {
+                        goto retry;
+                    }else{
+                        return ts_start++;
+                    }
+				}else {
+					uint64_t ts_temp = rdma_mg->FetchAddNextTimestamp(8);
+                    // Atomically update latest_timestamp if temp is larger
+                    uint64_t current = latest_timestamp.load(std::memory_order_acquire);
+                    while (ts_temp > current) {
+                        if (latest_timestamp.compare_exchange_weak(
+                                current, ts_temp,
+                                std::memory_order_acq_rel,
+                                std::memory_order_acquire)) {
+                            break;
+                        }
+                    }
+                    ts_start = ts_temp;
+                    ts_end = ts_temp + 8;
+                    CTS_mtx.unlock();
+                    return ts_temp;
 #endif
+#else
+                return rdma_mg->FetchAddNextTimestamp(1);
+#endif
+				}
+				// return rdma_mg->FetchAddNextTimestamp(1);
+
 			}
             static uint64_t GetMonotoneTimestamp(){
                 if (!rdma_mg){
@@ -33,75 +64,48 @@ namespace DSMEngine{
                 }
 #ifdef USE_SNAPSHOT_MANAGER
                 EnsureSnapshotThreadStarted();
-                // return global_read_snapshot.load(std::memory_order_acquire);
-                return local_ts_next.load(std::memory_order_relaxed);
+                return global_read_snapshot.load(std::memory_order_acquire);
+                // return local_ts_next.load(std::memory_order_relaxed);
 #else
 #ifdef BETTER_TS_ACQUIRE
                 // this optimization can reduce unnecessary RDMA read over the network.
-                uint64_t to_ret = 0;
-                if (!time_stamp_mtx.try_lock()){
+                // uint64_t to_ret = 0;
+                if (!RTS_mtx.try_lock()){
                     // latest_snapshot = rdma_mg->GetTimestamp();
-                    time_stamp_mtx.lock();
-                    to_ret = latest_snapshot;
-                    time_stamp_mtx.unlock();
-                    return to_ret;
+                    RTS_mtx.lock();
+                    // to_ret = latest_snapshot;
+                    RTS_mtx.unlock();
+                    return latest_timestamp.load(std::memory_order_relaxed);
                 }else{
-                    latest_snapshot = rdma_mg->GetTimestamp();
-                    to_ret = latest_snapshot;
+                    uint64_t temp = rdma_mg->GetTimestamp();
+                    
+                    // Atomically update latest_timestamp if temp is larger
+                    uint64_t current = latest_timestamp.load(std::memory_order_acquire);
+                    while (temp > current) {
+                        if (latest_timestamp.compare_exchange_weak(
+                                current, temp,
+                                std::memory_order_acq_rel,
+                                std::memory_order_acquire)) {
+                            break;
+                        }
+                    }
+                    RTS_mtx.unlock();
+                    return latest_timestamp.load(std::memory_order_relaxed);
                 }
-                time_stamp_mtx.unlock();
-                return to_ret;
-
+                
 #else
                 return rdma_mg->GetTimestamp();
 #endif
 #endif
             }
 
-//			static uint64_t GetBatchMonotoneTimestamp(){
-//				return monotone_timestamp_.fetch_add(kBatchTsNum, std::memory_order_relaxed);
-//			}
-//			///////////////////////
-//
-//			///////////////////////
-//			// for multiversion concurrency control, including snapshot isolation.
-//			// the purpose is (1) to collect garbage for version maintenance; (2) generate a timestamp to retrieve consistent snapshot.
-//
-//			// for OCC or 2PL, we can use maximum timestamp to retrieve consistent snapshot.
-//			// this is because the timestamp for OCC and 2PL is generated at the commit time, and new committed transactions must have larger timestamp.
-//			static uint64_t GetMaxTimestamp(){
-//				uint64_t res = *(thread_timestamp_[0]);
-//				for (size_t i = 0; i < thread_count_; ++i){
-//					if (*(thread_timestamp_[i]) > res){
-//						res = *(thread_timestamp_[i]);
-//					}
-//				}
-//				return res;
-//			}
-//
-//			// for TO, we can use minimum timestamp to retrieve consistent snapshot.
-//			// this is because the timestamp for TO is generated at the beginning of a transaction, and "staled" transactions can still commit.
-//			static uint64_t GetMinTimestamp(){
-//				uint64_t res = *(thread_timestamp_[0]);
-//				for (size_t i = 1; i < thread_count_; ++i){
-//					if (*(thread_timestamp_[i]) < res){
-//						res = *(thread_timestamp_[i]);
-//					}
-//				}
-//				return res;
-//			}
-//
-//			static void SetThreadTimestamp(const size_t &thread_id, const uint64_t &timestamp){
-//				*(thread_timestamp_[thread_id]) = timestamp;
-//			}
-			///////////////////////
-
 		public:
             static RDMA_Manager* rdma_mg;
 //			static std::atomic<uint64_t> monotone_timestamp_;
             static GlobalAddress time_stamp_gaddr;
-            static uint64_t latest_snapshot;
-            static RWSpinMutex time_stamp_mtx;
+            static std::atomic<uint64_t> latest_timestamp;
+            static RWSpinMutex RTS_mtx;
+			static RWSpinMutex CTS_mtx;
 #ifdef USE_SNAPSHOT_MANAGER
             // Snapshot manager mode: commit IDs are allocated from ranges provided
             // by memory node 1. A per-node background thread keeps the range cache

@@ -197,7 +197,7 @@ namespace DSMEngine {
                                                                             ITEM_TABLE_ID));
                     Record *item_record = nullptr;
                     DB_QUERY(SearchRecord(ITEM_TABLE_ID, item_key, item_record,
-                                          (AccessType) new_order_param->item_access_type_[i]))
+                                          READ_ONLY))
 //      if (transaction_manager_->SearchRecord(
 //          &context_, ITEM_TABLE_ID, item_key, item_record,
 //          (AccessType) new_order_param->item_access_type_[i]) == false) {
@@ -234,7 +234,7 @@ namespace DSMEngine {
                     //DB_QUERY(SearchRecord(&context_, STOCK_TABLE_ID, stock_key, stock_record, READ_WRITE));
                     DB_QUERY(SearchRecord(
                             STOCK_TABLE_ID, stock_key, stock_record,
-                            (AccessType) new_order_param->stock_access_type_[i]));  // for testing
+                            READ_WRITE));
 
                     int ol_quantity = new_order_param->i_qtys_[i];
                     int ytd = 0;
@@ -274,7 +274,7 @@ namespace DSMEngine {
                                                                                   WAREHOUSE_TABLE_ID));
                 Record *warehouse_record = nullptr;
                 DB_QUERY(SearchRecord(WAREHOUSE_TABLE_ID, warehouse_key, warehouse_record,
-                                      (AccessType) new_order_param->warehouse_access_type_));
+                                      READ_ONLY));
                 double w_tax = 0;
                 warehouse_record->GetColumn(7, &w_tax);
 #if defined(TO)
@@ -290,7 +290,7 @@ namespace DSMEngine {
                                                                                 DISTRICT_TABLE_ID));
                 Record *district_record = nullptr;
                 DB_QUERY(SearchRecord(DISTRICT_TABLE_ID, district_key, district_record,
-                                      (AccessType) new_order_param->district_access_type_));
+                                      READ_WRITE));
                 int d_next_o_id = 0;
                 district_record->GetColumn(10, &d_next_o_id);
                 assert(d_next_o_id > 0);
@@ -315,7 +315,7 @@ namespace DSMEngine {
                                                                                 CUSTOMER_TABLE_ID));
                 Record *customer_record = nullptr;
                 DB_QUERY(SearchRecord(CUSTOMER_TABLE_ID, customer_key, customer_record,
-                                      (AccessType) new_order_param->customer_access_type_));
+                                      READ_ONLY));
                 double c_discount = 0;
                 customer_record->GetColumn(15, &c_discount);
                 for (size_t i = 0; i < new_order_param->ol_cnt_; ++i) {
