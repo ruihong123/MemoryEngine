@@ -4214,7 +4214,6 @@ namespace DSMEngine {
             }
             rc = ibv_post_send(qp, &sr, &bad_wr);
         } else {
-            assert(false);
             std::shared_lock<std::shared_mutex> l(qp_cq_map_mutex);
             qp = res->qp_map.at(target_node_id);
             rc = ibv_post_send(qp, &sr, &bad_wr);
@@ -5099,7 +5098,6 @@ namespace DSMEngine {
             }
             rc = ibv_post_send(qp, &sr, &bad_wr);
         } else {
-            assert(false);
             std::shared_lock<std::shared_mutex> l(qp_cq_map_mutex);
             qp = res->qp_map.at(target_node_id);
             rc = ibv_post_send(qp, &sr, &bad_wr);

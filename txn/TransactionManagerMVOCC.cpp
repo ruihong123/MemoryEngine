@@ -394,8 +394,14 @@ namespace DSMEngine{
         
         // Get the page buffer from the already acquired lock
         GlobalAddress page_gaddr = TOPAGE(access->access_addr_);
+        assert(locked_handles_.find(page_gaddr) != locked_handles_.end());
         Cache::Handle* handle = locked_handles_.at(page_gaddr).first;
+        // NOTE: handle->value is a pointer to ibv_mr in ACCESS_MODE==1, or the buffer directly in ACCESS_MODE==0
+#if ACCESS_MODE == 1
+        void* page_buffer = ((ibv_mr*)handle->value)->addr;
+#elif ACCESS_MODE == 0
         void* page_buffer = handle->value;
+#endif
         
         uint64_t current_page_version = GetCurrentPageVersion(page_buffer);
         uint64_t new_page_version = current_page_version + 1;

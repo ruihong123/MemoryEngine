@@ -147,6 +147,7 @@ namespace DSMEngine {
             hdr.last_index = 0;
             hdr.this_page_g_ptr = this_page_g_ptr;
             hdr.kCardinality = cardinality;
+            hdr.p_version = 0;
             SetHighest(DynamicCompoundKey::MaxValue(schema), schema);
             SetLowest(DynamicCompoundKey::MinValue(schema), schema);
         }
@@ -162,6 +163,7 @@ namespace DSMEngine {
             assert(this_page_g_ptr != GlobalAddress::Null());
             hdr.this_page_g_ptr = this_page_g_ptr;
             hdr.kCardinality = calculate_cardinality(kInternalPageSize, schema);
+            hdr.p_version = 0;
             SetHighest(DynamicCompoundKey::MaxValue(schema), schema);
             SetLowest(DynamicCompoundKey::MinValue(schema), schema);
         }
@@ -253,6 +255,7 @@ namespace DSMEngine {
             hdr.record_size = schema->GetRecordTotalSize();
             hdr.this_page_g_ptr = this_page_g_ptr;
             hdr.kCardinality = leaf_cardinality;
+            hdr.p_version = 0;
             SetHighest(DynamicCompoundKey::MaxValue(schema), schema);
             SetLowest(DynamicCompoundKey::MinValue(schema), schema);
         }
@@ -394,6 +397,7 @@ namespace DSMEngine {
             hdr.table_id = id;
             hdr.number_of_records = 0;
             hdr.lsn_ = 0;
+            hdr.p_version = 0;
             hdr.reset_dirty_bounds();
 
             uint32_t bitmap_words = (data_cardinality + 63) / 64;

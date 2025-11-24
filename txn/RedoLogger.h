@@ -433,10 +433,12 @@ namespace DSMEngine {
                 uint64_t physical_addr = rdma_->TranslateLogicalToPhysicalAddress(
                     remote_data_addr.nodeID, remote_data_addr.offset, replica_phys_id);
                 uint32_t rkey = rdma_->GetPhysicalRkey(remote_data_addr.nodeID, replica_phys_id);
-                
+                printf("RedoLogger: Writing %zu bytes to replica %u at physical address 0x%lx with rkey 0x%x\n",
+                       to_flush, replica_phys_id, physical_addr, rkey);
+                fflush(stdout);
                 // RDMA write with imm, using wr_id to encode logical_region_id
                 int rc = rdma_->RDMA_Write_Imme_WithWrId(reinterpret_cast<void*>(physical_addr), rkey, 
-                                                         &local_view, to_flush, "default", 
+                                                         &local_view, to_flush, "main", 
                                                          IBV_SEND_SIGNALED, 1, imm_data, wr_id,
                                                          replica_phys_id);
                 if (rc) {
@@ -526,6 +528,8 @@ namespace DSMEngine {
                 uint16_t physical_node_id = replicas[i].phys_id;
                 
                 // Send RPC to this physical memory node
+                printf("RedoLogger: Sending log_segment_request RPC to physical_node_id=%u\n", physical_node_id);
+                fflush(stdout);
                 int rc = rdma_->post_send<RDMA_Request>(send_mr, physical_node_id, std::string("main"));
                 if (rc) {
                     fprintf(stderr, "RedoLogger: failed to send log_segment_request RPC to physical_node_id=%u (rc=%d)\n", 

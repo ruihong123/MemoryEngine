@@ -126,7 +126,7 @@ extern bool Show_Me_The_Print;
 #define PAGE_FREE_LIST
 #define FREELIST_RATIO 0.002
 #define FREELIST_THREAD_NUM 1
-#define DIRTY_ONLY_FLUSH
+// #define DIRTY_ONLY_FLUSH
 #define ASYNC_PLAN 1
 // #define USE_SNAPSHOT_MANAGER
 // #define ENABLE_MVOCC_RETRY_OPTIMIZATION

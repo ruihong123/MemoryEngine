@@ -229,7 +229,7 @@ vary_query_ratio () {
   FREQUENCY_ORDER_STATUS=(0 0 0 100 0 1 0 50 0)
   FREQUENCY_STOCK_LEVEL=(0 0 0 0 100 1 0 50 0)
   # Logging options: empty string for disabled, "-log" for enabled
-  logging_options=("" "-log")
+  logging_options=("-log")
   for ware_num in ${WarehouseNum[@]}; do
     for qr_index in 5; do
       for thread_n in ${thread_number[@]}; do
