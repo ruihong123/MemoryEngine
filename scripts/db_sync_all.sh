@@ -9,11 +9,59 @@ port=$((10000+RANDOM%1000))
 bin=`dirname "$0"`
 bin=`cd "$bin"; pwd`
 SRC_HOME=$bin/..
-BIN_HOME=$bin/../debug
+BIN_HOME=$bin/../release
 core_dump_dir="/ssd_root/wang4996"
 github_repo="https://github.com/ruihong123/MemoryEngine"
 gitbranch="reserved_branch1"
+ssh_opts="-o StrictHostKeyChecking=no"
+
+cleanup_memory_node() {
+  local node="$1"
+  ssh ${ssh_opts} "${node}" bash <<EOF
+pkill -f micro_bench >/dev/null 2>&1 || true
+pkill -f mvcc_storage_bench >/dev/null 2>&1 || true
+sudo pkill -f motor_mempool >/dev/null 2>&1 || true
+pkill -f memory_server_term >/dev/null 2>&1 || true
+pkill -f tpcc >/dev/null 2>&1 || true
+pkill -f memory_server_tpcc >/dev/null 2>&1 || true
+pkill -f memory_server >/dev/null 2>&1 || true
+pkill -f btree_bench >/dev/null 2>&1 || true
+rm -f ${home_dir}/scripts/log* >/dev/null 2>&1 || true
+rm -f ${home_dir}/scripts/results/* >/dev/null 2>&1 || true
+rm -f ${home_dir}/scripts/data/* >/dev/null 2>&1 || true
+rm -f ${home_dir}/debug/logdump.txt >/dev/null 2>&1 || true
+rm -f ${home_dir}/release/logdump.txt >/dev/null 2>&1 || true
+rm -f ${core_dump_dir}/core* >/dev/null 2>&1 || true
+EOF
+}
+
+cleanup_compute_node() {
+  local node="$1"
+  ssh ${ssh_opts} "${node}" bash <<EOF
+rm -f ${core_dump_dir}/core* >/dev/null 2>&1 || true
+pkill -f motor_mempool >/dev/null 2>&1 || true
+pkill -f micro_bench >/dev/null 2>&1 || true
+pkill -f mvcc_storage_bench >/dev/null 2>&1 || true
+pkill -f memory_server_term >/dev/null 2>&1 || true
+pkill -f tpcc >/dev/null 2>&1 || true
+pkill -f memory_server_tpcc >/dev/null 2>&1 || true
+pkill -f memory_server >/dev/null 2>&1 || true
+pkill -f btree_bench >/dev/null 2>&1 || true
+rm -f ${home_dir}/scripts/log* >/dev/null 2>&1 || true
+rm -f ${home_dir}/scripts/results/* >/dev/null 2>&1 || true
+rm -f ${home_dir}/scripts/data/* >/dev/null 2>&1 || true
+rm -f ${home_dir}/debug/logdump.txt >/dev/null 2>&1 || true
+rm -f ${home_dir}/release/logdump.txt >/dev/null 2>&1 || true
+rm -f ${core_dump_dir}/core* >/dev/null 2>&1 || true
+EOF
+}
+
 function run_bench() {
+  results_dir="$SRC_HOME/scripts/results"
+  if [ -d "$results_dir" ]; then
+    echo "Cleaning results directory at $results_dir"
+    find "$results_dir" -mindepth 1 -delete
+  fi
   communication_port=()
 #	memory_port=()
 	memory_server=()
@@ -81,31 +129,23 @@ function run_bench() {
 #  done
   for node in ${memory_shard[@]}
   do
-    if [ $node != "10.4.3.1" ]; then
-          echo "Rsync the $node rsync -a $home_dir $node:$home_dir"
+    echo "Rsync the $node rsync -a $home_dir $node:$home_dir"
+#    ssh -o StrictHostKeyChecking=no $node "sudo apt-get install -y libnuma-dev numactl htop libmemcached-dev libboost-all-dev" &
 
-#            echo "Rsync the $node rsync -a $home_dir $node:$home_dir"
-        #    ssh -o StrictHostKeyChecking=no $node "sudo apt-get install -y libnuma-dev numactl htop libmemcached-dev libboost-all-dev" &
-            rsync -a $home_dir $node:$home_dir
-    fi
+#    ssh -o StrictHostKeyChecking=no $node  "sudo umount /mnt/core_dump & rm /mnt/core_dump/core*"
 
-
+    
 #    ssh -o StrictHostKeyChecking=no $node "killall micro_bench memory_server_term > /dev/null 2>&1"
 #    ssh -o StrictHostKeyChecking=no $node "sudo apt install libtbb-dev -y" &
-    ssh -o StrictHostKeyChecking=no $node "pkill -f micro_bench" &
-    ssh -o StrictHostKeyChecking=no $node "pkill -f memory_server_term" &
-    ssh -o StrictHostKeyChecking=no $node "pkill -f tpcc" &
-    ssh -o StrictHostKeyChecking=no $node "pkill -f memory_server_tpcc" &
-    ssh -o StrictHostKeyChecking=no $node "pkill -f memory_server" &
-    ssh -o StrictHostKeyChecking=no $node "pkill -f btree_bench" &
-    ssh -o StrictHostKeyChecking=no $node "rm $home_dir/scripts/log*" &
-    ssh -o StrictHostKeyChecking=no $node "rm $home_dir/debug/logdump.txt" &
-    ssh -o StrictHostKeyChecking=no $node "rm $home_dir/release/logdump.txt" &
-    ssh -o StrictHostKeyChecking=no $node "rm $core_dump_dir/core*"
-
+    # ssh -o StrictHostKeyChecking=no $node "pkill -f memory_server_tpcc" &
+    #  ssh -o StrictHostKeyChecking=no $node "pkill -f tpcc" &
+    cleanup_memory_node "${node}"
+    if [ $node != "10.4.3.1" ]; then
+      rsync -a "$home_dir" "$node:$home_dir" &
+    fi
 #    ssh ${ssh_opts} $node "sudo mkdir /mnt/core_dump && sudo mkfs.ext4 /dev/sda4 && sudo mount /dev/sda4 /mnt/core_dump"
 
-    ssh ${ssh_opts} $node "echo '$core_dump_dir/core$compute' | sudo tee /proc/sys/kernel/core_pattern" &
+    ssh -t ${ssh_opts} $node "echo '$core_dump_dir/core$node.%p' | sudo tee /proc/sys/kernel/core_pattern"
 #    ssh -o StrictHostKeyChecking=no $node  "sudo mount /dev/sda4 /mnt/core_dump" &
 
 #    ssh -o StrictHostKeyChecking=no $node "sudo /etc/init.d/openibd restart" &
@@ -114,26 +154,18 @@ function run_bench() {
   done
   for node in ${compute_shard[@]}
   do
+    echo "Rsync the $node rsync -a $home_dir $node:$home_dir"
+#    ssh -o StrictHostKeyChecking=no $node "sudo apt-get install -y libnuma-dev numactl htop libmemcached-dev libboost-all-dev" &
+#    ssh -o StrictHostKeyChecking=no $node  "sudo umount /mnt/core_dump & rm /mnt/core_dump/core*"
+    #  ssh -o StrictHostKeyChecking=no $node "pkill -f memory_server_tpcc" &
+    #  ssh -o StrictHostKeyChecking=no $node "pkill -f tpcc" &
+    cleanup_compute_node "${node}"
     if [ $node != "10.4.3.1" ]; then
-      echo "Rsync the $node rsync -a $home_dir $node:$home_dir"
-  #    ssh -o StrictHostKeyChecking=no $node "sudo apt-get install -y libnuma-dev numactl htop libmemcached-dev libboost-all-dev" &
-      rsync -a $home_dir $node:$home_dir
+      rsync -a "$home_dir" "$node:$home_dir" &
     fi
-#    ssh -o StrictHostKeyChecking=no $node "killall micro_bench memory_server_term > /dev/null 2>&1"
-    ssh -o StrictHostKeyChecking=no $node "pkill -f micro_bench" &
-    ssh -o StrictHostKeyChecking=no $node "pkill -f memory_server_term" &
-    ssh -o StrictHostKeyChecking=no $node "pkill -f tpcc" &
-    ssh -o StrictHostKeyChecking=no $node "pkill -f memory_server_tpcc" &
-    ssh -o StrictHostKeyChecking=no $node "pkill -f memory_server" &
-    ssh -o StrictHostKeyChecking=no $node "pkill -f btree_bench" &
-    ssh -o StrictHostKeyChecking=no $node "rm $home_dir/scripts/log*" &
-    ssh -o StrictHostKeyChecking=no $node "rm $home_dir/debug/logdump.txt" &
-    ssh -o StrictHostKeyChecking=no $node "rm $home_dir/release/logdump.txt" &
-    ssh -o StrictHostKeyChecking=no $node "rm $home_dir/scripts/data/*" &
-    ssh -o StrictHostKeyChecking=no $node "rm $core_dump_dir/core*"
 #    ssh ${ssh_opts} $node "sudo mkdir /mnt/core_dump && sudo mkfs.ext4 /dev/sda4 && sudo mount /dev/sda4 /mnt/core_dump"
 
-    ssh ${ssh_opts} $node "echo '$core_dump_dir/core$compute' | sudo tee /proc/sys/kernel/core_pattern" &
+    ssh -t ${ssh_opts} $node "echo '$core_dump_dir/core$node.%p' | sudo tee /proc/sys/kernel/core_pattern"
 
 #    ssh -o StrictHostKeyChecking=no $node  "sudo mount /dev/sda4 /mnt/core_dump" &
 
@@ -143,9 +175,12 @@ function run_bench() {
 
 
   done
+  echo "All rsync operations completed."
+  
+  wait
   read -r -a memcached_node <<< $(head -n 1 $SRC_HOME/memcached_db_servers.conf)
   echo "restart memcached on ${memcached_node[0]}"
-  ssh -o StrictHostKeyChecking=no ${memcached_node[0]} "sudo -S service memcached restart"
+  ssh -t ${ssh_opts} ${memcached_node[0]} "sudo service memcached restart"
 
 
 #  systemctl status opensmd.service

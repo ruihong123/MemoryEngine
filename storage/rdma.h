@@ -54,11 +54,13 @@ static inline uint64_t ntohll(uint64_t x) { return x; }
 #define INDEX_BLOCK  (8*1024*1024)
 #define FILTER_BLOCK  (2*1024*1024)
 // Replication strategy macros
+// Replica write type constants (kept for backward compatibility)
 #define REPLICA_WRITE_PRIMARY_ONLY 0    // Write to primary only
 #define REPLICA_WRITE_ALL 1             // Write to all replicas (default)
 #define REPLICA_WRITE_PRIMARY_ASYNC 2   // Write to primary + async replication
 #define REPLICA_WRITE_MAJORITY 3        // Write to majority
-#define REPLICA_TYPE REPLICA_WRITE_ALL  // Current replication strategy
+// Default replication strategy (used for initialization, can be changed at runtime)
+#define REPLICA_TYPE_DEFAULT REPLICA_WRITE_PRIMARY_ONLY
 
 namespace DSMEngine
 {
@@ -193,7 +195,7 @@ namespace DSMEngine
     {
         invalid_command_ = 0,
         create_qp_,
-        create_mr_128MB_,
+        create_mr_with_size_,
         create_mr_any_,
         near_data_compaction,
         install_version_edit,
@@ -211,11 +213,14 @@ namespace DSMEngine
         pull_delta_section,
         push_least_snapshot,
         pull_least_snapshot,
+        snapshot_range_request,
         tuple_read_2pc,
         prepare_2pc,
         commit_2pc,
         abort_2pc,
-        heart_beat
+        heart_beat,
+        log_segment_request,
+        log_segment_recycle
     };
 
     enum file_type
@@ -269,11 +274,42 @@ namespace DSMEngine
     {
     };
 
+    struct SnapshotRangeRequest
+    {
+        uint64_t reported_local_ts_next;
+        uint16_t node_id;
+    };
+
+    struct SnapshotRangeReply
+    {
+        uint64_t global_read_snapshot;
+        uint64_t forced_ts_next;
+    };
+
     struct MRRequest
     {
         size_t mem_size;
         uint8_t target_region_id;
     };
+
+    // Unified request for creating a new log stream or allocating a new segment
+    struct LogSegmentRequest
+    {
+        GlobalAddress log_segment_addr;      // Address of the log data segment
+        uint16_t compute_node_id;            // Compute node creating the stream
+        uint16_t logical_region_id;          // Logical memory region ID
+        size_t segment_size;                  // Size of the log segment
+        bool is_new_stream;                   // true for initial stream creation, false for new segment
+    } __attribute__((packed));
+    
+    // Request to notify compute node that log segments can be recycled/reused
+    struct LogSegmentRecycleRequest
+    {
+        uint16_t memory_node_id;             // Memory node sending the notification
+        uint16_t logical_region_id;          // Logical memory region ID
+        uint32_t num_segments;               // Number of segments that can be recycled
+        GlobalAddress segment_addrs[16];     // Addresses of segments that can be recycled (max 16 per RPC)
+    } __attribute__((packed));
 
     //struct WUnlock_message{
     //    GlobalAddress page_addr;
@@ -299,10 +335,13 @@ namespace DSMEngine
         PullDS pull_ds;
         PushSP snapshot_push;
         PullSP snapshot_pull;
+        SnapshotRangeRequest snapshot_range_req;
         Tuple_info tuple_info;
         Prepare prepare;
         Commit commit;
         Abort abort;
+        LogSegmentRequest log_segment_request;
+        LogSegmentRecycleRequest log_segment_recycle;
     };
 
     union RDMA_Reply_Content
@@ -311,6 +350,7 @@ namespace DSMEngine
         Registered_qp_config qp_config;
         Registered_qp_config_xcompute qp_config_xcompute;
         install_versionedit ive;
+        SnapshotRangeReply snapshot_range_reply;
     };
 
     struct RDMA_Request
@@ -571,15 +611,16 @@ namespace DSMEngine
         public:
             enum task_type
             {
-                read_unlock_async,
-                write_handover_async,
-                handover_async,
-                write_downtoR_async,
-                write_replica_async,
+                unoccupied = 0,
+                read_unlock_async = 1,
+                write_handover_async = 2,
+                handover_async = 3,
+                write_downtoR_async = 4,
+                write_replica_async = 5
             };
 
-            task_type work_type[ATOMIC_OUTSTANDING_SIZE] = {};
-            // std::vector<task_type> work_type = {};
+            // task_type work_type[ATOMIC_OUTSTANDING_SIZE] = {};
+            std::vector<task_type> work_type = {};
             ibv_mr* mrs[ATOMIC_OUTSTANDING_SIZE] = {nullptr};
 #if ASYNC_PLAN == 1
             uint32_t counter = 0;
@@ -695,12 +736,12 @@ namespace DSMEngine
         public:
             uint32_t counter = 0;
             //        void* handles[SEND_OUTSTANDING_SIZE_XCOMPUTE] = {nullptr};
-            ibv_mr* mrs[SEND_OUTSTANDING_SIZE_XCOMPUTE - 1] = {nullptr};
+            ibv_mr* mrs[SEND_OUTSTANDING_SIZE_XCOMPUTE] = {nullptr};
 
             Async_Xcompute_Tasks()
             {
                 auto rdma_mg = RDMA_Manager::Get_Instance();
-                for (int i = 0; i < SEND_OUTSTANDING_SIZE_XCOMPUTE - 1; ++i)
+                for (int i = 0; i < SEND_OUTSTANDING_SIZE_XCOMPUTE; ++i)
                 {
                     ibv_mr* mr = new ibv_mr{};
                     rdma_mg->Allocate_Local_RDMA_Slot(*mr, BigPage);
@@ -711,7 +752,7 @@ namespace DSMEngine
             ~Async_Xcompute_Tasks()
             {
                 auto rdma_mg = RDMA_Manager::Get_Instance();
-                for (int i = 0; i < SEND_OUTSTANDING_SIZE_XCOMPUTE - 1; ++i)
+                for (int i = 0; i <= SEND_OUTSTANDING_SIZE_XCOMPUTE - 1; ++i)
                 {
                     rdma_mg->Deallocate_Local_RDMA_Slot(mrs[i]->addr, BigPage);
                 }
@@ -747,7 +788,7 @@ namespace DSMEngine
 
         size_t GetComputeNodeNum();
 
-        uint64_t FetchAddNextTimestamp();
+        uint64_t FetchAddNextTimestamp(int add_value = 1);
 
         uint64_t GetTimestamp();
 
@@ -765,6 +806,12 @@ namespace DSMEngine
         void Cross_Computes_RPC_Threads_Creator(uint16_t target_node_id);
 
         void cross_compute_message_handling_worker(uint16_t target_node_id, int qp_num, ibv_mr* recv_mr);
+
+        void cross_compute_message_handling_worker_consolidated(uint16_t target_node_id, void* recv_mr_ptr);
+
+        // Helper functions for QP routing
+        int GetQPForCacheInvalidation();
+        int GetQPForDeltaPull();
 
         //FUnction for invalidation message handling
         void Writer_Inv_Shared_handler(RDMA_Request* receive_msg_buf, uint8_t target_node_id);
@@ -856,6 +903,9 @@ namespace DSMEngine
         //                                   ibv_mr* local_data_mr);
         //  void client_message_polling_thread();
         void compute_message_handling_thread(std::string q_id, uint16_t shard_target_node_id);
+        
+        // Consolidated message handling thread that handles RPCs from all memory nodes
+        void compute_message_handling_thread_consolidated();
 
         void ConnectQPThroughSocket(std::string qp_type, int socket_fd,
                                     uint16_t& target_node_id);
@@ -911,6 +961,8 @@ namespace DSMEngine
 
         int RDMA_Write_xcompute(ibv_mr* local_mr, void* addr, uint32_t rkey, size_t msg_size, uint16_t target_node_id,
                                 int num_of_qp, bool async);
+        int RDMA_Write_xcompute_localcopy(ibv_mr* local_mr, void* addr, uint32_t rkey, size_t msg_size, uint16_t target_node_id,
+                                int num_of_qp, bool async, std::shared_lock<RWSpinMutex>* out_side_lock = nullptr);
 
         int
         RDMA_Write_xcompute_imm(ibv_mr* local_mr, void* addr, uint32_t rkey, size_t msg_size, uint16_t target_node_id,
@@ -921,6 +973,12 @@ namespace DSMEngine
         int RDMA_Write_Imme(void* addr, uint32_t rkey, ibv_mr* local_mr,
                             size_t msg_size, std::string qp_type, size_t send_flag,
                             int poll_num, unsigned int imme, uint16_t target_node_id);
+        
+        // RDMA write with imm, allowing custom wr_id (e.g., to encode logical_region_id)
+        int RDMA_Write_Imme_WithWrId(void* addr, uint32_t rkey, ibv_mr* local_mr,
+                                     size_t msg_size, std::string qp_type, size_t send_flag,
+                                     int poll_num, unsigned int imme, uint64_t wr_id,
+                                     uint16_t target_node_id);
 
         // Return 0 mean success
         int RDMA_CAS(GlobalAddress remote_ptr, ibv_mr* local_mr, uint64_t compare,
@@ -1077,6 +1135,17 @@ namespace DSMEngine
         void Allocate_Local_RDMA_Slot(ibv_mr& mr_input, Chunk_type pool_name);
 
         size_t Calculate_size_of_pool(Chunk_type pool_name);
+        
+        size_t Get_chunk_size(Chunk_type pool_name) const {
+            return name_to_chunksize.at(pool_name);
+        }
+        
+        // Replica write type management (for dynamic configuration)
+        // Replica write type: 0=PRIMARY_ONLY, 1=ALL, 2=PRIMARY_ASYNC, 3=MAJORITY
+        int GetReplicaType() const { return replica_type_.load(std::memory_order_acquire); }
+        void SetReplicaType(int replica_type) { 
+            replica_type_.store(replica_type, std::memory_order_release); 
+        }
 
         // Logical memory group helpers
         inline bool IsLogicalMemoryId(uint16_t id) const
@@ -1186,6 +1255,12 @@ namespace DSMEngine
         void Set_message_handling_func(std::function<void(void*)>&& func, Registered_F_type func_name);
 
         void register_message_handling_thread(uint32_t handler_id, Registered_F_type func_name);
+
+#ifdef USE_SNAPSHOT_MANAGER
+        bool SyncSnapshotInfo(uint64_t reported_local_ts_next, SnapshotRangeReply* reply);
+        SnapshotRangeReply HandleSnapshotSyncRequest(const SnapshotRangeRequest& request);
+        uint64_t SnapshotManagerFetchAdd(uint64_t add_value);
+#endif
 
         void join_all_handling_thread();
 
@@ -1315,8 +1390,15 @@ namespace DSMEngine
         ibv_mr* global_lock_table = nullptr;
         ibv_mr* timestamp_oracle = nullptr;
         Env* env_;
+        
+        // Replica write type (runtime configurable, default from REPLICA_TYPE_DEFAULT macro)
+        std::atomic<int> replica_type_;
         std::shared_mutex user_df_map_mutex;
         std::unordered_map<Registered_F_type, std::function<void(void*)>> message_handling_funcs_map;
+        
+        // Log segment recycle handler callback (set by DDSM/RedoLogger initialization)
+        // Function signature: void(uint16_t logical_region_id, uint16_t memory_node_id, const std::vector<GlobalAddress>& segment_addrs)
+        std::function<void(uint16_t, uint16_t, const std::vector<GlobalAddress>&)> log_segment_recycle_handler_;
         //  std::function<void(uint32_t)> message_handling_func;
         std::atomic<bool> handler_is_finish = false;
         //TODO: clear those allocated resources when RDMA manager is being destroyed.
@@ -1526,59 +1608,5 @@ namespace DSMEngine
 
         return rc;
     }
-
-    // template <typename T>
-    // inline int RDMA_Manager::post_send(ibv_mr* mr, uint16_t target_node_id, std::string qp_type) {
-    //   struct ibv_send_wr sr;
-    //   struct ibv_sge sge;
-    //   struct ibv_send_wr* bad_wr = NULL;
-    //   int rc;
-    //   memset(&sge, 0, sizeof(sge));
-    //   sge.addr = (uintptr_t)mr->addr;
-    //   sge.length = sizeof(T);
-    //   sge.lkey = mr->lkey;
-
-    //   /* prepare the send work request */
-    //   memset(&sr, 0, sizeof(sr));
-    //   sr.next = NULL;
-    //   sr.wr_id = 0;
-    //   sr.sg_list = &sge;
-    //   sr.num_sge = 1;
-    //   sr.opcode = static_cast<ibv_wr_opcode>(IBV_WR_SEND);
-    //   sr.send_flags = IBV_SEND_SIGNALED;
-
-    //   /* there is a Receive Request in the responder side, so we won't get any into RNR flow */
-
-    //   ibv_qp* qp;
-    //   if (qp_type == "default"){
-    //     //    assert(false);// Never comes to here
-    //     qp = static_cast<ibv_qp*>(qp_data_default.at(target_node_id)->Get());
-    //     if (qp == NULL) {
-    //       Remote_Query_Pair_Connection(qp_type,target_node_id);
-    //       qp = static_cast<ibv_qp*>(qp_data_default.at(target_node_id)->Get());
-    //     }
-    //     rc = ibv_post_send(qp, &sr, &bad_wr);
-    //   }else if (qp_type == "write_local_flush"){
-    //     qp = static_cast<ibv_qp*>(qp_local_write_flush.at(target_node_id)->Get());
-    //     if (qp == NULL) {
-    //       Remote_Query_Pair_Connection(qp_type,target_node_id);
-    //       qp = static_cast<ibv_qp*>(qp_local_write_flush.at(target_node_id)->Get());
-    //     }
-    //     rc = ibv_post_send(qp, &sr, &bad_wr);
-
-    //   }else if (qp_type == "write_local_compact"){
-    //     qp = static_cast<ibv_qp*>(qp_local_write_compact.at(target_node_id)->Get());
-    //     if (qp == NULL) {
-    //       Remote_Query_Pair_Connection(qp_type,target_node_id);
-    //       qp = static_cast<ibv_qp*>(qp_local_write_compact.at(target_node_id)->Get());
-    //     }
-    //     rc = ibv_post_send(qp, &sr, &bad_wr);
-    //   } else {
-    //     std::shared_lock<std::shared_mutex> l(qp_cq_map_mutex);
-    //     rc = ibv_post_send(res->qp_map.at(target_node_id), &sr, &bad_wr);
-    //     l.unlock();
-    //   }
-    //   return rc;
-    // }
 }
 #endif

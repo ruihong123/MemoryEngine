@@ -15,6 +15,7 @@
 //#include "db/version_set.h"
 #include "Tools/options.h"
 #include <libmemcached/memcached.h>
+#include "memory_node/LogReplayerManager.h"
 
 namespace DSMEngine {
 
@@ -37,7 +38,15 @@ class Memory_Node_Keeper {
   void SetBackgroundThreads(int num,  ThreadPoolType type);
   void ExitAllThreads(){
       exit_all_threads_ = true;
+      if (rdma_mg) {
+          rdma_mg->exit_flag = true;
+      }
+      // Give detached worker threads time to notice exit_flag and terminate
+      // The threads check exit_flag in their polling loops and will exit
+      // std::cout << "Waiting for worker threads to exit..." << std::endl;
+      sleep(2);  // Wait 2 seconds for threads to exit
       JoinAllThreads(false);
+      // std::cout << "All threads exited" << std::endl;
   }
 //  void MaybeScheduleCompaction(std::string& client_ip);
 //  static void BGWork_Compaction(void* thread_args);
@@ -99,12 +108,21 @@ class Memory_Node_Keeper {
                         int socket_fd, uint8_t target_node_id);
   void sync_option_handler(RDMA_Request* request, std::string& client_ip,
                            uint8_t target_node_id);
+#ifdef USE_SNAPSHOT_MANAGER
+  void snapshot_range_request_handler(RDMA_Request* request, std::string& client_ip,
+                                      uint8_t target_node_id);
+#endif
     void Get_qp_info_handler(RDMA_Request* request, std::string& client_ip,
                              uint8_t target_node_id);
+    void log_segment_request_handler(RDMA_Request* request, std::string& client_ip,
+                                     uint8_t target_node_id);
 //  void version_unpin_handler(RDMA_Request* request, std::string& client_ip);
 
   // Memcached helper method for broadcasting metadata (uses RDMA_Manager)
   void broadcastReplicaMetadata(uint16_t logical_id, uint16_t physical_id, uint64_t base_ptr, uint32_t rkey);
+  
+  // Log replayer manager
+  std::unique_ptr<LogReplayerManager> log_replayer_mgr_;
 
 };
 }

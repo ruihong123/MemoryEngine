@@ -6,7 +6,7 @@ namespace DSMEngine{
 
         WritableFile* TransactionManager::log_file = nullptr;
         std::atomic<uint64_t > TransactionManager::largest_sp_acquired = 0;
-        std::shared_mutex TransactionManager::delta_map_mtx;
+        RWSpinMutex TransactionManager::delta_map_mtx;
         std::map<GlobalAddress, DeltaSectionWrap*, std::greater<GlobalAddress>> TransactionManager::delta_sections;
         RWSpinMutex TransactionManager::garb_mtx;
         SpinMutex TransactionManager::pin_sp_mtx;
@@ -14,6 +14,9 @@ namespace DSMEngine{
 //        uint64_t TransactionManager::last_broadcasted_sp = 0;
         SpinMutex TransactionManager::c_l_mtx;
         std::map<uint16_t, uint64_t > TransactionManager::cluster_least_sp_;
+        SpinMutex TransactionManager::gc_thread_control_mtx;
+        std::atomic<bool> TransactionManager::gc_should_run{false};
+        std::atomic<uint32_t> TransactionManager::active_manager_count{0};
         std::thread* TransactionManager::gc_thread = nullptr;
         uint64_t delta_pull_num[MAX_APP_THREAD];
         uint64_t roll_back_num[MAX_APP_THREAD];
@@ -98,12 +101,18 @@ namespace DSMEngine{
                                               const DynamicCompoundKey keys,
                                               size_t key_num, Record *record,
                                               Cache::Handle *handle,
-                                              const GlobalAddress tuple_gaddr) const {
+                                              const GlobalAddress tuple_gaddr) {
 
 //			record->is_visible_ = false;
             PROFILE_TIME_START(thread_id_, INDEX_INSERT);
 //            bool ret = storage_manager_->tables_[table_id]->InsertPriIndex(keys, key_num, tuple_gaddr);
 //            record->primary_key = keys[0];
+            
+            // Copy primary key directly from the key parameter to the record buffer
+            record->primary_key_length_ = keys.schema_ptr->GetPrimaryKeyLength();
+            assert(record->primary_key_length_ <= 64); // Ensure key fits in fixed buffer
+            memcpy(record->primary_key_buffer_, keys.start, record->primary_key_length_);
+            
             PROFILE_TIME_END(thread_id_, INDEX_INSERT);
             PROFILE_TIME_END(thread_id_, CC_INSERT);
 //            gallocators[thread_id_]->SELCC_Exclusive_UnLock(TOPAGE(handle->gptr), handle);
@@ -128,7 +137,21 @@ namespace DSMEngine{
         Cache::Handle* handle;
         char* tuple_buffer;
         //TODO: need to remember the latch, so that the latch can be released when the transaction abort.
-        if (access_type == READ_ONLY) {
+        
+#ifdef ENABLE_MVOCC_RETRY_OPTIMIZATION
+        // For retried transactions, treat READ_ONLY as READ_WRITE
+        AccessType effective_access_type = access_type;
+        if (is_retry_ && access_type == READ_ONLY) {
+            effective_access_type = READ_WRITE;
+            if (pure_read_txn){
+                pure_read_txn = false;
+            }
+        }
+#else
+        AccessType effective_access_type = access_type;
+#endif
+        
+        if (effective_access_type == READ_ONLY) {
 //                uint64_t wts = record->GetWTS();
             default_gallocator->SELCC_Shared_Lock(page_buff, page_gaddr, handle);
 
@@ -147,18 +170,20 @@ namespace DSMEngine{
 //        record->Set_Handle(handle);
 
         Access* access = access_list_.NewAccess();
-        access->access_type_ = access_type;
+        access->access_type_ = effective_access_type;
         access->access_global_record_ = new Record(schema_ptr, tuple_buffer);
         record = new Record(schema_ptr);
         record->CopyFrom(access->access_global_record_);
-
+        access->txn_local_tuple_ = record;
+        access->access_addr_ = tuple_gaddr;
         volatile uint64_t ts = record->GetWTS();
+        RegisterSeenTs(ts);
         assert(buffer_is_not_all_zero(record->data_ptr_, schema_ptr->GetRecordTotalSize()));
         // todo: for serializable isolation level, a larger tuple timestamps means that we need to abort this txn.
 #ifdef EARLYABORT
         if (isolation_level ==SERIALIZABLE){
-            if (!pure_read_txn && (have_rolled_back) ){
-                if (access_type == READ_ONLY) {
+            if (!pure_read_txn && (have_rolled_back) && (ts > snapshot_ts)){
+                if (effective_access_type == READ_ONLY) {
 //                uint64_t wts = record->GetWTS();
                     default_gallocator->SELCC_Shared_UnLock(page_gaddr, handle);
 
@@ -170,7 +195,6 @@ namespace DSMEngine{
                 AbortTransaction();
                 return false;
             }
-            // this is problematic because  the snapshot ts is used for the snapshot release later, simply replace with maxim number is not correct.
             if (!pure_read_txn && ((ts > snapshot_ts) && !have_rolled_back) ){
                 // IF we have not roll back and we find the snapshot is too small for current operation, we can simply fall back to the traditional OCC algorithm.
                 plain_occ = true;
@@ -179,11 +203,16 @@ namespace DSMEngine{
 
         }
         if (isolation_level ==SNAPSHOT_ISOLATION){
-            if (!pure_read_txn && ts > snapshot_ts && access_type == READ_WRITE){
-                //Read_Write, Delete_Only, Insert_Only
-                default_gallocator->SELCC_Exclusive_UnLock(page_gaddr, handle);
-                AbortTransaction();
-                return false;
+            if ( ts > snapshot_ts && effective_access_type == READ_WRITE){
+                // if (have_rolled_back) {
+                    //Read_Write, Delete_Only, Insert_Only
+                    default_gallocator->SELCC_Exclusive_UnLock(page_gaddr, handle);
+                    AbortTransaction();
+                    return false;
+                // }else {
+                //     // you can not update the snapshot number because you need to make sure the previous
+                //     plain_occ = true;
+                // }
             }
         }
 
@@ -199,12 +228,12 @@ namespace DSMEngine{
                 lc++;
                 // TODO: ROll back old version of the data.
                 MetaColumn meta = record->GetMeta();
-                GlobalAddress prev_delta = meta.prev_delta_;
+                GlobalAddress prev_delta = meta.prev_version_;
                 // todo: if this record is new inserted by an ongoing tranaction, the prev_delta is null, we can simply abort this transaction.
                 // actually, this should never happen in TPC-C benchmark.
                 if (prev_delta == GlobalAddress::Null()) {
                     assert(false);
-                    if (access_type == READ_ONLY) {
+                    if (effective_access_type == READ_ONLY) {
                         default_gallocator->SELCC_Shared_UnLock(page_gaddr, handle);
                     } else  {
                         //Read_Write, Delete_Only, Insert_Only
@@ -226,7 +255,7 @@ namespace DSMEngine{
 #endif
                 uint64_t ds_epoch = 0;
                 {
-                    std::shared_lock<std::shared_mutex> l(delta_map_mtx);
+                    std::shared_lock<RWSpinMutex> l(delta_map_mtx);
                     auto iter = delta_sections.lower_bound(prev_delta);
                     assert(iter != delta_sections.end());
                     delta_section = iter->second;
@@ -250,45 +279,45 @@ namespace DSMEngine{
 #ifndef NDEBUG
                 bool need_pull_update = false;
 #endif
+                long offset = prev_delta.offset - delta_section->seg_addr_.offset - STRUCT_OFFSET(DeltaSection, local_addr_);
+
                 {
+                    // Calculate offset from global address
+                    
                     // we use the latch for shadow copy because the garbage collection or delta appending shall not fail
                     // the delta section validation in any way. In other word,  the new tail or epoch will not make the prev delta invalid.
                     // and the garbage collection shall never collect the delta record that this transaciton snapshot can still see.
-                    std::shared_lock<RWSpinMutex> slck(delta_section->shadow_mtx_);
-                    if (delta_section->inner_section->is_empty_ ||
-                        !delta_section->isOffsetValid(prev_delta, meta.prev_delta_epoch_)) {
-#ifndef NDEBUG
-                        need_pull_update = true;
-#endif
-                        slck.unlock();
-                        // fetch the latest version of the delta section.
-                        // use double-checked locking to avoid conflict.
+                    // std::shared_lock<RWSpinMutex> slck(delta_section->shadow_mtx_);
+                    // std::shared_lock<RWSpinMutex> slck(delta_section->shadow_mtx_);
+                    if (delta_section->inner_section->is_empty_ || 
+                        !delta_section->isOffsetValid(offset, meta.prev_delta_epoch_)) {
+                        // slck.unlock();
                         std::unique_lock<RWSpinMutex> lck(delta_section->shadow_mtx_);
                         if (delta_section->inner_section->is_empty_ ||
-                            !delta_section->isOffsetValid(prev_delta, meta.prev_delta_epoch_)) {
-                            assert(delta_section->owner_compute_node_id_ != RDMA_Manager::node_id);
-                            delta_section->PullUpdates();
-                            delta_pull_num[thread_id_]++;
-
-
+                            !delta_section->isOffsetValid(offset, meta.prev_delta_epoch_)) {
+                            // Pull updates from remote node
+                            if (delta_section->owner_compute_node_id_ != RDMA_Manager::Get_Instance()->node_id) {
+                                delta_section->PullUpdates();
+                            }
                         }
-
+                    }else{
+                        while (delta_section->isOffsetDangerous(offset, meta.prev_delta_epoch_)) {
+                            _mm_pause();
+                        }  
                     }
                 }
 
 
 //                std::shared_lock<std::shared_mutex> lck(delta_section->shadow_mtx_);
 
-                assert(meta.prev_delta_epoch_ <= delta_section->inner_section->epoch);
+                assert(meta.prev_delta_epoch_ <= delta_section->GetEpoch());
 
 #ifndef NDEBUG
 //                ds_tail = delta_section->GetTail();
 //                ds_head = delta_section->GetHead();
                 assert(!delta_section->inner_section->is_empty_ &&
-                       delta_section->isOffsetValid(prev_delta, meta.prev_delta_epoch_));
-
-                long offset = prev_delta.offset - delta_section->seg_addr_.offset -
-                              STRUCT_OFFSET(DeltaSection, local_seg_addr_);
+                       delta_section->isOffsetValid(offset, meta.prev_delta_epoch_));
+                
                 if (ds_tail >= ds_head) {
                     assert(delta_section->inner_section->tail_ - offset > STRUCT_OFFSET(DeltaRecord, data_));
                 }
@@ -311,13 +340,12 @@ namespace DSMEngine{
                 ts = record->GetWTS();
             }
             assert(buffer_is_not_all_zero(record->data_ptr_, schema_ptr->GetRecordTotalSize()));
-        access->txn_local_tuple_ = record;
-        access->access_addr_ = tuple_gaddr;
-        if (access_type == DELETE_ONLY) {
+
+        if (effective_access_type == DELETE_ONLY) {
             record->PutWTS(UINT64_MAX);
             record->SetVisible(false);
         }
-        if (access_type == READ_ONLY) {
+        if (effective_access_type == READ_ONLY) {
 //                uint64_t wts = record->GetWTS();
             default_gallocator->SELCC_Shared_UnLock(page_gaddr, handle);
 
@@ -328,6 +356,101 @@ namespace DSMEngine{
         }
         PROFILE_TIME_END(thread_id_, CC_SELECT);
         return true;
+    }
+
+
+    void TransactionManager::LogDataUpdateOperation(Access* access, uint64_t commit_ts) {
+        // Use LogCodec to encode only modified columns (similar to serialize_to_delta)
+        LogCodec::Encoder encoder;
+        
+        uint16_t logical_region_id = access->access_addr_.nodeID;
+        
+        // Only log modified columns (using dirty_col_ids like delta records)
+        if (!access->txn_local_tuple_->dirty_col_ids.empty()) {
+            for (auto col_id : access->txn_local_tuple_->dirty_col_ids) {
+                size_t column_size = access->txn_local_tuple_->schema_ptr_->GetColumnSize(col_id);
+                size_t column_offset = access->txn_local_tuple_->schema_ptr_->GetColumnOffset(col_id);
+                
+                // Log UPDATE_BYTES for this specific column
+                encoder.AddUpdateBytes(column_offset, 
+                                     access->txn_local_tuple_->data_ptr_ + column_offset, 
+                                     column_size);
+            }
+            
+            // For dirty column updates, also log timestamp update separately
+            size_t meta_col_id = access->txn_local_tuple_->schema_ptr_->GetMetaColumnId();
+            size_t meta_offset = access->txn_local_tuple_->schema_ptr_->GetColumnOffset(meta_col_id);
+            size_t wts_offset = meta_offset + offsetof(MetaColumn, Wts_);
+            encoder.AddSetU64LE(wts_offset, commit_ts);
+        } else {
+            // Fallback: log entire record if no dirty tracking (includes MetaColumn with timestamp)
+            size_t record_size = access->txn_local_tuple_->GetRecordSize();
+            encoder.AddUpdateBytes(0, access->txn_local_tuple_->data_ptr_, record_size);
+            // No separate timestamp log needed - it's already included in the full record
+        }
+        
+        // Get current page version and increment it for this log record
+        GlobalAddress target_page = TOPAGE(access->access_addr_);
+        
+        // Get the page buffer from the already acquired lock
+        GlobalAddress page_gaddr = TOPAGE(access->access_addr_);
+        assert(locked_handles_.find(page_gaddr) != locked_handles_.end());
+        Cache::Handle* handle = locked_handles_.at(page_gaddr).first;
+        // NOTE: handle->value is a pointer to ibv_mr in ACCESS_MODE==1, or the buffer directly in ACCESS_MODE==0
+#if ACCESS_MODE == 1
+        void* page_buffer = ((ibv_mr*)handle->value)->addr;
+#elif ACCESS_MODE == 0
+        void* page_buffer = handle->value;
+#endif
+        
+        uint64_t current_page_version = GetCurrentPageVersion(page_buffer);
+        uint64_t new_page_version = current_page_version + 1;
+        
+        // Update the page version on the compute node (primary copy)
+        SetCurrentPageVersion(page_buffer, new_page_version);
+        
+        // Append to redo log with the new page version
+        // Get shared RedoLogger from DDSM (singleton shared across all threads)
+        RedoLogger* redo_logger = default_gallocator->GetRedoLogger(log_enabled_);
+        if (redo_logger) {
+            redo_logger->Append(logical_region_id, target_page, new_page_version, encoder.Buffer().data(), encoder.Buffer().size());
+            
+            printf("RedoLogger: Logged data update (%zu dirty cols, %zu bytes) for record at page=0x%lx, logical_region=%u\n",
+                   access->txn_local_tuple_->dirty_col_ids.size(), encoder.Buffer().size(),
+                   target_page.val, logical_region_id);
+        }
+    }
+
+    void TransactionManager::LogIndexInsertOperation(Access* access, const DynamicCompoundKey& primary_key, uint64_t commit_ts) {
+        // No-op: Index redo logging disabled for now
+        // TODO: Implement proper index redo logging later
+    }
+
+    uint64_t TransactionManager::GetCurrentPageVersion(void* page_buffer) {
+        // Get the current page version from the already locked page buffer
+        if (page_buffer == nullptr) {
+            printf("TransactionManager: Warning - Page buffer is null\n");
+            assert(false);
+            return 0;
+        }
+        
+        // Get the page header and read version
+        DSMEngine::DataPage* data_page = reinterpret_cast<DSMEngine::DataPage*>(page_buffer);
+        return data_page->hdr.p_version;
+    }
+
+    void TransactionManager::SetCurrentPageVersion(void* page_buffer, uint64_t version) {
+        // Update the page version in the already locked page buffer
+        if (page_buffer == nullptr) {
+            printf("TransactionManager: Warning - Page buffer is null\n");
+            return;
+        }
+        
+        // Update the page header with new version
+        DSMEngine::DataPage* data_page = reinterpret_cast<DSMEngine::DataPage*>(page_buffer);
+        data_page->hdr.p_version = version;
+        
+        printf("TransactionManager: Updated page version to %lu for page buffer %p\n", version, page_buffer);
     }
     // Contain validation and commit stages.
     bool TransactionManager::CommitTransaction(CharArray &ret_str) {
@@ -392,6 +515,7 @@ namespace DSMEngine{
 
                     }
                     if (access->access_global_record_->GetWTS() > access->txn_local_tuple_->GetWTS()){
+                        RegisterSeenTs(access->access_global_record_->GetWTS());
                         AbortTransaction();
                         return false;
                     }
@@ -424,6 +548,7 @@ namespace DSMEngine{
                         access->access_global_record_->ReSetRecordBuff(tuple_buffer, access->access_global_record_->GetRecordSize(), false);
                     }
                     if (access->access_global_record_->GetWTS() > access->txn_local_tuple_->GetWTS()){
+                        RegisterSeenTs(access->access_global_record_->GetWTS());
                         AbortTransaction();
                         return false;
                     }
@@ -431,10 +556,16 @@ namespace DSMEngine{
             }
         }
         // -----------------(commit stage)----------------------------------------------
+#ifdef USE_SNAPSHOT_MANAGER
+        uint64_t required_floor = max_seen_ts_;
+        if (required_floor != 0) {
+            GlobalTimestamp::EnsureCommitFloor(required_floor + 1);
+        }
+#endif
         // get the commit timestamp right before the commit phase.
         uint64_t commit_ts = GlobalTimestamp::FetchAddMonotoneTimestamp();
 
-        // Then let us write the data and commit.
+        // Write the data, commit, and generate redo logs
         for (size_t i = 0; i < access_list_.access_count_; ++i) {
             Access* access = access_list_.GetAccess(i);
             AccessType access_type = access->access_type_;
@@ -447,24 +578,25 @@ namespace DSMEngine{
                 ds_for_write->fill_in_delta_record_single(access->txn_local_tuple_, access->access_global_record_,
                                                                 delta_gadd,
                                                                 delta_size, commit_ts);
-//                printf("Step 4: Node %d thread %d modify tail_ outside fill in delta\n", RDMA_Manager::node_id, thread_id_);
-//                fflush(stdout);
 #else
                 ds_for_write->fill_in_delta_record_thread_local(access->txn_local_tuple_, access->access_global_record_,
                                                                 delta_gadd,
                                                                 delta_size, commit_ts);
 #endif
-//                printf("Node %u thread %u The delta record is written at %u, %lu, epoch is %u, tuple_gaddr is %p\n", RDMA_Manager::node_id, thread_id_, delta_gadd.nodeID, delta_gadd.offset, ds_for_write->GetEpoch(), access->access_addr_.val);
-//                fflush(stdout);
                 MetaColumn meta = access->txn_local_tuple_->GetMeta();
-                assert(delta_gadd.offset - ds_for_write->seg_addr_.offset < ds_for_write->seg_real_size_ + STRUCT_OFFSET(DeltaSection, local_seg_addr_));
-                meta.prev_delta_ = delta_gadd;
+                assert(delta_gadd.offset - ds_for_write->seg_addr_.offset < ds_for_write->seg_real_size_ + STRUCT_OFFSET(DeltaSection, local_addr_));
+                meta.prev_version_ = delta_gadd;
                 meta.prev_delta_epoch_ = ds_for_write->GetEpoch();
                 meta.prev_delta_data_size_ = delta_size;
-//                meta.next_delta_wts_ = meta.Wts_;
                 meta.Wts_ = commit_ts;
 
                 access->txn_local_tuple_->PutMeta(meta);
+                
+                // Log data update operation before performing it
+                if (log_enabled_) {
+                    LogDataUpdateOperation(access, commit_ts);
+                }
+                
                 // todo: delete the asertion below.
                 access->access_global_record_->CopyFrom(access->txn_local_tuple_);
 //                access->access_global_record_->PutWTS(commit_ts);
@@ -473,15 +605,25 @@ namespace DSMEngine{
                 assert(locked_handles_.find(TOPAGE(access->access_addr_)) != locked_handles_.end());
                 access->txn_local_tuple_->PutWTS(commit_ts);
                 assert(commit_ts < 0x100d2c00cbe9);
+                
+                // Log data update operation before performing it
+                if (log_enabled_) {
+                    LogDataUpdateOperation(access, commit_ts);
+                }
+                
                 access->access_global_record_->CopyFrom(access->txn_local_tuple_);
-//                IndexKey keys[1];
-//                access->txn_local_tuple_->GetPrimaryKey(&keys[0]);
+                
+                // Primary key should have been extracted in InsertRecord and stored in local tuple
+                assert(access->txn_local_tuple_->primary_key_length_ > 0); // Ensure primary key was stored
                 RecordSchema *index_schema_ptr = storage_manager_->tables_[access->access_global_record_->GetTableId()]->GetPrimaryIndexSchema();
-                char* primaryk_buff = new char[access->txn_local_tuple_->schema_ptr_->GetPrimaryKeyLength()];
-                access->txn_local_tuple_->GetPrimaryKey(primaryk_buff);
-                DynamicCompoundKey primary_key(primaryk_buff, index_schema_ptr);
+                DynamicCompoundKey primary_key(access->txn_local_tuple_->primary_key_buffer_, index_schema_ptr);
+                
+                // Log index insertion operation before performing it
+                if (log_enabled_) {
+                    LogIndexInsertOperation(access, primary_key, commit_ts);
+                }
+                
                 storage_manager_->tables_[access->txn_local_tuple_->schema_ptr_->GetTableId()]->InsertPriIndex(primary_key, 1, access->access_addr_);
-                delete[] primaryk_buff;
             }
             delete access->access_global_record_;
             access->access_global_record_ = nullptr;
@@ -506,11 +648,21 @@ namespace DSMEngine{
             // unlock
         }
         ClearStates();
+#ifdef USE_SNAPSHOT_MANAGER
+        max_seen_ts_ = commit_ts;
+#endif
         PROFILE_TIME_END(thread_id_, CC_COMMIT);
         return true;
 		}
 
-		void TransactionManager::AbortTransaction() {
+#ifdef USE_SNAPSHOT_MANAGER
+        void TransactionManager::RegisterSeenTs(uint64_t ts) {
+            if (ts > max_seen_ts_) {
+                max_seen_ts_ = ts;
+            }
+        }
+#endif
+        void TransactionManager::AbortTransaction() {
             PROFILE_TIME_START(thread_id_, CC_ABORT);
             for (size_t i = 0; i < access_list_.access_count_; ++i) {
                 Access* access = access_list_.GetAccess(i);
@@ -541,7 +693,17 @@ namespace DSMEngine{
                 }
                 // unlock
             }
+#ifdef USE_SNAPSHOT_MANAGER
+            if (max_seen_ts_ != 0) {
+                GlobalTimestamp::EnsureCommitFloor(max_seen_ts_ + 1);
+            }
+#endif
             ClearStates();
+#ifdef ENABLE_MVOCC_RETRY_OPTIMIZATION
+            // Mark this transaction as a retry for the next execution
+            // Set after ClearStates() so it persists for the retried transaction
+            is_retry_ = true;
+#endif
             PROFILE_TIME_END(thread_id_, CC_ABORT);
 
         }
@@ -551,7 +713,22 @@ namespace DSMEngine{
             // the old version for this snapshot number. We can make the timestamp acquire inside the spin lock, but it may cause the performance issue.
             // Another solution could be using another spin mutex to use a shared lock to block the garbage collector when we are calling Get snapshot function
             garb_mtx.lock_shared(); // this garb_mtx is necessary to guarantee the correctness of garbage collection.
+            
+#ifdef ENABLE_MVOCC_RETRY_OPTIMIZATION
+            // For retried transactions, use local_ts_next without incrementing it
+            if (is_retry_) {
+#ifdef USE_SNAPSHOT_MANAGER
+                GlobalTimestamp::EnsureSnapshotThreadStarted();
+                snapshot_ts = GlobalTimestamp::local_ts_next.load(std::memory_order_acquire);
+#else
+                snapshot_ts = GlobalTimestamp::GetMonotoneTimestamp();
+#endif
+            } else {
+                snapshot_ts = GlobalTimestamp::GetMonotoneTimestamp();
+            }
+#else
             snapshot_ts = GlobalTimestamp::GetMonotoneTimestamp();
+#endif
 
             std::unique_lock<SpinMutex> psp_lck(pin_sp_mtx);
 
@@ -604,7 +781,7 @@ namespace DSMEngine{
         // we need to wrap the funciton to a function pointer or funciton object.
         auto* ds_= new DeltaSectionWrap(compute_node_id, ds_gaddr, rdma_mg->delta_section_size, local_mr);
         {
-            std::unique_lock<std::shared_mutex> lck(TransactionManager::delta_map_mtx);
+            std::unique_lock<RWSpinMutex> lck(TransactionManager::delta_map_mtx);
             TransactionManager::delta_sections.insert(std::make_pair(ds_gaddr, ds_));
         }
         delete receive_msg_buf;
@@ -622,84 +799,101 @@ namespace DSMEngine{
         uint64_t old_epoch = receive_msg_buf->content.pull_ds.old_epoch;
         uint8_t requester_node_id = receive_msg_buf->content.pull_ds.requester_node_id;
 
+        DeltaSectionWrap* ds_w = nullptr;
+        uint64_t calculated_danger_size = 0;
+        
         {
-            std::shared_lock<std::shared_mutex> map_lck(TransactionManager::delta_map_mtx);
+            std::shared_lock<RWSpinMutex> map_lck(TransactionManager::delta_map_mtx);
             auto it = TransactionManager::delta_sections.find(ds_gaddr);
             map_lck.unlock();
-            DeltaSectionWrap* ds_w = it->second;
-            // RDMA write back the most updated delta section.
-            std::shared_lock<std::shared_mutex> delta_lck(ds_w->main_mtx_);
+
+            if (it == TransactionManager::delta_sections.end()) {
+                delete receive_msg_buf;
+                assert(false);
+                return;
+            }
+
+            ds_w = it->second;
+            std::shared_lock<RWSpinMutex> delta_lck(ds_w->main_mtx_);
+            while (ds_w->inner_section->tail_ != ds_w->inner_section->tail_allocated) {
+                _mm_pause();
+            }
             assert(!ds_w->inner_section->is_empty_);
+            
+            // Capture head and tail values at function start to ensure consistency
+            uint64_t captured_head = ds_w->GetHead();
+            uint64_t captured_tail = ds_w->GetTail();
+            
+            int qp_id = rdma_mg->GetQPForDeltaPull();
             ibv_mr local_mr = *ds_w->seg_local_mr_;
             char* remote_addr = (char*)receive_msg_buf->buffer;
-//                if (old_epoch < ds_w->inner_section->epoch){
-            // the local copy is up to date.
-            //todo: develop reply mechanism according to the old epoch, old head and old tail and also try to make the delta
-            // write an async operation to minumize the latency.
-             int qp_id = rdma_mg->qp_inc_ticket++ % NUM_QP_ACCROSS_COMPUTE;
-             uint8_t* polling_byte = (uint8_t*)((uint8_t*)local_mr.addr + rdma_mg->delta_section_size - 1);
-             assert(ds_w->inner_section->tail_ != ds_w->inner_section->head_ || ds_w->inner_section->is_empty_);
-             *polling_byte = 5;
+            uint8_t* polling_byte = (uint8_t*)((uint8_t*)local_mr.addr + rdma_mg->delta_section_size - 1);
+            assert(ds_w->inner_section->tail_ != ds_w->inner_section->head_ || ds_w->inner_section->is_empty_);
+            *polling_byte = 5;
+            
             std::vector<std::pair<uint64_t, uint64_t>> boundaries;
-             ds_w->CalculateWriteBoundaries(boundaries, old_head_, old_tail_, old_epoch);
-             bool async = false;
-             //todo: it is possible that the tail is updated but the boundary is not updated,
-             // as the tail_cahnge is ourside of the latch guard.
-             for(auto pair : boundaries){
-                 assert(boundaries.size() <= 3);
-                 assert(boundaries.size() > 0);
-                 qp_id = rdma_mg->qp_inc_ticket++ % NUM_QP_ACCROSS_COMPUTE;
+            // Calculate boundaries and danger_size without modifying delta section (holding shared lock)
+            calculated_danger_size = ds_w->CalculateWriteBoundaries(boundaries, old_head_, old_tail_, old_epoch);
+            
+            // Print boundaries information
+            //  printf("[Delta Pull Handler] Node %d -> Node %d: old_head=%lu, old_tail=%lu, old_epoch=%lu, "
+            //         "current_head=%lu, current_tail=%lu, current_epoch=%lu, danger_size=%lu, num_boundaries=%lu\n",
+            //         rdma_mg->node_id, requester_node_id, old_head_, old_tail_, old_epoch,
+            //         ds_w->GetHead(), ds_w->GetTail(), ds_w->GetEpoch(),
+            //         calculated_danger_size, boundaries.size());
+            //  for (size_t i = 0; i < boundaries.size(); i++) {
+            //      printf("  Boundary %lu: start=%lu, end=%lu, size=%lu bytes\n",
+            //             i, boundaries[i].first, boundaries[i].second,
+            //             boundaries[i].second - boundaries[i].first);
+            //  }
+            //  fflush(stdout);
+            
+            // danger_size is now calculated automatically in CalculateWriteBoundaries
+            
+            int count = 0;
+            for (auto pair: boundaries) {
+                qp_id = rdma_mg->GetQPForDeltaPull();
+                
+                if (count == 0) {
+                  local_mr = *rdma_mg->Get_local_big_mr();
+                  remote_addr = (char*)receive_msg_buf->buffer;
+                  uint64_t start = pair.first;
+                  uint64_t end = pair.second;
+                  size_t write_size = end - start;
+                  // copy the header to a local buffer
+                  memcpy(local_mr.addr, ds_w->seg_local_mr_->addr, write_size);
+                  // set the danger size in the local_mr.
+                  ((DeltaSection*)local_mr.addr)->danger_size.store(calculated_danger_size, std::memory_order_release);
+                  
+                  assert(write_size >= STRUCT_OFFSET(DeltaSection, local_addr_));
+                  bool async = true;
+                    // Verify that head and tail have not changed during function execution
+                    assert(captured_head == ds_w->GetHead() && "Head changed during delta pull!");
+                    assert(captured_tail == ds_w->GetTail() && "Tail changed during delta pull!");
+                  rdma_mg->RDMA_Write_xcompute_localcopy(&local_mr, remote_addr, receive_msg_buf->rkey,
+                    write_size, requester_node_id, qp_id, true, &delta_lck);
+                } else {
+                  local_mr = *ds_w->seg_local_mr_;
+                  remote_addr = (char*)receive_msg_buf->buffer;
+                  uint64_t start = pair.first;
+                  uint64_t end = pair.second;
+                  size_t write_size = end - start;
+                  bool async = true;
 
-                local_mr = *ds_w->seg_local_mr_;
-                remote_addr = (char*)receive_msg_buf->buffer;
-                uint64_t start = pair.first;
-                uint64_t end = pair.second;
-                size_t write_size = end - start;
-                 if (write_size < BIGPAGESIZE){
-                     async = true;
-                 }else{
-                     async = false;
-                 }
-                local_mr.addr = (void*)((char*)local_mr.addr + start);
-                 remote_addr += start;
-//                 printf("Issue write request from %lu to %lu\n", start, end);
-//                 fflush(stdout);
-                rdma_mg->RDMA_Write_xcompute(&local_mr, remote_addr, receive_msg_buf->rkey,
-                                            write_size,
-                                            requester_node_id, qp_id, async);
+                  local_mr.addr = (void*)((char*)local_mr.addr + start);
+                  remote_addr += start;
+                  std::atomic_thread_fence(std::memory_order_release);
+                  //todo: may be use RDMA atomic operation can help?
+                  rdma_mg->RDMA_Write_xcompute_localcopy(&local_mr, remote_addr, receive_msg_buf->rkey,
+                    write_size, requester_node_id, qp_id, true, nullptr);
+                }
+                count++;
              }
+             
+
          }
          delete receive_msg_buf;
              // todo: implement the async write according to the returned boundaries.
-//             {// write the header.
-//                 size_t write_size = STRUCT_OFFSET(DeltaSection, local_seg_addr_);
-//                 rdma_mg->RDMA_Write_xcompute(&local_mr, remote_addr, receive_msg_buf->rkey,
-//                                              write_size,
-//                                              requester_node_id, qp_id, true);
-//
-//                 // write the active delta section.
-//                 qp_id = rdma_mg->qp_inc_ticket++ % NUM_QP_ACCROSS_COMPUTE;
-//                 bool async = ds_w->inner_section->tail_ - ds_w->inner_section->head_ >= BIGPAGESIZE;
-//                 remote_addr += STRUCT_OFFSET(DeltaSection, local_seg_addr_) + ds_w->inner_section->head_;
-//                 local_mr.addr = (char*)local_mr.addr + STRUCT_OFFSET(DeltaSection, local_seg_addr_) + ds_w->inner_section->head_;
-//                 rdma_mg->RDMA_Write_xcompute(&local_mr, remote_addr, receive_msg_buf->rkey,
-//                                              ds_w->inner_section->tail_ - ds_w->inner_section->head_,
-//                                              requester_node_id, qp_id, async);
-//                 // write the polling byte.
-//                 remote_addr = (char*)receive_msg_buf->buffer + rdma_mg->delta_section_size - 1;
-//                 local_mr.addr = (char*)ds_w->seg_local_mr_->addr + rdma_mg->delta_section_size - 1;
-//                 rdma_mg->RDMA_Write_xcompute(&local_mr, remote_addr, receive_msg_buf->rkey,
-//                                              1, requester_node_id, qp_id, true);
-//             }
-//            *polling_byte = 5;
-//            rdma_mg->RDMA_Write_xcompute(local_mr, receive_msg_buf->buffer, receive_msg_buf->rkey,
-//                                        rdma_mg->delta_section_size,
-//                                        requester_node_id, qp_id, false);
-            // ibv_mr* thread_local_mr = rdma_mg->Get_local_send_message_mr();
-            // uint8_t* local_uint8 = (uint8_t*)thread_local_mr->addr;
-            // *local_uint8 = 5;
-            // rdma_mg->RDMA_Write_xcompute(thread_local_mr, receive_msg_buf->buffer + rdma_mg->delta_section_size - 1, receive_msg_buf->rkey,
-            //     1, requester_node_id, qp_id, true);
     }
 
     void TransactionManager::ProcessSnapshotPush(void* args){
@@ -733,7 +927,7 @@ namespace DSMEngine{
         for (uint8_t i = 0; i < rdma_mg->GetComputeNodeNum(); i++){
             uint8_t target_node_id = 2*i;
             if (target_node_id != rdma_mg->node_id){
-                int qp_id = rdma_mg->qp_inc_ticket++ % NUM_QP_ACCROSS_COMPUTE;
+                int qp_id = rdma_mg->GetQPForDeltaPull();
                 rdma_mg->post_send_xcompute(send_mr, target_node_id, qp_id, sizeof(RDMA_Request));
             }
         }
@@ -743,7 +937,7 @@ namespace DSMEngine{
         uint64_t last_broadcasted_sp = 0;
         uint64_t last_gc_ts = 0;
         uint64_t largest_snapshot = largest_sp_acquired.load();
-        while(1){
+        while (gc_should_run.load(std::memory_order_acquire)){
             if (largest_snapshot < largest_sp_acquired.load()){
                 // Get the largest snapshot till now in this compute node.
                 largest_snapshot = largest_sp_acquired.load();
@@ -771,6 +965,16 @@ namespace DSMEngine{
                 last_broadcasted_sp = least_sp_this_node;
 
             }
+            {
+                std::unique_lock<SpinMutex> lck2(c_l_mtx);
+                // need to initialize the cluster_least_sp_.
+                if (cluster_least_sp_.empty()) {
+                    for (uint16_t i = 0; i < rdma_mg->GetComputeNodeNum(); i++) {
+                        cluster_least_sp_[2 * i] = 0;
+                    }
+                }
+            }
+
 
             //step 2: do garbage collection according to the least sp across the cluster.
             std::unique_lock<SpinMutex> cl_lck(c_l_mtx);
@@ -799,7 +1003,7 @@ namespace DSMEngine{
 
             }
             // do garbage collection.
-            usleep(500); //todo: tune the sleep time or make the sleep time
+            usleep(5000); //todo: tune the sleep time or make the sleep time
         }
     }
     bool TransactionManager::CoordinatorPrepare() {

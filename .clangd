@@ -5,14 +5,14 @@ CompileFlags:
     - -DMVOCC
     - -DBACKOFF
     - -DBOOST_ALLOW_DEPRECATED_HEADERS
-    - -I/home/wang4996/CLionProjects/MemoryEngine
-    - -I/home/wang4996/CLionProjects/MemoryEngine/include
-    - -I/home/wang4996/CLionProjects/MemoryEngine/txn
-    - -I/home/wang4996/CLionProjects/MemoryEngine/storage
-    - -I/home/wang4996/CLionProjects/MemoryEngine/tpcc
-    - -I/home/wang4996/CLionProjects/MemoryEngine/bench
-    - -I/home/wang4996/CLionProjects/MemoryEngine/utils
-    - -I/home/wang4996/CLionProjects/MemoryEngine/btr
+    - -I/home/ruihong/Projects/MemoryEngine
+    - -I/home/ruihong/Projects/MemoryEngine/include
+    - -I/home/ruihong/Projects/MemoryEngine/txn
+    - -I/home/ruihong/Projects/MemoryEngine/storage
+    - -I/home/ruihong/Projects/MemoryEngine/tpcc
+    - -I/home/ruihong/Projects/MemoryEngine/bench
+    - -I/home/ruihong/Projects/MemoryEngine/utils
+    - -I/home/ruihong/Projects/MemoryEngine/btr
   Remove:
     - -w
     - -Wall
@@ -28,28 +28,22 @@ CompileFlags:
     - -Wno-unused-parameter
 
 Index:
-  Background: Build
-  StandardLibrary: Yes
+  Background: Skip
+  StandardLibrary: No
 
 Diagnostics:
   ClangTidy:
-    Add: 
-      - readability-*
-      - performance-*
-      - modernize-*
+    Add: []
     Remove:
-      - readability-magic-numbers
-      - modernize-use-trailing-return-type
-  UnusedIncludes: Strict
-  MissingIncludes: Strict
+      - '*'
+  UnusedIncludes: None
+  MissingIncludes: None
 
 InlayHints:
-  Enabled: Yes
-  ParameterNames: Yes
-  DeducedTypes: Yes
+  Enabled: No
 
 Hover:
-  ShowAKA: Yes
+  ShowAKA: No
 
 Completion:
   AllScopes: Yes

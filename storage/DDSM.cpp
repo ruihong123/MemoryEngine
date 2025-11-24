@@ -4,6 +4,8 @@
 
 #include <fstream>
 #include "DDSM.h"
+#include "txn/RedoLogger.h"
+#include "Tools/env.h"
 extern uint64_t cache_lookup_total[MAX_APP_THREAD];
 extern uint64_t cache_lookup_times[MAX_APP_THREAD];
 
@@ -478,6 +480,55 @@ namespace DSMEngine {
             return ddsm;
         }
 
+    }
+    
+    ::DSMEngine::RedoLogger* DDSM::GetRedoLogger(bool enable_logging) const {
+        // This function should only be called when logging is enabled
+        assert(enable_logging && "GetRedoLogger called with logging disabled");
+        
+        // Double-checked locking pattern for thread-safe lazy initialization
+        if (redo_logger_ == nullptr) {
+            std::lock_guard<std::mutex> lock(redo_logger_mtx_);
+            if (redo_logger_ == nullptr) {
+                // Initialize RedoLogger with default options
+                DSMEngine::RedoLogger::Options opts;
+                opts.enable_file_system = false;  // Disable file system logging
+                opts.remote_pool = Chunk_type::DeltaChunk;
+                
+                // Set replica write mode based on runtime REPLICA_TYPE from rdma_mg
+                // REPLICA_WRITE_PRIMARY_ONLY (0) → write to all replicas
+                // REPLICA_WRITE_ALL (1) → write to only one replica
+                int replica_type = rdma_mg->GetReplicaType();
+                if (replica_type == REPLICA_WRITE_PRIMARY_ONLY) {
+                    opts.replica_write_mode = DSMEngine::RedoLogger::ReplicaWriteMode::WRITE_ALL_REPLICAS;
+                } else if (replica_type == REPLICA_WRITE_ALL) {
+                    opts.replica_write_mode = DSMEngine::RedoLogger::ReplicaWriteMode::WRITE_ONE_REPLICA;
+                } else {
+                    // Default: write to all replicas
+                    opts.replica_write_mode = DSMEngine::RedoLogger::ReplicaWriteMode::WRITE_ALL_REPLICAS;
+                }
+                
+                // Get compute node ID from rdma_mg (compute nodes have even IDs: 0, 2, 4, ...)
+                uint16_t compute_node_id = static_cast<uint16_t>(rdma_mg->node_id);
+                
+                // Get Env from RDMA_Manager
+                Env* env = rdma_mg->env_;
+                
+                // Create the shared RedoLogger instance
+                const_cast<DDSM*>(this)->redo_logger_ = 
+                    new DSMEngine::RedoLogger(env, rdma_mg, compute_node_id, opts);
+                
+                // Set up the log segment recycle handler in RDMA_Manager
+                rdma_mg->log_segment_recycle_handler_ = 
+                    [this](uint16_t logical_region_id, uint16_t memory_node_id, 
+                           const std::vector<GlobalAddress>& segment_addrs) {
+                        if (redo_logger_ != nullptr) {
+                            redo_logger_->HandleLogSegmentRecycle(logical_region_id, memory_node_id, segment_addrs);
+                        }
+                    };
+            }
+        }
+        return redo_logger_;
     }
 
 

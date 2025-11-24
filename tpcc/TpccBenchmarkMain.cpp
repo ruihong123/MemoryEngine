@@ -1,44 +1,44 @@
-#include "TpccExecutor.h"
-#include "TpccPopulator.h"
-#include "TpccSource.h"
-#include "TpccInitiator.h"
-#include "TpccConstants.h"
-#include "Meta.h"
-#include "TpccParams.h"
 #include "BenchmarkArguments.h"
 #include "ClusterHelper.h"
 #include "ClusterSync.h"
+#include "Meta.h"
+#include "TpccConstants.h"
+#include "TpccExecutor.h"
+#include "TpccInitiator.h"
+#include "TpccParams.h"
+#include "TpccPopulator.h"
+#include "TpccSource.h"
 #include <iostream>
 
 using namespace DSMEngine::TpccBenchmark;
 using namespace DSMEngine;
 
-void ExchPerfStatistics(ClusterConfig* config, 
-    ClusterSync* synchronizer, PerfStatistics* s);
+void ExchPerfStatistics(ClusterConfig *config, ClusterSync *synchronizer,
+                        PerfStatistics *s);
 extern uint64_t cache_invalidation[MAX_APP_THREAD];
 extern uint64_t cache_hit_valid[MAX_APP_THREAD][8];
 extern uint64_t cache_miss[MAX_APP_THREAD][8];
 
 //#if defined(MVOCC)
-//extern uint64_t delta_pull_num[MAX_APP_THREAD];
+// extern uint64_t delta_pull_num[MAX_APP_THREAD];
 //#endif
 void clear_cache_statistics() {
-    for (int i = 0; i < MAX_APP_THREAD; ++i) {
-        cache_invalidation[i] = 0;
+  for (int i = 0; i < MAX_APP_THREAD; ++i) {
+    cache_invalidation[i] = 0;
 #if defined(MVOCC)
-        delta_pull_num[i] = 0;
-        roll_back_num[i] = 0;
+    delta_pull_num[i] = 0;
+    roll_back_num[i] = 0;
 #endif
-        for (int j = 0; j < 8; ++j) {
-            cache_hit_valid[i][j] = 0;
-            cache_miss[i][j] = 0;
-        }
+    for (int j = 0; j < 8; ++j) {
+      cache_hit_valid[i][j] = 0;
+      cache_miss[i][j] = 0;
     }
+  }
 }
-int main(int argc, char* argv[]) {
+int main(int argc, char *argv[]) {
   ArgumentsParser(argc, argv);
 
-//  std::string my_host_name = ClusterHelper::GetLocalHostName();
+  //  std::string my_host_name = ClusterHelper::GetLocalHostName();
   ClusterConfig config(my_host_name, conn_port, config_filename);
   ClusterSync synchronizer(&config);
   FillScaleParams(config);
@@ -47,92 +47,123 @@ int main(int argc, char* argv[]) {
   TpccInitiator initiator(gThreadCount, &config);
   // initialize GAM storage layer
   initiator.InitGAllocator();
-    // the RDMA Manager have a synchronization accross the nodes.
+  // the RDMA Manager have a synchronization accross the nodes.
 
   // initialize benchmark data
-  char* storage_addr = initiator.InitStorage();
-    assert(storage_addr);
+  char *storage_addr = initiator.InitStorage();
+  assert(storage_addr);
   char storage_key[16] = "Storage Key";
-//  default_gallocator->memSet(storage_key, 16, storage_addr, TableDirectory::GetSerializeSize());
-    synchronizer.MasterBroadcast(storage_key, 16, storage_addr,
+  //  default_gallocator->memSet(storage_key, 16, storage_addr,
+  //  TableDirectory::GetSerializeSize());
+  synchronizer.MasterBroadcast(storage_key, 16, storage_addr,
                                TableDirectory::GetSerializeSize());
 
-    std::cout << "storage_addr=" << storage_addr << std::endl;
-    TableDirectory storage_manager;
+  std::cout << "storage_addr=" << storage_addr << std::endl;
+  TableDirectory storage_manager;
   storage_manager.Deserialize(storage_addr);
-
+  default_gallocator->rdma_mg->sync_with_computes_Cside();
   // populate database
   INIT_PROFILE_TIME(gThreadCount);
   TpccPopulator populator(&storage_manager, &tpcc_scale_params);
   populator.Start();
   REPORT_PROFILE_TIME(gThreadCount);
-  //TODO: it seems that FenceXComputes did not do the synchronization.
-    synchronizer.FenceXComputes();
-//    WORKLOAD_PATTERN == PARTITION_SOURCE
-    if (TWOPHASECOMMIT){
-        auto func = std::bind(&TpccExecutor::ProcessQueryThread_2PC_Participant,  (void*)&storage_manager, std::placeholders::_1);
-        default_gallocator->rdma_mg->Set_message_handling_func(func, TwoPC);
-    }
+  // TODO: it seems that FenceXComputes did not do the synchronization.
+  synchronizer.FenceXComputes();
+  //    WORKLOAD_PATTERN == PARTITION_SOURCE
+  if (TWOPHASECOMMIT) {
+    auto func = std::bind(&TpccExecutor::ProcessQueryThread_2PC_Participant,
+                          (void *)&storage_manager, std::placeholders::_1);
+    default_gallocator->rdma_mg->Set_message_handling_func(func, TwoPC);
+  }
   // generate workload
   IORedirector redirector(gThreadCount);
   size_t access_pattern = 0;
-  TpccSource sourcer(&tpcc_scale_params, &redirector, num_txn,
-                     WORKLOAD_PATTERN, gThreadCount, dist_ratio,
-                     config.GetMyPartitionId());
+  TpccSource sourcer(&tpcc_scale_params, &redirector, num_txn, WORKLOAD_PATTERN,
+                     gThreadCount, dist_ratio, config.GetMyPartitionId());
   sourcer.Start();
 
-    IORedirector redirector1(gThreadCount);
-    TpccSource sourcer1(&tpcc_scale_params, &redirector1, num_txn/4,
-                       WORKLOAD_PATTERN, gThreadCount, dist_ratio,
-                       config.GetMyPartitionId());
-//    TpccSource sourcer1(&tpcc_scale_params, &redirector1, num_txn/1000,
-//                        WORKLOAD_PATTERN, gThreadCount, dist_ratio,
-//                        config.GetMyPartitionId());
-    sourcer1.Start();
+  IORedirector redirector1(gThreadCount);
+  TpccSource sourcer1(&tpcc_scale_params, &redirector1, num_txn / 4,
+                      WORKLOAD_PATTERN, gThreadCount, dist_ratio,
+                      config.GetMyPartitionId());
+  //    TpccSource sourcer1(&tpcc_scale_params, &redirector1, num_txn/1000,
+  //                        WORKLOAD_PATTERN, gThreadCount, dist_ratio,
+  //                        config.GetMyPartitionId());
+  sourcer1.Start();
   synchronizer.FenceXComputes();
 
   {
     // warm up
     INIT_PROFILE_TIME(gThreadCount);
     TpccExecutor executor(&redirector, &storage_manager, gThreadCount, false);
+    executor.EnableProgressReporting(true);
     executor.Start();
     REPORT_PROFILE_TIME(gThreadCount);
   }
-    synchronizer.FenceXComputes();
-    // clear the cache statistics.
-    clear_cache_statistics();
+  synchronizer.FenceXComputes();
+  // clear the cache statistics.
+  clear_cache_statistics();
   {
     // run workload
     INIT_PROFILE_TIME(gThreadCount);
-    TpccExecutor executor(&redirector1, &storage_manager, gThreadCount, LOGGING);
+    TpccExecutor executor(&redirector1, &storage_manager, gThreadCount, enable_logging,
+                          enable_latency_recording);
+    executor.EnableProgressReporting(true);
+
+    // Set transaction type names for latency tracking (if enabled)
+    if (enable_latency_recording) {
+      std::map<size_t, std::string> txn_names;
+      txn_names[DELIVERY] = "DELIVERY";
+      txn_names[NEW_ORDER] = "NEW_ORDER";
+      txn_names[PAYMENT] = "PAYMENT";
+      txn_names[ORDER_STATUS] = "ORDER_STATUS";
+      txn_names[STOCK_LEVEL] = "STOCK_LEVEL";
+      executor.SetTxnTypeNames(txn_names);
+    }
+    executor.EnableHotTableScanner(enable_hot_table_scanner);
+
     executor.Start();
     REPORT_PROFILE_TIME(gThreadCount);
     ExchPerfStatistics(&config, &synchronizer, &executor.GetPerfStatistics());
   }
 
   std::cout << "prepare to exit..." << std::endl;
-    synchronizer.Fence_XALLNodes();
-    default_gallocator->rdma_mg->join_all_handling_thread();
+  synchronizer.Fence_XALLNodes();
+  default_gallocator->rdma_mg->join_all_handling_thread();
   std::cout << "over.." << std::endl;
   return 0;
 }
 
-void ExchPerfStatistics(ClusterConfig* config, 
-    ClusterSync* synchronizer, PerfStatistics* s) {
+void ExchPerfStatistics(ClusterConfig *config, ClusterSync *synchronizer,
+                        PerfStatistics *s) {
+  // Save local latency data before collecting stats across nodes
+  // (latency_trackers_ cannot be serialized via memcpy)
+  auto local_latency_trackers = s->latency_trackers_;
+  auto local_txn_type_names = s->txn_type_names_;
+  
   PerfStatistics *stats = new PerfStatistics[config->GetPartitionNum()];
-  synchronizer->MasterCollect<PerfStatistics>(
-      s, stats);
+  synchronizer->MasterCollect<PerfStatistics>(s, stats);
   synchronizer->MasterBroadcast<PerfStatistics>(stats);
+  
+  // Reconstruct corrupted map objects from memcpy using placement new
+  // This overwrites the corrupted maps without trying to traverse/delete them
+  for (size_t i = 0; i < config->GetPartitionNum(); ++i) {
+    new (&stats[i].latency_trackers_) std::map<size_t, LatencyTracker>();
+    new (&stats[i].txn_type_names_) std::map<size_t, std::string>();
+  }
+  
   for (size_t i = 0; i < config->GetPartitionNum(); ++i) {
     stats[i].Print();
     stats[0].Aggregate(stats[i]);
   }
-    if (config->IsMaster()){
-        stats[0].PrintAgg();
-    }
+  if (config->IsMaster()) {
+    // Move (not copy) latency data from master node's local data
+    stats[0].latency_trackers_ = std::move(local_latency_trackers);
+    stats[0].txn_type_names_ = std::move(local_txn_type_names);
+    // Calculate percentiles before printing
+    stats[0].CalculateLatencyPercentiles();
+    stats[0].PrintAgg();
+  }
   delete[] stats;
   stats = nullptr;
 }
-
-
-

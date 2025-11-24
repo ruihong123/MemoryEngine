@@ -1,0 +1,168 @@
+#include "BenchmarkArguments.h"
+#include "ClusterHelper.h"
+#include "ClusterSync.h"
+#include "Meta.h"
+#include "TATPConstants.h"
+#include "TATPExecutor.h"
+#include "TATPInitiator.h"
+#include "TATPParams.h"
+#include "TATPPopulator.h"
+#include "TATPSource.h"
+#include <iostream>
+
+using namespace DSMEngine::TATPBenchmark;
+using namespace DSMEngine;
+
+void ExchPerfStatistics(ClusterConfig *config, ClusterSync *synchronizer,
+                        PerfStatistics *s);
+
+extern uint64_t cache_invalidation[MAX_APP_THREAD];
+extern uint64_t cache_hit_valid[MAX_APP_THREAD][8];
+extern uint64_t cache_miss[MAX_APP_THREAD][8];
+
+#if defined(MVOCC)
+extern uint64_t delta_pull_num[MAX_APP_THREAD];
+extern uint64_t roll_back_num[MAX_APP_THREAD];
+#endif
+
+void clear_cache_statistics() {
+  for (int i = 0; i < MAX_APP_THREAD; ++i) {
+    cache_invalidation[i] = 0;
+#if defined(MVOCC)
+    DSMEngine::delta_pull_num[i] = 0;
+    DSMEngine::roll_back_num[i] = 0;
+#endif
+    for (int j = 0; j < 8; ++j) {
+      cache_hit_valid[i][j] = 0;
+      cache_miss[i][j] = 0;
+    }
+  }
+}
+
+int main(int argc, char *argv[]) {
+  ArgumentsParser(argc, argv);
+
+  ClusterConfig config(my_host_name, conn_port, config_filename);
+  ClusterSync synchronizer(&config);
+  FillScaleParams(config);
+  PrintScaleParams();
+
+  TATPInitiator initiator(gThreadCount, &config);
+
+  // initialize GAM storage layer
+  initiator.InitGAllocator();
+
+  // initialize benchmark data
+  char *storage_addr = initiator.InitStorage();
+  assert(storage_addr);
+  char storage_key[16] = "Storage Key";
+  synchronizer.MasterBroadcast(storage_key, 16, storage_addr,
+                               TableDirectory::GetSerializeSize());
+
+  std::cout << "storage_addr=" << storage_addr << std::endl;
+  TableDirectory storage_manager;
+  storage_manager.Deserialize(storage_addr);
+  default_gallocator->rdma_mg->sync_with_computes_Cside();
+
+  // populate database
+  INIT_PROFILE_TIME(gThreadCount);
+  TATPPopulator populator(&storage_manager);
+  populator.PopulateDatabase();
+  REPORT_PROFILE_TIME(gThreadCount);
+
+  synchronizer.FenceXComputes();
+
+  if (TWOPHASECOMMIT) {
+    auto func = std::bind(&TATPExecutor::ProcessQueryThread_2PC_Participant,
+                          (void *)&storage_manager, std::placeholders::_1);
+    default_gallocator->rdma_mg->Set_message_handling_func(func, TwoPC);
+  }
+
+  // generate workload
+  IORedirector redirector(gThreadCount);
+  TATPSource sourcer(&tatp_scale_params, &redirector, num_txn, 0, gThreadCount);
+  sourcer.Start();
+
+  IORedirector redirector1(gThreadCount);
+  TATPSource sourcer1(&tatp_scale_params, &redirector1, num_txn / 4, 0,
+                      gThreadCount);
+  sourcer1.Start();
+
+  synchronizer.FenceXComputes();
+
+  {
+    // warm up
+    std::cout << "Warm up phase..." << std::endl;
+    INIT_PROFILE_TIME(gThreadCount);
+    TATPExecutor executor(&redirector, &storage_manager, gThreadCount, false);
+    executor.Start();
+    REPORT_PROFILE_TIME(gThreadCount);
+  }
+
+  synchronizer.FenceXComputes();
+  clear_cache_statistics();
+
+  {
+    // run workload
+    std::cout << "Running benchmark..." << std::endl;
+    INIT_PROFILE_TIME(gThreadCount);
+    TATPExecutor executor(&redirector1, &storage_manager, gThreadCount, enable_logging,
+                          enable_latency_recording);
+
+    // Set transaction type names for latency tracking (if enabled)
+    if (enable_latency_recording) {
+      std::map<size_t, std::string> txn_names;
+      txn_names[GET_SUBSCRIBER_DATA] = "GET_SUBSCRIBER_DATA";
+      txn_names[GET_NEW_DESTINATION] = "GET_NEW_DESTINATION";
+      txn_names[GET_ACCESS_DATA] = "GET_ACCESS_DATA";
+      txn_names[UPDATE_SUBSCRIBER_DATA] = "UPDATE_SUBSCRIBER_DATA";
+      txn_names[UPDATE_LOCATION] = "UPDATE_LOCATION";
+      txn_names[INSERT_CALL_FORWARDING] = "INSERT_CALL_FORWARDING";
+      txn_names[DELETE_CALL_FORWARDING] = "DELETE_CALL_FORWARDING";
+      executor.SetTxnTypeNames(txn_names);
+    }
+    executor.EnableHotTableScanner(enable_hot_table_scanner);
+
+    executor.Start();
+    REPORT_PROFILE_TIME(gThreadCount);
+    ExchPerfStatistics(&config, &synchronizer, &executor.GetPerfStatistics());
+  }
+
+  std::cout << "prepare to exit..." << std::endl;
+  synchronizer.Fence_XALLNodes();
+  default_gallocator->rdma_mg->join_all_handling_thread();
+  std::cout << "over.." << std::endl;
+  return 0;
+}
+
+void ExchPerfStatistics(ClusterConfig *config, ClusterSync *synchronizer,
+                        PerfStatistics *s) {
+  // Save local latency data before collecting stats across nodes
+  // (latency_trackers_ cannot be serialized via memcpy)
+  auto local_latency_trackers = s->latency_trackers_;
+  auto local_txn_type_names = s->txn_type_names_;
+  
+  PerfStatistics *stats = new PerfStatistics[config->GetPartitionNum()];
+  synchronizer->MasterCollect<PerfStatistics>(s, stats);
+  synchronizer->MasterBroadcast<PerfStatistics>(stats);
+  
+  // Reconstruct corrupted map objects from memcpy using placement new
+  // This overwrites the corrupted maps without trying to traverse/delete them
+  for (size_t i = 0; i < config->GetPartitionNum(); ++i) {
+    new (&stats[i].latency_trackers_) std::map<size_t, LatencyTracker>();
+    new (&stats[i].txn_type_names_) std::map<size_t, std::string>();
+  }
+  
+  for (size_t i = 0; i < config->GetPartitionNum(); ++i) {
+    stats[i].Print();
+    stats[0].Aggregate(stats[i]);
+  }
+  if (config->IsMaster()) {
+    // Move (not copy) latency data from master node's local data
+    stats[0].latency_trackers_ = std::move(local_latency_trackers);
+    stats[0].txn_type_names_ = std::move(local_txn_type_names);
+    stats[0].PrintAgg();
+  }
+  delete[] stats;
+  stats = nullptr;
+}

@@ -104,17 +104,17 @@ extern bool Show_Me_The_Print;
 //#define RDMAPROCESSANALYSIS
 
 //Configuration macro
-#define NUM_QP_ACCROSS_COMPUTE 1
+#define NUM_QP_ACCROSS_COMPUTE 2
 #define RDMAFAAFORREADLOCK
 #define CACHECOHERENCEPROTOCOL
 #define DYNAMIC_ANALYSE_PAGE
 #define TIMEPRINTGAP 100000
 //#define GETANALYSIS
 //#define TIMEPRINT
-#define BIGPAGESIZE (512*1024)
+#define BIGPAGESIZE (1024*1024)
 #define ROCKSDB_PTHREAD_ADAPTIVE_MUTEX
 #define RECEIVE_OUTSTANDING_SIZE 1024 // used to be 1024
-#define SEND_OUTSTANDING_SIZE_XCOMPUTE 32 //todo: enlarge this
+#define SEND_OUTSTANDING_SIZE_XCOMPUTE 64 //todo: enlarge this
 #define ATOMIC_OUTSTANDING_SIZE 16
 #define MAX_INLINE_SIZE 256
 //#define ASYNC_UNLOCK
@@ -126,14 +126,16 @@ extern bool Show_Me_The_Print;
 #define PAGE_FREE_LIST
 #define FREELIST_RATIO 0.002
 #define FREELIST_THREAD_NUM 1
-#define DIRTY_ONLY_FLUSH
+// #define DIRTY_ONLY_FLUSH
 #define ASYNC_PLAN 1
+// #define USE_SNAPSHOT_MANAGER
+// #define ENABLE_MVOCC_RETRY_OPTIMIZATION
 
 #define PARALLEL_DEGREE 8
 #define STARVATION_THRESHOLD 256 // todo: we can try 1, 8 64 and UINT64_MAX
 #define WRITER_STARV_SPIN_BASE 16 // disable WRITER_STARV_SPIN_BASE and STARV_REVENGE when testing the impact of STARVATION_THRESHOLD
-#define STARV_REVENGE
-#define STARV_BACKOFF
+// #define STARV_REVENGE
+// #define STARV_BACKOFF
 
 #include "port/thread_annotations.h"
 
