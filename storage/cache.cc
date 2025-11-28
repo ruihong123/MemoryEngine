@@ -714,6 +714,109 @@ void LRUCache::bulk_insert_free_list(std::pair<LRUHandle *, LRUHandle *> start_e
 
 }
 
+void LRUCache::SoftFlushAllDirtyPages() {
+    std::unique_lock<RWSpinMutex> l(table_mutex_);
+    
+    // Ensure in_use_ list is empty before flushing - entries in in_use_ are actively
+    // being used by clients (refs >= 2) and should not be flushed
+    if (in_use_.next != &in_use_) {
+        // in_use_ list is not empty, skip flushing to avoid interfering with active clients
+        return;
+    }
+    
+    std::vector<LRUHandle*> dirty_handles;
+    
+    // Only collect dirty handles from lru_ list (entries with refs == 1, not actively in use)
+    for (LRUHandle* e = lru_.next; e != &lru_;) {
+        LRUHandle* next = e->next;
+        // Only flush entries that are in cache, have write lock, and are in lru_ list (not in use)
+        if (e->in_cache && e->remote_lock_status.load() == 2 && e->refs.load() == 1) {
+            // This is a dirty page with write lock, need to flush
+            dirty_handles.push_back(e);
+        }
+        e = next;
+    }
+    
+    // Also check entries in the hash table that might be in lru_ but not yet in the list
+    // Only collect those that are not in in_use_ (refs == 1)
+    for (uint32_t i = 0; i < table_.length_; i++) {
+        LRUHandle* h = table_.list_[i];
+        while (h != nullptr) {
+            // Only collect if: in cache, has write lock, refs == 1 (not in use), and not already collected
+            if (h->in_cache && h->remote_lock_status.load() == 2 && h->refs.load() == 1) {
+                // Check if already collected
+                bool found = false;
+                for (auto* collected : dirty_handles) {
+                    if (collected == h) {
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    dirty_handles.push_back(h);
+                }
+            }
+            h = h->next_hash;
+        }
+    }
+    
+    l.unlock();
+    
+    // Now flush all dirty pages with proper ownership management
+    auto rdma_mg = RDMA_Manager::Get_Instance();
+    for (LRUHandle* handle : dirty_handles) {
+        // Acquire write lock on the handle to ensure exclusive access during flush
+        std::unique_lock<RWSpinMutex> handle_lock(handle->rw_mtx);
+        
+        // Double-check the conditions after acquiring the handle lock
+        // Ensure it's still not in use (refs == 1) and still has write lock
+        if (handle->refs.load() != 1 || handle->remote_lock_status.load() != 2) {
+            // State changed - either now in use or lock released, skip this handle
+            continue;
+        }
+        
+        ibv_mr* mr = (ibv_mr*)handle->value;
+        if (mr == nullptr || mr->addr == nullptr) {
+            continue;
+        }
+        
+        // Calculate lock address
+        GlobalAddress lock_gptr = handle->gptr;
+        lock_gptr.offset = lock_gptr.offset + STRUCT_OFFSET(LeafPage, global_lock);
+        
+        // Flush the dirty page with proper ownership management
+        // This will properly release the write lock and flush the page
+        rdma_mg->global_write_page_and_Wunlock_Async(mr, handle->gptr, kLeafPageSize, lock_gptr, handle, false);
+        
+        // Update lock status after flush
+        handle->remote_lock_status.store(0);
+        handle->clear_pending_inv_states();
+    }
+}
+
+void LRUCache::HardRemoveByLogicalId(uint16_t logical_id) {
+    std::unique_lock<RWSpinMutex> l(table_mutex_);
+    std::vector<LRUHandle*> handles_to_remove;
+    
+    // Collect all handles matching the logical_id from the hash table
+    for (uint32_t i = 0; i < table_.length_; i++) {
+        LRUHandle* h = table_.list_[i];
+        while (h != nullptr) {
+            LRUHandle* next = h->next_hash;
+            if (h->in_cache && h->gptr.nodeID == logical_id) {
+                handles_to_remove.push_back(h);
+            }
+            h = next;
+        }
+    }
+    
+    // Remove all matching handles
+    for (LRUHandle* handle : handles_to_remove) {
+        // Remove from hash table
+        FinishErase(table_.Remove(handle->key(), handle->hash));
+    }
+}
+
 
 static const int kNumShardBits = 7;
 static const int kNumShards = 1 << kNumShardBits;
@@ -848,6 +951,16 @@ class ShardedLRUCache : public Cache {
       total += shard_[s].TotalCharge();
     }
     return total;
+  }
+  void SoftFlushAllDirtyPages() override {
+    for (int s = 0; s < kNumShards; s++) {
+      shard_[s].SoftFlushAllDirtyPages();
+    }
+  }
+  void HardRemoveByLogicalId(uint16_t logical_id) override {
+    for (int s = 0; s < kNumShards; s++) {
+      shard_[s].HardRemoveByLogicalId(logical_id);
+    }
   }
 };
 

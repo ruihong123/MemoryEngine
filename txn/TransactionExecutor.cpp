@@ -45,12 +45,15 @@ void TransactionExecutor::HotTableScannerMain() {
     std::this_thread::yield();
   }
 
+  size_t scan_transaction_count = 0;
   while (hot_scan_should_run_.load(std::memory_order_acquire)) {
     for (auto &task : hot_scan_tasks_) {
       if (!hot_scan_should_run_.load(std::memory_order_acquire)) {
         break;
       }
+      // Each task.run_once() represents one long-running scan transaction
       task.run_once(scanner_manager);
+      scan_transaction_count++;
     }
   }
   
@@ -58,7 +61,11 @@ void TransactionExecutor::HotTableScannerMain() {
   if (scanner_manager.HasActiveTransaction()) {
     CharArray ret;
     scanner_manager.CommitTransaction(ret);
+    scan_transaction_count++;
   }
+  
+  // Update hot scan count
+  hot_scan_count_.fetch_add(scan_transaction_count, std::memory_order_relaxed);
 }
 
 void TransactionExecutor::EnableHotTableScanner(bool enabled) {

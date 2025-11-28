@@ -128,6 +128,9 @@ int main(int argc, char *argv[]) {
   }
 
   std::cout << "prepare to exit..." << std::endl;
+  std::cout << "wait for all memory nodes to replay complete..." << std::endl;
+  default_gallocator->GetRedoLogger(true)->FlushAllBuffers(false);
+  default_gallocator->GetRedoLogger(true)->WaitForAllMemoryNodesReplayComplete();
   synchronizer.Fence_XALLNodes();
   default_gallocator->rdma_mg->join_all_handling_thread();
   std::cout << "over.." << std::endl;

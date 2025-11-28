@@ -23,6 +23,9 @@
 #include "utils/Local_opt_locks.h"
 //#include "storage/Table.h"
 class IndexCache;
+namespace DSMEngine {
+    class RedoLogger;
+}
 
 template<class Key, class Value>
 struct Request {
@@ -162,12 +165,12 @@ class Btr {
         //Btree waiting for serialization. get the root node from memcached
         Btr(DDSM *dsm, Cache *cache_ptr, RecordSchema *record_scheme_ptr);
         // the start pointer of k and the data_ of v shall be same.
-        void insert(const DynamicCompoundKey &k, const Slice &v);
+        void insert(const DynamicCompoundKey &k, const Slice &v, RedoLogger* redo_logger = nullptr);
 
-        bool remove(const DynamicCompoundKey &k);
+        bool remove(const DynamicCompoundKey &k, RedoLogger* redo_logger = nullptr);
 
         bool search(const DynamicCompoundKey &k, const Slice &v);
-        bool remove(const DynamicCompoundKey &k, const Slice &v);
+        bool remove(const DynamicCompoundKey &k, const Slice &v, RedoLogger* redo_logger = nullptr);
         //Remember to destroy the iterator after use.
         iterator begin();
         // Finds the first element whose key is not less than key. the iterator always move forward.
@@ -253,7 +256,17 @@ class Btr {
 
         void refetch_rootnode();
 
-        bool update_new_root(GlobalAddress left, const DynamicCompoundKey &k, GlobalAddress right, int level, GlobalAddress old_root);
+        bool update_new_root(GlobalAddress left, const DynamicCompoundKey &k, GlobalAddress right, int level, GlobalAddress old_root, RedoLogger* redo_logger = nullptr);
+        
+        // Helper functions for logging index page changes
+        void LogIndexPageChange(RedoLogger* redo_logger, GlobalAddress page_addr, void* page_buffer, size_t page_size, bool is_split = false);
+        void LogIndexPageHeaderChange(RedoLogger* redo_logger, GlobalAddress page_addr, void* page_buffer);
+        void LogIndexPageContentChange(RedoLogger* redo_logger, GlobalAddress page_addr, void* page_buffer, size_t content_offset, size_t content_size);
+        void LogInternalPageSplit(RedoLogger* redo_logger, GlobalAddress old_page_addr, InternalPage* old_page, 
+                                 GlobalAddress new_page_addr, InternalPage* new_page, RecordSchema* schema);
+        void LogLeafPageSplit(RedoLogger* redo_logger, GlobalAddress old_page_addr, LeafPage* old_page,
+                             GlobalAddress new_page_addr, LeafPage* new_page, RecordSchema* schema);
+        void LogNewRootPage(RedoLogger* redo_logger, GlobalAddress root_addr, InternalPage* root_page, RecordSchema* schema);
         void invalidate_root(GlobalAddress gptr){
             std::unique_lock<RWSpinMutex> l(root_mtx);
             if (gptr == g_root_ptr.load()) {
@@ -261,7 +274,7 @@ class Btr {
             }
         };
         // Insert a key and a point at a particular level (level != 0), the node is unknown
-        bool insert_internal(DynamicCompoundKey &k, GlobalAddress &v, int target_level);
+        bool insert_internal(DynamicCompoundKey &k, GlobalAddress &v, int target_level, RedoLogger* redo_logger = nullptr);
 
 
 
@@ -274,7 +287,7 @@ class Btr {
 
 
         bool leaf_page_search(GlobalAddress page_addr, const DynamicCompoundKey &k, SearchResult &result, int level);
-        bool leaf_page_delete(GlobalAddress page_addr, const DynamicCompoundKey &k, SearchResult &result, int level);
+        bool leaf_page_delete(GlobalAddress page_addr, const DynamicCompoundKey &k, SearchResult &result, int level, RedoLogger* redo_logger = nullptr);
         // create a iterator for the range query.
         bool leaf_page_find(GlobalAddress page_addr, const DynamicCompoundKey &k, SearchResult &result, iterator &iter, int level);
 //        void internal_page_search(const Key &k, SearchResult &result);
@@ -282,13 +295,13 @@ class Btr {
 //    void leaf_page_search(LeafPage *page, const Key &k, SearchResult &result);
         // store a key and a pointer to an known internal node.
         // Note: node range [barrer1, barrer2)
-        bool internal_page_store(GlobalAddress page_addr, DynamicCompoundKey &k, GlobalAddress &v, int level);
+        bool internal_page_store(GlobalAddress page_addr, DynamicCompoundKey &k, GlobalAddress &v, int level, RedoLogger* redo_logger = nullptr);
 
         //store a key and value to a leaf page [lowest, highest). If it is secondary index, then range could be [lowest, highest], where lowest == highest.
         // Our code logic make it impossible to have duplicated key like this [a,b,c,d,d,d,d] [d,e,e,e,e,f], where dupilated keys covers last few records in one node and
         // spill to the next node for a few records. We make sure this never happen by our code logics in split.
         bool leaf_page_store(GlobalAddress page_addr, const DynamicCompoundKey &k, const Slice &v, DynamicCompoundKey &split_key,
-                             GlobalAddress &sibling_addr, int level);
+                             GlobalAddress &sibling_addr, int level, RedoLogger* redo_logger = nullptr);
 
 //        bool leaf_page_del(GlobalAddress page_addr, const Key &k, int level,
 //                           CoroContext *cxt, int coro_id);

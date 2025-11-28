@@ -4241,7 +4241,7 @@ namespace DSMEngine {
                 std::cout << "q id is" << qp_type << std::endl;
                 fprintf(stdout, "QP number=0x%x\n", res->qp_map[target_node_id]->qp_num);
             } else {
-                DEBUG_PRINT("RDMA write successfully\n");
+                // DEBUG_PRINT("RDMA write successfully\n");
             }
             delete[] wc;
         }
@@ -5115,7 +5115,7 @@ namespace DSMEngine {
                 std::cout << "q id is" << qp_type << std::endl;
                 fprintf(stdout, "QP number=0x%x\n", res->qp_map[target_node_id]->qp_num);
             } else {
-                DEBUG_PRINT("RDMA write with imm successfully\n");
+                // DEBUG_PRINT("RDMA write with imm successfully\n");
             }
             delete[] wc;
         }
@@ -10575,6 +10575,7 @@ namespace DSMEngine {
         if (it != logical_groups.end()) {
             for (const auto &phys_reg: it->second.physical_regions) {
                 if (phys_reg.phys_id == physical_id) {
+                    assert(phys_reg.base_ptr != 0);
                     return phys_reg.base_ptr + logical_offset;
                 }
             }

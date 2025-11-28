@@ -21,6 +21,9 @@
 #include <vector>
 #include <memory>
 #include <list>
+#include <set>
+#include <thread>
+#include <chrono>
 
 #include "Tools/env.h"
 #include "Tools/slice.h"
@@ -38,7 +41,7 @@ namespace DSMEngine {
         static constexpr char SEGMENT_CLOSE_MARKER = '$';
         
         // Threshold for auto-flush: flush when unflushed data exceeds this size
-        static constexpr size_t AUTO_FLUSH_THRESHOLD = 64 * 1024;  // 64KB
+        static constexpr size_t AUTO_FLUSH_THRESHOLD = 1024 * 1024;  // 64KB
 
         // Metadata structure (separate from data buffer, append-only)
         // For append-only logs, we track tail (write position) and flushed_tail (flushed position)
@@ -49,15 +52,39 @@ namespace DSMEngine {
         } __attribute__((packed));
         
 
+        // Debug-only enum to identify log record types
+#ifdef NDEBUG
+        enum LogRecordType : uint8_t {
+            LOG_UNKNOWN = 0
+        };
+#else
+        enum LogRecordType : uint8_t {
+            LOG_UNKNOWN = 0,
+            LOG_DATA_PAGE_INIT,           // DataPage initialization
+            LOG_DATA_PAGE_BITMAP_UPDATE,  // DataPage bitmap update (AllocateRecord)
+            LOG_DATA_PAGE_UPDATE,         // DataPage record update (LogDataUpdateOperation)
+            LOG_INTERNAL_PAGE_STORE,      // InternalPage::internal_page_store
+            LOG_LEAF_PAGE_STORE,          // LeafPage::leaf_page_store
+            LOG_LEAF_PAGE_DELETE,         // LeafPage::leaf_page_delete
+            LOG_INTERNAL_PAGE_SPLIT_OLD,  // LogInternalPageSplit - old page
+            LOG_INTERNAL_PAGE_SPLIT_NEW,  // LogInternalPageSplit - new page
+            LOG_LEAF_PAGE_SPLIT_OLD,      // LogLeafPageSplit - old page
+            LOG_LEAF_PAGE_SPLIT_NEW,      // LogLeafPageSplit - new page
+            LOG_NEW_ROOT_PAGE,            // LogNewRootPage
+            LOG_INDEX_PAGE_CHANGE,        // LogIndexPageChange (helper function)
+            LOG_INDEX_PAGE_HEADER_CHANGE, // LogIndexPageHeaderChange (helper function)
+            LOG_INDEX_PAGE_CONTENT_CHANGE // LogIndexPageContentChange (helper function)
+        };
+#endif
+
         struct RecordHeader {
             uint16_t magic;             // 0x4C52 ('R''L' little-endian)
-            uint16_t version;           // record format version (1)
-            uint16_t compute_node_id;   // producing compute node id
-            uint16_t logical_region_id;    // target memory node id (stream key)
             GlobalAddress page_gaddr;   // page the redo applies to
             uint64_t page_version;      // version of the page for last-writer-wins
-            uint64_t lsn;               // per-compute-node LSN
             uint32_t payload_len;       // bytes following the header
+#ifndef NDEBUG
+            LogRecordType log_type;     // Debug: identifies which function created this log
+#endif
         } __attribute__((packed));
 
         enum ReplicaWriteMode {
@@ -104,22 +131,23 @@ namespace DSMEngine {
                     GlobalAddress page_gaddr,
                     uint64_t page_version,
                     const void* payload,
-                    uint32_t payload_len,
-                    LSN* out_lsn = nullptr) {
+                    uint32_t payload_len
+#ifndef NDEBUG
+                    , LogRecordType log_type = LOG_UNKNOWN
+#endif
+                    ) {
             const size_t need = sizeof(RecordHeader) + payload_len;
 
             auto& s = GetOrCreateStream(logical_region_id);
 
             RecordHeader hdr;
             hdr.magic = 0x4C52;
-            hdr.version = 1;
-            hdr.compute_node_id = compute_node_id_;
-            hdr.logical_region_id  = logical_region_id;
             hdr.page_gaddr = page_gaddr;
             hdr.page_version = page_version;
-            hdr.lsn = next_lsn_.fetch_add(1, std::memory_order_relaxed);
             hdr.payload_len = payload_len;
-            if (out_lsn) *out_lsn = hdr.lsn;
+#ifndef NDEBUG
+            hdr.log_type = log_type;
+#endif
 
             std::lock_guard<SpinMutex> lk(s.mtx);
 
@@ -179,6 +207,7 @@ namespace DSMEngine {
         }
 
         void Flush(uint16_t logical_region_id, bool fsync) {
+            std::shared_lock<RWSpinMutex> read_lk(streams_mtx_);
             auto it = streams_.find(logical_region_id);
             if (it == streams_.end()) return;
             std::lock_guard<SpinMutex> lk(it->second.mtx);
@@ -186,9 +215,91 @@ namespace DSMEngine {
         }
 
         void FlushAll(bool fsync) {
+            std::shared_lock<RWSpinMutex> read_lk(streams_mtx_);
             for (auto& kv : streams_) {
                 std::lock_guard<SpinMutex> lk(kv.second.mtx);
                 FlushLocked(kv.second, fsync);
+            }
+        }
+        
+        // Flush all buffers for all streams (ensures all data is written to remote)
+        void FlushAllBuffers(bool fsync = false) {
+            FlushAll(fsync);
+        }
+        
+        // Wait for all remote memory nodes to finish replaying all logs
+        // This sends RPC queries to all memory nodes and waits for them to confirm replay is complete
+        void WaitForAllMemoryNodesReplayComplete() {
+            // Collect all unique logical region IDs (memory nodes) that we have streams for
+            std::set<uint16_t> logical_region_ids;
+            {
+                std::shared_lock<RWSpinMutex> read_lk(streams_mtx_);
+                for (const auto& kv : streams_) {
+                    logical_region_ids.insert(kv.first);
+                }
+            }
+            
+            if (logical_region_ids.empty()) {
+                return; // No streams, nothing to wait for
+            }
+            
+            // For each logical region, query all replica memory nodes
+            for (uint16_t logical_region_id : logical_region_ids) {
+                const auto& replicas = rdma_->GetReplicaSet(logical_region_id);
+                if (replicas.empty()) {
+                    continue;
+                }
+                
+                // Query all replica nodes (skip primary at index 0)
+                for (size_t i = 1; i < replicas.size(); ++i) {
+                    uint16_t physical_node_id = replicas[i].phys_id;
+                    
+                    // Allocate receive buffer for reply BEFORE sending request
+                    ibv_mr recv_mr;
+                    rdma_->Allocate_Local_RDMA_Slot(recv_mr, Message);
+                    RDMA_Reply* recv_pointer = reinterpret_cast<RDMA_Reply*>(recv_mr.addr);
+                    *recv_pointer = {};
+                    recv_pointer->received = false;
+                    
+                    // Send RPC query
+                    RDMA_Request* send_pointer;
+                    ibv_mr* send_mr = rdma_->Get_local_send_message_mr();
+                    send_pointer = (RDMA_Request*)send_mr->addr;
+                    
+                    send_pointer->command = log_replay_status_query;
+                    send_pointer->content.log_replay_status_query.compute_node_id = compute_node_id_;
+                    
+                    // Set the receive buffer address and rkey in the request
+                    send_pointer->buffer = recv_mr.addr;
+                    send_pointer->rkey = recv_mr.rkey;
+                    
+                    std::string qp_type_main("main");
+                    int rc = rdma_->post_send<RDMA_Request>(send_mr, physical_node_id, qp_type_main);
+                    if (rc) {
+                        fprintf(stderr, "RedoLogger: failed to send log_replay_status_query RPC to physical_node_id=%u (rc=%d)\n", 
+                               physical_node_id, rc);
+                        rdma_->Deallocate_Local_RDMA_Slot(recv_mr.addr, Message);
+                        continue;
+                    }
+                    
+                    // Poll for send completion
+                    ibv_wc wc[2] = {};
+                    if (rdma_->poll_completion(wc, 1, qp_type_main, true, physical_node_id)) {
+                        fprintf(stderr, "RedoLogger: failed to poll send completion for log_replay_status_query RPC\n");
+                        rdma_->Deallocate_Local_RDMA_Slot(recv_mr.addr, Message);
+                        continue;
+                    }
+                    
+                    // Poll for reply using poll_reply_buffer (same pattern as Remote_Memory_Register)
+                    rdma_->poll_reply_buffer(recv_pointer);
+                    
+                    // Check if reply indicates all logs are replayed
+                    if (!recv_pointer->received || !recv_pointer->content.log_replay_status_reply.all_logs_replayed) {
+                        fprintf(stderr, "RedoLogger: Unexpected reply from physical_node_id=%u\n", physical_node_id);
+                    }
+                    
+                    rdma_->Deallocate_Local_RDMA_Slot(recv_mr.addr, Message);
+                }
             }
         }
 
@@ -199,6 +310,7 @@ namespace DSMEngine {
         }
 
         size_t UnflushedBytes(uint16_t logical_region_id) const {
+            std::shared_lock<RWSpinMutex> read_lk(streams_mtx_);
             auto it = streams_.find(logical_region_id);
             if (it == streams_.end()) return 0;
             uint64_t tail = it->second.metadata.tail_.load(std::memory_order_acquire);
@@ -212,6 +324,7 @@ namespace DSMEngine {
         void HandleLogSegmentRecycle(uint16_t logical_region_id,
                                      uint16_t memory_node_id,
                                      const std::vector<GlobalAddress>& segment_addrs) {
+            std::shared_lock<RWSpinMutex> read_lk(streams_mtx_);
             auto it = streams_.find(logical_region_id);
             if (it == streams_.end()) {
                 fprintf(stderr, "RedoLogger: HandleLogSegmentRecycle: stream not found for logical_region_id=%u\n", 
@@ -260,9 +373,8 @@ namespace DSMEngine {
                 if (current_acks >= required_acks) {
                     // Move segment to free list
                     s.free_segments.push_back(seg_addr);
-                    // Remove from pending tracking
-                    s.pending_recycle_acks.erase(ack_it);
-                    
+                    // Remove from pending tracking (erase by key to handle case where required_acks=1)
+                    s.pending_recycle_acks.erase(seg_key);
                     printf("RedoLogger: Recycled segment 0x%lx for logical_region_id=%u (acks=%u/%u)\n",
                            seg_addr.val, logical_region_id, current_acks, required_acks);
                 } else {
@@ -339,6 +451,17 @@ namespace DSMEngine {
         };
 
         StreamState& GetOrCreateStream(uint16_t logical_region_id) {
+            // First check without lock (fast path)
+            {
+                std::shared_lock<RWSpinMutex> read_lk(streams_mtx_);
+                auto it = streams_.find(logical_region_id);
+                if (it != streams_.end()) return it->second;
+            }
+            
+            // Need to create stream - acquire write lock
+            std::unique_lock<RWSpinMutex> write_lk(streams_mtx_);
+            
+            // Double-check after acquiring write lock (another thread might have created it)
             auto it = streams_.find(logical_region_id);
             if (it != streams_.end()) return it->second;
 
@@ -423,26 +546,33 @@ namespace DSMEngine {
             // Get logical region ID from remote address
             uint16_t logical_region_id = remote_data_addr.nodeID;
             
-            // Encode logical_region_id in wr_id (64-bit value, so we have plenty of space)
-            uint64_t wr_id = static_cast<uint64_t>(logical_region_id);
-            unsigned int imm_data = static_cast<unsigned int>(to_flush);  // transferred size in imm_data
+            // Encode both logical_region_id and transferred_size into imm_data (32 bits)
+            // Lower 8 bits: logical_region_id (guaranteed to be 0-255)
+            // Upper 24 bits: transferred_size (to_flush)
+            // Upper limit: transferred_size must fit in 24 bits (max 16,777,215 bytes ~16 MB)
+            assert(logical_region_id <= UINT8_MAX && "logical_region_id must fit in 8 bits (0-255)");
+            static constexpr size_t MAX_RDMA_WRITE_IMM_SIZE = (1UL << 24) - 1;  // 16,777,215 bytes
+            assert(to_flush <= MAX_RDMA_WRITE_IMM_SIZE && 
+                   "RDMA write with immediate data size exceeds 24-bit limit (16,777,215 bytes). "
+                   "to_flush must be <= 16,777,215 to fit in imm_data encoding.");
+            unsigned int imm_data = (static_cast<unsigned int>(to_flush) << 8) | static_cast<unsigned int>(logical_region_id);
             
-            // Write to selected replica nodes (RDMA write with imm, wr_id encodes logical_region_id)
+            // Write to selected replica nodes (RDMA write with imm)
             for (size_t i = start_idx; i < end_idx; ++i) {
                 uint16_t replica_phys_id = replicas[i].phys_id;
                 uint64_t physical_addr = rdma_->TranslateLogicalToPhysicalAddress(
                     remote_data_addr.nodeID, remote_data_addr.offset, replica_phys_id);
                 uint32_t rkey = rdma_->GetPhysicalRkey(remote_data_addr.nodeID, replica_phys_id);
-                printf("RedoLogger: Writing %zu bytes to replica %u at physical address 0x%lx with rkey 0x%x\n",
-                       to_flush, replica_phys_id, physical_addr, rkey);
+                printf("RedoLogger: Compute node %u writing %zu bytes to replica %u for logical_region_id=%u at physical address 0x%lx with rkey 0x%x\n",
+                       compute_node_id_, to_flush, replica_phys_id, logical_region_id, physical_addr, rkey);
                 fflush(stdout);
-                // RDMA write with imm, using wr_id to encode logical_region_id
-                int rc = rdma_->RDMA_Write_Imme_WithWrId(reinterpret_cast<void*>(physical_addr), rkey, 
-                                                         &local_view, to_flush, "main", 
-                                                         IBV_SEND_SIGNALED, 1, imm_data, wr_id,
-                                                         replica_phys_id);
+                // RDMA write with imm, encoding both logical_region_id and transferred_size in imm_data
+                int rc = rdma_->RDMA_Write_Imme(reinterpret_cast<void*>(physical_addr), rkey, 
+                                                 &local_view, to_flush, "main", 
+                                                 IBV_SEND_SIGNALED, 1, imm_data,
+                                                 replica_phys_id);
                 if (rc) {
-                    fprintf(stderr, "RedoLogger: RDMA_Write_Imme_WithWrId to replica %u failed (rc=%d)\n", 
+                    fprintf(stderr, "RedoLogger: RDMA_Write_Imme to replica %u failed (rc=%d)\n", 
                            replica_phys_id, rc);
                 }
             }
@@ -488,6 +618,10 @@ namespace DSMEngine {
                 // Allocate a new remote segment
                 s.current_segment_addr = rdma_->Allocate_Remote_RDMA_Slot(opts_.remote_pool, s.logical_region_id);
                 s.current_segment_size = rdma_->Get_chunk_size(opts_.remote_pool);
+                
+                printf("RedoLogger: Allocated new segment 0x%lx (size=%zu bytes) for compute_node=%u, logical_region_id=%u\n",
+                       s.current_segment_addr.val, s.current_segment_size, compute_node_id_, s.logical_region_id);
+                fflush(stdout);
             }
             
             // Notify remote memory node about the new segment (is_new_stream = false)
@@ -528,7 +662,8 @@ namespace DSMEngine {
                 uint16_t physical_node_id = replicas[i].phys_id;
                 
                 // Send RPC to this physical memory node
-                printf("RedoLogger: Sending log_segment_request RPC to physical_node_id=%u\n", physical_node_id);
+                printf("RedoLogger: Compute node %u sending log_segment_request RPC to physical_node_id=%u for logical_region_id=%u\n",
+                       compute_node_id_, physical_node_id, logical_region_id);
                 fflush(stdout);
                 int rc = rdma_->post_send<RDMA_Request>(send_mr, physical_node_id, std::string("main"));
                 if (rc) {
@@ -560,6 +695,7 @@ namespace DSMEngine {
         Options opts_;
         std::atomic<LSN> next_lsn_;
         std::unordered_map<uint16_t, StreamState> streams_;
+        mutable RWSpinMutex streams_mtx_;  // Protects streams_ map from concurrent access
     };
 
 } // namespace DSMEngine

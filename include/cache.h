@@ -299,6 +299,16 @@ class DSMEngine_EXPORT Cache {
   // table_cache.
   virtual size_t TotalCharge() const = 0;
 
+  // Soft flush: Flush all dirty pages (write-locked entries) to disaggregated memory.
+  // This properly manages GCL ownerships before flushing. This is a "soft" operation
+  // that ensures proper ownership transfer.
+  virtual void SoftFlushAllDirtyPages() = 0;
+
+  // Hard removal: Remove all cache handles whose gptr's nodeID matches the given logical_id.
+  // This is a "hard" operation that does not manage GCL ownership before removal.
+  // Use with caution - this forcefully removes entries without proper cleanup.
+  virtual void HardRemoveByLogicalId(uint16_t logical_id) = 0;
+
  private:
   void LRU_Remove(Handle* e);
   void LRU_Append(Handle* e);
@@ -356,6 +366,7 @@ class LocalBuffer {
 // we have tested.  E.g., readrandom speeds up by ~5% over the g++
 // 4.4.3's builtin hashtable.
 class HandleTable {
+    friend class LRUCache;
 public:
     HandleTable() : length_(0), elems_(0), list_(nullptr) { Resize(); }
     ~HandleTable() { delete[] list_; }
@@ -507,6 +518,12 @@ public:
     void prepare_free_list();
     std::pair<LRUHandle*, LRUHandle*> bulk_remove_LRU_list(size_t size);
     void bulk_insert_free_list(std::pair<LRUHandle *, LRUHandle *> start_end, size_t size);
+
+    // Soft flush: Flush all dirty pages (write-locked entries) to disaggregated memory.
+    void SoftFlushAllDirtyPages();
+
+    // Hard removal: Remove all cache handles whose gptr's nodeID matches the given logical_id.
+    void HardRemoveByLogicalId(uint16_t logical_id);
 
 private:
     void List_Remove(LRUHandle* e);

@@ -260,7 +260,6 @@ namespace DSMEngine {
         
         // Direct redo logging per page update
         void LogDataUpdateOperation(Access* access, uint64_t commit_ts);
-        void LogIndexInsertOperation(Access* access, const DynamicCompoundKey& primary_key, uint64_t commit_ts);
         
         // Page version management for redo logging (using already locked pages)
         uint64_t GetCurrentPageVersion(void* page_buffer);

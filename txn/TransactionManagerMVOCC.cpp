@@ -59,6 +59,48 @@ namespace DSMEngine{
                 uint64_t cardinality = 8ull*(kLeafPageSize - STRUCT_OFFSET(DataPage, data_[0]) - 8) / (8ull*table->GetSchemaSize() +1);
                 page = new(page_buffer) DataPage(*gcl_addr, cardinality, table_id);
                 new_created = true;
+                
+                // Log DataPage initialization
+                if (log_enabled_) {
+                    RedoLogger* redo_logger = gallocator->GetRedoLogger(log_enabled_);
+                    if (redo_logger) {
+                        uint16_t logical_region_id = gcl_addr->nodeID;
+                    uint64_t new_page_version = 1;  // New page starts at version 1
+                    page->hdr.p_version = new_page_version;
+                    
+                    LogCodec::Encoder encoder;
+                    size_t header_offset = STRUCT_OFFSET(DataPage, hdr);
+                    
+                    // Log header initialization (essential fields only)
+                    size_t p_type_offset = header_offset + offsetof(Header, p_type);
+                    encoder.AddUpdateBytes(p_type_offset, &page->hdr.p_type, sizeof(page->hdr.p_type));
+                    
+                    size_t this_page_g_ptr_offset = header_offset + offsetof(Header, this_page_g_ptr);
+                    encoder.AddUpdateBytes(this_page_g_ptr_offset, &page->hdr.this_page_g_ptr, sizeof(page->hdr.this_page_g_ptr));
+                    
+                    size_t kDataCardinality_offset = header_offset + offsetof(Header, kDataCardinality);
+                    encoder.AddUpdateBytes(kDataCardinality_offset, &page->hdr.kDataCardinality, sizeof(page->hdr.kDataCardinality));
+                    
+                    size_t table_id_offset = header_offset + offsetof(Header, table_id);
+                    encoder.AddUpdateBytes(table_id_offset, &page->hdr.table_id, sizeof(page->hdr.table_id));
+                    
+                    size_t number_of_records_offset = header_offset + offsetof(Header, number_of_records);
+                    encoder.AddUpdateBytes(number_of_records_offset, &page->hdr.number_of_records, sizeof(page->hdr.number_of_records));
+                    
+                    // Log bitmap initialization (all zeros)
+                    size_t data_offset = STRUCT_OFFSET(DataPage, data_);
+                    uint32_t bitmap_words = (cardinality + 63) / 64;
+                    uint32_t bitmap_bytes = bitmap_words * sizeof(uint64_t);
+                    encoder.AddUpdateBytes(data_offset, page->data_, bitmap_bytes);
+                    
+                    redo_logger->Append(logical_region_id, *gcl_addr, new_page_version,
+                                       encoder.Buffer().data(), encoder.Buffer().size()
+#ifndef NDEBUG
+                                       , RedoLogger::LOG_DATA_PAGE_INIT
+#endif
+                                       );
+                    }
+                }
             }
             RecordSchema *schema_ptr = storage_manager_->tables_[table_id]->GetSchema();
             int cnt = 0;
@@ -67,6 +109,37 @@ namespace DSMEngine{
             assert((char*)tuple_buffer - (char*)page_buffer > STRUCT_OFFSET(DataPage, data_));
             assert(((DataPage*)page_buffer)->hdr.this_page_g_ptr != GlobalAddress::Null());
             assert(ret);
+            
+            // Log bitmap update after record allocation (bitmap was updated during AllocateRecord)
+            if (log_enabled_) {
+                RedoLogger* redo_logger = gallocator->GetRedoLogger(log_enabled_);
+                if (redo_logger) {
+                    uint16_t logical_region_id = gcl_addr->nodeID;
+                uint64_t current_page_version = page->hdr.p_version;
+                uint64_t new_page_version = current_page_version + 1;
+                page->hdr.p_version = new_page_version;
+                
+                LogCodec::Encoder encoder;
+                size_t data_offset = STRUCT_OFFSET(DataPage, data_);
+                uint32_t bitmap_words = (page->hdr.kDataCardinality + 63) / 64;
+                uint32_t bitmap_bytes = bitmap_words * sizeof(uint64_t);
+                
+                // Log bitmap update (bit was set during AllocateRecord)
+                encoder.AddUpdateBytes(data_offset, page->data_, bitmap_bytes);
+                
+                // Log number_of_records update
+                size_t header_offset = STRUCT_OFFSET(DataPage, hdr);
+                size_t number_of_records_offset = header_offset + offsetof(Header, number_of_records);
+                encoder.AddUpdateBytes(number_of_records_offset, &page->hdr.number_of_records, sizeof(page->hdr.number_of_records));
+                
+                redo_logger->Append(logical_region_id, *gcl_addr, new_page_version,
+                                   encoder.Buffer().data(), encoder.Buffer().size()
+#ifndef NDEBUG
+                                   , RedoLogger::LOG_DATA_PAGE_BITMAP_UPDATE
+#endif
+                                   );
+                }
+            }
 
 //           table->Allo/cateNewTuple(tuple_buffer, tuple_gaddr, handle, default_gallocator, nullptr);
             Record* global_record = new Record(schema_ptr, tuple_buffer);
@@ -365,6 +438,25 @@ namespace DSMEngine{
         
         uint16_t logical_region_id = access->access_addr_.nodeID;
         
+        // Get current page version and increment it for this log record
+        GlobalAddress target_page = TOPAGE(access->access_addr_);
+        
+        // Get the page buffer from the already acquired lock
+        GlobalAddress page_gaddr = TOPAGE(access->access_addr_);
+        assert(locked_handles_.find(page_gaddr) != locked_handles_.end());
+        Cache::Handle* handle = locked_handles_.at(page_gaddr).first;
+        // NOTE: handle->value is a pointer to ibv_mr in ACCESS_MODE==1, or the buffer directly in ACCESS_MODE==0
+#if ACCESS_MODE == 1
+        void* page_buffer = ((ibv_mr*)handle->value)->addr;
+#elif ACCESS_MODE == 0
+        void* page_buffer = handle->value;
+#endif
+        
+        // Note: For INSERT_ONLY operations on newly created pages, bitmap update is already logged
+        // in AllocateNewRecord right after AllocateRecord. For existing pages, we still need to log bitmap updates here.
+        // Note: For INSERT_ONLY operations, bitmap and number_of_records updates are already logged
+        // in AllocateNewRecord right after AllocateRecord is called, so we don't need to log them here.
+        
         // Only log modified columns (using dirty_col_ids like delta records)
         if (!access->txn_local_tuple_->dirty_col_ids.empty()) {
             for (auto col_id : access->txn_local_tuple_->dirty_col_ids) {
@@ -389,20 +481,6 @@ namespace DSMEngine{
             // No separate timestamp log needed - it's already included in the full record
         }
         
-        // Get current page version and increment it for this log record
-        GlobalAddress target_page = TOPAGE(access->access_addr_);
-        
-        // Get the page buffer from the already acquired lock
-        GlobalAddress page_gaddr = TOPAGE(access->access_addr_);
-        assert(locked_handles_.find(page_gaddr) != locked_handles_.end());
-        Cache::Handle* handle = locked_handles_.at(page_gaddr).first;
-        // NOTE: handle->value is a pointer to ibv_mr in ACCESS_MODE==1, or the buffer directly in ACCESS_MODE==0
-#if ACCESS_MODE == 1
-        void* page_buffer = ((ibv_mr*)handle->value)->addr;
-#elif ACCESS_MODE == 0
-        void* page_buffer = handle->value;
-#endif
-        
         uint64_t current_page_version = GetCurrentPageVersion(page_buffer);
         uint64_t new_page_version = current_page_version + 1;
         
@@ -411,20 +489,22 @@ namespace DSMEngine{
         
         // Append to redo log with the new page version
         // Get shared RedoLogger from DDSM (singleton shared across all threads)
-        RedoLogger* redo_logger = default_gallocator->GetRedoLogger(log_enabled_);
-        if (redo_logger) {
-            redo_logger->Append(logical_region_id, target_page, new_page_version, encoder.Buffer().data(), encoder.Buffer().size());
+        if (log_enabled_) {
+            RedoLogger* redo_logger = default_gallocator->GetRedoLogger(log_enabled_);
+            if (redo_logger) {
+                redo_logger->Append(logical_region_id, target_page, new_page_version, encoder.Buffer().data(), encoder.Buffer().size()
+#ifndef NDEBUG
+                                    , RedoLogger::LOG_DATA_PAGE_UPDATE
+#endif
+                                    );
             
-            printf("RedoLogger: Logged data update (%zu dirty cols, %zu bytes) for record at page=0x%lx, logical_region=%u\n",
-                   access->txn_local_tuple_->dirty_col_ids.size(), encoder.Buffer().size(),
-                   target_page.val, logical_region_id);
+                // printf("RedoLogger: Logged data update (%zu dirty cols, %zu bytes) for record at page=0x%lx, logical_region=%u\n",
+                //        access->txn_local_tuple_->dirty_col_ids.size(), encoder.Buffer().size(),
+                //        target_page.val, logical_region_id);
+            }
         }
     }
 
-    void TransactionManager::LogIndexInsertOperation(Access* access, const DynamicCompoundKey& primary_key, uint64_t commit_ts) {
-        // No-op: Index redo logging disabled for now
-        // TODO: Implement proper index redo logging later
-    }
 
     uint64_t TransactionManager::GetCurrentPageVersion(void* page_buffer) {
         // Get the current page version from the already locked page buffer
@@ -450,7 +530,7 @@ namespace DSMEngine{
         DSMEngine::DataPage* data_page = reinterpret_cast<DSMEngine::DataPage*>(page_buffer);
         data_page->hdr.p_version = version;
         
-        printf("TransactionManager: Updated page version to %lu for page buffer %p\n", version, page_buffer);
+        // printf("TransactionManager: Updated page version to %lu for page buffer %p\n", version, page_buffer);
     }
     // Contain validation and commit stages.
     bool TransactionManager::CommitTransaction(CharArray &ret_str) {
@@ -618,12 +698,13 @@ namespace DSMEngine{
                 RecordSchema *index_schema_ptr = storage_manager_->tables_[access->access_global_record_->GetTableId()]->GetPrimaryIndexSchema();
                 DynamicCompoundKey primary_key(access->txn_local_tuple_->primary_key_buffer_, index_schema_ptr);
                 
-                // Log index insertion operation before performing it
+                // Get redo logger for index operations (logging happens inside leaf_page_store/internal_page_store)
+                RedoLogger* redo_logger = nullptr;
                 if (log_enabled_) {
-                    LogIndexInsertOperation(access, primary_key, commit_ts);
+                    redo_logger = default_gallocator->GetRedoLogger(log_enabled_);
                 }
                 
-                storage_manager_->tables_[access->txn_local_tuple_->schema_ptr_->GetTableId()]->InsertPriIndex(primary_key, 1, access->access_addr_);
+                storage_manager_->tables_[access->txn_local_tuple_->schema_ptr_->GetTableId()]->InsertPriIndex(primary_key, 1, access->access_addr_, redo_logger);
             }
             delete access->access_global_record_;
             access->access_global_record_ = nullptr;

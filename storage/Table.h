@@ -108,7 +108,7 @@ namespace DSMEngine {
         }
 
         // TODO: return false if the key exists in primary index already
-        bool InsertPriIndex(const DynamicCompoundKey key, size_t key_num, GlobalAddress tuple_gaddr) {
+        bool InsertPriIndex(const DynamicCompoundKey key, size_t key_num, GlobalAddress tuple_gaddr, DSMEngine::RedoLogger* redo_logger = nullptr) {
             assert(TOPAGE(tuple_gaddr).offset != tuple_gaddr.offset);
             assert(key_num == 1);
             size_t primary_key_length = primary_index_->index_scheme_ptr->GetPrimaryKeyLength();
@@ -117,7 +117,7 @@ namespace DSMEngine {
             Slice inserted_slice(key_value_pair, primary_key_length + 8);
             memcpy(key_value_pair, key.start, primary_key_length);
             memcpy(key_value_pair + primary_key_length, &tuple_gaddr, sizeof(GlobalAddress));
-            primary_index_->insert(key, inserted_slice);
+            primary_index_->insert(key, inserted_slice, redo_logger);
             delete[] key_value_pair;
             return true;
         }

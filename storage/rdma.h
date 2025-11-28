@@ -220,7 +220,8 @@ namespace DSMEngine
         abort_2pc,
         heart_beat,
         log_segment_request,
-        log_segment_recycle
+        log_segment_recycle,
+        log_replay_status_query
     };
 
     enum file_type
@@ -310,6 +311,18 @@ namespace DSMEngine
         uint32_t num_segments;               // Number of segments that can be recycled
         GlobalAddress segment_addrs[16];     // Addresses of segments that can be recycled (max 16 per RPC)
     } __attribute__((packed));
+    
+    // Request to query log replay status from memory node
+    struct LogReplayStatusQuery
+    {
+        uint16_t compute_node_id;            // Compute node sending the query
+    } __attribute__((packed));
+    
+    // Reply to log replay status query
+    struct LogReplayStatusReply
+    {
+        bool all_logs_replayed;              // true if all logs have been replayed
+    } __attribute__((packed));
 
     //struct WUnlock_message{
     //    GlobalAddress page_addr;
@@ -342,6 +355,7 @@ namespace DSMEngine
         Abort abort;
         LogSegmentRequest log_segment_request;
         LogSegmentRecycleRequest log_segment_recycle;
+        LogReplayStatusQuery log_replay_status_query;
     };
 
     union RDMA_Reply_Content
@@ -351,6 +365,7 @@ namespace DSMEngine
         Registered_qp_config_xcompute qp_config_xcompute;
         install_versionedit ive;
         SnapshotRangeReply snapshot_range_reply;
+        LogReplayStatusReply log_replay_status_reply;
     };
 
     struct RDMA_Request

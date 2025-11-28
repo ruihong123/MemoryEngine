@@ -13,6 +13,7 @@
 #include "storage/page.h"
 #include "txn/RedoLogger.h"
 #include "txn/LogCodec.h"
+#include "utils/mutexlock.h"
 
 namespace DSMEngine {
 
@@ -30,7 +31,7 @@ struct LogStreamState {
     
     // List of log segments for this stream
     std::list<LogSegment> segments;
-    std::mutex segments_mtx;          // Mutex for segments list
+    RWSpinMutex segments_mtx;          // Mutex for segments list
     
     // Tracking positions
     std::atomic<uint64_t> received_log_length{0};   // Total length of logs received
@@ -77,12 +78,16 @@ public:
     // Handle RDMA write with imm completion
     // Increase received_log_length for the corresponding stream
     // compute_node_id: compute node that sent the write
-    // logical_region_id: logical memory region ID (determined from segment mapping or imm_data)
-    // imm_data: transferred size in bytes
-    void HandleWriteWithImm(uint16_t compute_node_id, uint16_t logical_region_id, uint32_t imm_data);
+    // logical_region_id: logical memory region ID (extracted from imm_data)
+    // transferred_size: transferred size in bytes (extracted from imm_data)
+    void HandleWriteWithImm(uint16_t compute_node_id, uint16_t logical_region_id, uint32_t transferred_size);
     
     // Find all streams for a given compute node (used when we only know compute_node_id)
     std::vector<uint16_t> GetLogicalRegionsForComputeNode(uint16_t compute_node_id);
+    
+    // Wait until all redo logs have been replayed (all streams caught up)
+    // Blocks until replayed_log_length >= received_log_length for all initialized streams
+    void WaitForAllLogsReplayed();
     
     // Stop all replayer threads (for cleanup)
     void StopAllReplayers();
@@ -119,7 +124,12 @@ private:
     std::unordered_map<uint64_t, SegmentInfo> segment_to_stream_;
     std::mutex segment_to_stream_mtx_;  // Mutex for segment_to_stream_ map
     
+    // Condition variable and mutex for waiting until all logs are replayed
+    std::condition_variable all_logs_replayed_cv_;
+    std::mutex all_logs_replayed_mtx_;
+    
     // Generate array index for stream_states_ array
+    // Formula: compute_id * MAX_LOGICAL_REGIONS + region_id
     static size_t MakeStreamIndex(uint16_t compute_id, uint16_t region_id) {
         return static_cast<size_t>(compute_id) * MAX_LOGICAL_REGIONS + static_cast<size_t>(region_id);
     }
@@ -168,6 +178,9 @@ private:
     bool ProcessLogRecord(const RedoLogger::RecordHeader& header, const uint8_t* payload, size_t payload_size);
     uint64_t GetCurrentPageVersion(GlobalAddress page_addr);
     void SetCurrentPageVersion(GlobalAddress page_addr, uint64_t version);
+    
+    // Recycle fully replayed segments
+    void RecycleSegments(LogStreamState* stream_state);
     
     
     // Pseudo replay logic for testing (deprecated)

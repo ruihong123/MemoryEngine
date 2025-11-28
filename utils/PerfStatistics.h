@@ -24,6 +24,9 @@ struct PerfStatistics {
     elapsed_time_ = 0;
     throughput_ = 0.0;
 
+    hot_scan_count_ = 0;
+    hot_scan_throughput_ = 0.0;
+
     agg_total_count_ = 0;
     agg_thread_count_ = 0;
     agg_total_abort_count_ = 0;
@@ -31,6 +34,8 @@ struct PerfStatistics {
     agg_node_num_ = 0;
     longest_elapsed_time_ = 0;
     agg_throughput_ = 0.0;
+    agg_hot_scan_count_ = 0;
+    agg_hot_scan_throughput_ = 0.0;
   }
 
   // Set transaction type names for latency reporting
@@ -90,6 +95,10 @@ struct PerfStatistics {
            agg_elapsed_time_ * 1.0 / agg_node_num_, agg_throughput_,
            agg_throughput_ / agg_node_num_,
            agg_throughput_ / agg_thread_count_);
+    if (agg_hot_scan_count_ > 0) {
+      printf("hot_scan_total_count\t%lld\nhot_scan_throughput\t%lf\n",
+             agg_hot_scan_count_, agg_hot_scan_throughput_);
+    }
     uint64_t invalidation_num = 0;
     uint64_t hit_valid_num = 0;
     uint64_t miss_num = 0;
@@ -142,6 +151,8 @@ struct PerfStatistics {
     agg_throughput_ += obj.throughput_;
     agg_thread_count_ += obj.thread_count_;
     agg_elapsed_time_ += obj.elapsed_time_;
+    agg_hot_scan_count_ += obj.hot_scan_count_;
+    agg_hot_scan_throughput_ += obj.hot_scan_throughput_;
     agg_node_num_++;
   }
 
@@ -158,6 +169,12 @@ struct PerfStatistics {
   long long agg_elapsed_time_;
   long long agg_node_num_;
   long long longest_elapsed_time_;
+  
+  // Hot scan transaction statistics
+  long long hot_scan_count_;
+  double hot_scan_throughput_;
+  long long agg_hot_scan_count_;
+  double agg_hot_scan_throughput_;
 
   // Latency tracking: recorded locally on each node, but only printed on master
   // Note: Not aggregated across nodes (complex containers cannot be serialized

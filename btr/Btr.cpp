@@ -1,5 +1,7 @@
 #include "Btr.h"
 #include <atomic>
+#include "txn/RedoLogger.h"
+#include "txn/LogCodec.h"
 
 namespace DSMEngine {
     extern thread_local GlobalAddress path_stack[define::kMaxLevelOfTree];
@@ -260,7 +262,7 @@ namespace DSMEngine {
     }
 
     bool Btr::update_new_root(GlobalAddress left, const DynamicCompoundKey &k, GlobalAddress right, int level,
-                              GlobalAddress old_root) {
+                              GlobalAddress old_root, RedoLogger* redo_logger) {
 
         assert(level > 0);
         auto cas_buffer = rdma_mg->Get_local_CAS_mr();
@@ -304,6 +306,12 @@ namespace DSMEngine {
         tree_height.store(level);
         assert(new_root->hdr.level == level);
         rdma_mg->RDMA_Write(new_root_addr, page_mr, kInternalPageSize, IBV_SEND_SIGNALED, 1, Regular_Page);
+        
+        // Log the new root page efficiently
+        if (redo_logger) {
+            LogNewRootPage(redo_logger, new_root_addr, new_root, index_scheme_ptr);
+        }
+        
         ibv_mr remote_mr = *rdma_mg->global_index_table;
         // find the table enty according to the id
         remote_mr.addr = (void *) ((char *) remote_mr.addr + 8 * tree_id);
@@ -319,7 +327,7 @@ namespace DSMEngine {
     }
 
 // Note: this function will make sure the insert will definitely success. It will keep retrying.
-    bool Btr::insert_internal(DynamicCompoundKey &k, GlobalAddress &v, int target_level) {
+    bool Btr::insert_internal(DynamicCompoundKey &k, GlobalAddress &v, int target_level, RedoLogger* redo_logger) {
 
         //TODO: You need to acquire a lock when you write a page
         Cache::Handle *page_hint = nullptr;
@@ -390,7 +398,7 @@ namespace DSMEngine {
         assert(level == target_level);
         //Insert to target level
         assert(p != GlobalAddress::Null());
-        bool store_success = internal_page_store(p, k, v, level);
+        bool store_success = internal_page_store(p, k, v, level, redo_logger);
         if (!store_success) {
             //TODO: need to understand why the result is always false.
             if (path_stack[level + 1] != GlobalAddress::Null()) {
@@ -406,7 +414,7 @@ namespace DSMEngine {
         return true;
     }
 
-    void Btr::insert(const DynamicCompoundKey &k, const Slice &v) {
+    void Btr::insert(const DynamicCompoundKey &k, const Slice &v, RedoLogger* redo_logger) {
 //  assert(rdma_mg->is_register());
 #ifndef NDEBUG
         //check whether the primary key equal to the k.
@@ -537,7 +545,7 @@ namespace DSMEngine {
 //#endif
 #endif
 
-        if (!leaf_page_store(p, k, v, split_key, sibling_prt, 0)) {
+        if (!leaf_page_store(p, k, v, split_key, sibling_prt, 0, redo_logger)) {
             if (path_stack[1] != GlobalAddress::Null()) {
 
                 p = path_stack[1];
@@ -571,7 +579,7 @@ namespace DSMEngine {
 
     }
 
-    bool Btr::remove(const DynamicCompoundKey &k, const Slice &v) {
+    bool Btr::remove(const DynamicCompoundKey &k, const Slice &v, RedoLogger* redo_logger) {
         // help me to implement the remove function following the search function
         before_operation();
         Cache::Handle *page_hint = nullptr;
@@ -616,7 +624,7 @@ namespace DSMEngine {
         }
 
         assert(level == 0);
-        if (!leaf_page_delete(p, k, result, level)) {
+        if (!leaf_page_delete(p, k, result, level, redo_logger)) {
             if (path_stack[1] != GlobalAddress::Null()) {
                 p = path_stack[1];
                 if (p == root) {
@@ -763,7 +771,7 @@ namespace DSMEngine {
         }
     }
 
-    bool Btr::remove(const DynamicCompoundKey &k) {
+    bool Btr::remove(const DynamicCompoundKey &k, RedoLogger* redo_logger) {
         before_operation();
         Cache::Handle *page_hint = nullptr;
         auto root = get_root_ptr_protected(page_hint);
@@ -838,7 +846,7 @@ namespace DSMEngine {
         start = std::chrono::high_resolution_clock::now();
 #endif
         leaf_next:// Leaf page search
-        if (!leaf_page_delete(p, k, result, level)) {
+        if (!leaf_page_delete(p, k, result, level, redo_logger)) {
             if (path_stack[1] != GlobalAddress::Null()) {
                 p = path_stack[1];
                 level = 1;
@@ -1358,7 +1366,7 @@ namespace DSMEngine {
         return false;
     }
 
-    bool Btr::leaf_page_delete(GlobalAddress page_addr, const DynamicCompoundKey &k, SearchResult &result, int level) {
+    bool Btr::leaf_page_delete(GlobalAddress page_addr, const DynamicCompoundKey &k, SearchResult &result, int level, RedoLogger* redo_logger) {
 #ifdef PROCESSANALYSIS
         auto start = std::chrono::high_resolution_clock::now();
 #endif
@@ -1439,7 +1447,8 @@ namespace DSMEngine {
             goto returnfalse;
         }
 
-        need_merge = page->leaf_page_delete(k, cnt, result, index_scheme_ptr);
+        need_merge = page->leaf_page_delete(k, cnt, result, index_scheme_ptr, redo_logger, page_addr);
+        
         returntrue:
         assert(handle);
         ddms_->SELCC_Shared_UnLock(page_addr, handle);
@@ -1556,7 +1565,7 @@ namespace DSMEngine {
 // This function will return true unless it found that the key is smaller than the lower bound of a searched node.
 // When this function return false the upper layer should backoff in the tree.
 
-    bool Btr::internal_page_store(GlobalAddress page_addr, DynamicCompoundKey &k, GlobalAddress &v, int level) {
+    bool Btr::internal_page_store(GlobalAddress page_addr, DynamicCompoundKey &k, GlobalAddress &v, int level, RedoLogger* redo_logger) {
         assert(page_addr != GlobalAddress::Null());
         assert(v != GlobalAddress::Null());
         uint64_t lock_index =
@@ -1600,7 +1609,7 @@ namespace DSMEngine {
             }
             if (nested_retry_counter <= 4) {
                 nested_retry_counter++;
-                insert_success = this->internal_page_store(sib_ptr, k, v, level);
+                insert_success = this->internal_page_store(sib_ptr, k, v, level, redo_logger);
             } else {
                 nested_retry_counter = 0;
                 insert_success = false;
@@ -1627,8 +1636,9 @@ namespace DSMEngine {
         DynamicCompoundKey split_key(split_buff, index_scheme_ptr);
         GlobalAddress sibling_addr = GlobalAddress::Null();
 //  assert(k >= page->hdr.lowest);
-        need_split = page->internal_page_store(page_addr, k, v, level, index_scheme_ptr);
+        need_split = page->internal_page_store(page_addr, k, v, level, index_scheme_ptr, redo_logger);
         auto cnt = page->hdr.last_index + 1;
+        
         InternalPage *sibling = nullptr;
         if (need_split) { // need split
             assert(cnt == internal_cardinality_);
@@ -1678,9 +1688,16 @@ namespace DSMEngine {
             // link
             sibling->hdr.sibling_ptr = page->hdr.sibling_ptr;
             page->hdr.sibling_ptr = sibling_addr;
+            // Log the page split efficiently
+            if (redo_logger) {
+                LogInternalPageSplit(redo_logger, page_addr, page, sibling_addr, sibling, index_scheme_ptr);
+            }
             rdma_mg->RDMA_Write(sibling_addr, sibling_mr, kInternalPageSize, IBV_SEND_SIGNALED, 1, Regular_Page);
             assert(sibling->GetRecordValueByIndex(sibling->hdr.last_index) != GlobalAddress::Null());
             assert(page->GetRecordValueByIndex(page->hdr.last_index) != GlobalAddress::Null());
+            
+            
+            
             // todo: why we need to update k?
             k = split_key;
             v = sibling_addr;
@@ -1728,7 +1745,7 @@ namespace DSMEngine {
                     p = g_root_ptr.load();
                     height = tree_height.load();
                     if (path_stack[level] == p && (int) height == level) {
-                        update_new_root(path_stack[level], split_key, sibling_addr, level + 1, path_stack[level]);
+                        update_new_root(path_stack[level], split_key, sibling_addr, level + 1, path_stack[level], redo_logger);
                         *(uint64_t *) cas_buffer->addr = 0;
                         //TODO: USE RDMA cas TO release lock
                         rdma_mg->RDMA_CAS(lock_addr, cas_buffer, 1, 0, IBV_SEND_SIGNALED, 1, LockTable);
@@ -1757,7 +1774,7 @@ namespace DSMEngine {
                     //TODO: shall I implement a function that search a ptr at particular level.
                     printf(" rare case the tranverse during the root update\n");
 //                    assert(tree_height.load() != level && path_stack[coro_id][level] != p);
-                    return insert_internal(split_key, sibling_addr, level + 1);
+                    return insert_internal(split_key, sibling_addr, level + 1, redo_logger);
                 }
 
 
@@ -1769,7 +1786,7 @@ namespace DSMEngine {
             memset(&result, 0, sizeof(SearchResult));
             int fall_back_level = 0;
             re_insert:
-            if (UNLIKELY(!internal_page_store(p, split_key, sibling_addr, level))) {
+            if (UNLIKELY(!internal_page_store(p, split_key, sibling_addr, level, redo_logger))) {
                 //this path should be a rare case.
 
                 // fall back to upper level in the cache to search for the right node at this level
@@ -1783,7 +1800,7 @@ namespace DSMEngine {
                 } else {
                     if (!internal_page_search(p, k, result, fall_back_level, false, page_hint)) {
                         // if the upper level is still a stale node, just insert the node by top down method.
-                        insert_internal(split_key, sibling_addr, level);
+                        insert_internal(split_key, sibling_addr, level, redo_logger);
 //                        level = level + 1; // move to upper level
 //                        p = path_stack[coro_id][level];// move the pointer to upper level
                     } else {
@@ -1810,7 +1827,7 @@ namespace DSMEngine {
 
     bool Btr::leaf_page_store(GlobalAddress page_addr, const DynamicCompoundKey &k, const Slice &v,
                               DynamicCompoundKey &split_key,
-                              GlobalAddress &sibling_addr, int level) {
+                              GlobalAddress &sibling_addr, int level, RedoLogger* redo_logger) {
 #ifdef PROCESSANALYSIS
         auto start = std::chrono::high_resolution_clock::now();
 #endif
@@ -1858,7 +1875,7 @@ namespace DSMEngine {
                     nested_retry_counter++;
                     auto sibling_ptr = page->hdr.sibling_ptr;
                     ddms_->SELCC_Exclusive_UnLock(page_addr, handle);
-                    return this->leaf_page_store(sibling_ptr, k, v, split_key, sibling_addr, level);
+                    return this->leaf_page_store(sibling_ptr, k, v, split_key, sibling_addr, level, redo_logger);
                 } else {
                     DEBUG_PRINT_CONDITION("retry place 7");
                     nested_retry_counter = 0;
@@ -1895,7 +1912,7 @@ namespace DSMEngine {
         int cnt = 0;
         uint64_t tuple_length = index_scheme_ptr->GetRecordTotalSize();
 
-        bool need_split = page->leaf_page_store(k, v, cnt, index_scheme_ptr);
+        bool need_split = page->leaf_page_store(k, v, cnt, index_scheme_ptr, redo_logger, page_addr);
         num_of_record++;
         if (!need_split) {
             ddms_->SELCC_Exclusive_UnLock(page_addr, handle);
@@ -1946,6 +1963,10 @@ namespace DSMEngine {
             // link
             sibling->hdr.sibling_ptr = page->hdr.sibling_ptr;
             page->hdr.sibling_ptr = sibling_addr;
+            // Log the page split efficiently
+            if (redo_logger) {
+                LogLeafPageSplit(redo_logger, page_addr, page, sibling_addr, sibling, index_scheme_ptr);
+            }
             // TODO: directly back the page with read lock and insert the page into the cache with shared state.
             rdma_mg->RDMA_Write(sibling_addr, sibling_mr, kLeafPageSize, IBV_SEND_SIGNALED, 1, Regular_Page);
             rdma_mg->Deallocate_Local_RDMA_Slot(sibling_mr->addr, Regular_Page);
@@ -2000,7 +2021,7 @@ namespace DSMEngine {
                     height = tree_height;
                     if (path_stack[level] == p && height == level) {
                         update_new_root(path_stack[level], split_key, sibling_addr, level + 1,
-                                        path_stack[level]);
+                                        path_stack[level], redo_logger);
                         *(uint64_t *) cas_buffer->addr = 0;
                         rdma_mg->RDMA_CAS(lock_addr, cas_buffer, 1, 0, IBV_SEND_SIGNALED, 1, LockTable);
                         assert((*(uint64_t *) cas_buffer->addr) == 1);
@@ -2019,7 +2040,7 @@ namespace DSMEngine {
                     //TODO: shall I implement a function that search a ptr at particular level.
                     printf(" rare case the tranverse during the root update\n");
                     // It is impossinle to insert the internal in level 0.
-                    return insert_internal(split_key, sibling_addr, level + 1);
+                    return insert_internal(split_key, sibling_addr, level + 1, redo_logger);
                 }
 
 
@@ -2034,7 +2055,7 @@ namespace DSMEngine {
             int fall_back_level = 0;
             re_insert:
 
-            if (UNLIKELY(!internal_page_store(p, split_key, sibling_addr, level))) {
+            if (UNLIKELY(!internal_page_store(p, split_key, sibling_addr, level, redo_logger))) {
                 //this path should be a rare case.
 
                 // fall back to upper level in the cache to search for the right node at this level
@@ -2048,7 +2069,7 @@ namespace DSMEngine {
                     //fall back one step.
                     if (!internal_page_search(p, k, result, fall_back_level, false, nullptr)) {
                         // if the upper level is still a stale node, just insert the node by top down method.
-                        insert_internal(split_key, sibling_addr, level);
+                        insert_internal(split_key, sibling_addr, level, redo_logger);
 //                        level = level + 1; // move to upper level
 //                        p = path_stack[coro_id][level];// move the pointer to upper level
                     } else {
@@ -2078,6 +2099,317 @@ namespace DSMEngine {
             cache_hit_valid[i][0] = 0;
             cache_miss[i][0] = 0;
         }
+    }
+
+    // Helper function to log index page changes
+    void Btr::LogIndexPageChange(RedoLogger* redo_logger, GlobalAddress page_addr, void* page_buffer, size_t page_size, bool is_split) {
+        if (!redo_logger || !page_buffer) return;
+        
+        uint16_t logical_region_id = page_addr.nodeID;
+        
+        // Get current page version from header
+        Header_Index* header = (Header_Index*)((char*)page_buffer + STRUCT_OFFSET(InternalPage, hdr));
+        uint64_t current_page_version = header->p_version;
+        uint64_t new_page_version = current_page_version + 1;
+        
+        // Update page version
+        header->p_version = new_page_version;
+        
+        // Encode the page changes using LogCodec
+        LogCodec::Encoder encoder;
+        
+        // Log header changes
+        size_t header_offset = STRUCT_OFFSET(InternalPage, hdr);
+        size_t header_size = sizeof(Header_Index);
+        encoder.AddUpdateBytes(header_offset, (char*)page_buffer + header_offset, header_size);
+        
+        // For splits, log the entire page content; otherwise, log only changed portions
+        if (is_split) {
+            // Log entire page content for new split pages
+            encoder.AddUpdateBytes(0, page_buffer, page_size);
+        } else {
+            // Log only the data portion that changed (we'll log the full data section for simplicity)
+            size_t data_offset = STRUCT_OFFSET(InternalPage, data_);
+            size_t data_size = page_size - data_offset;
+            if (data_size > 0) {
+                encoder.AddUpdateBytes(data_offset, (char*)page_buffer + data_offset, data_size);
+            }
+        }
+        
+        // Append to redo log
+        redo_logger->Append(logical_region_id, page_addr, new_page_version, 
+                           encoder.Buffer().data(), encoder.Buffer().size()
+#ifndef NDEBUG
+                           , RedoLogger::LOG_INDEX_PAGE_CHANGE
+#endif
+                           );
+    }
+
+    void Btr::LogIndexPageHeaderChange(RedoLogger* redo_logger, GlobalAddress page_addr, void* page_buffer) {
+        if (!redo_logger || !page_buffer) return;
+        
+        uint16_t logical_region_id = page_addr.nodeID;
+        Header_Index* header = (Header_Index*)((char*)page_buffer + STRUCT_OFFSET(InternalPage, hdr));
+        uint64_t current_page_version = header->p_version;
+        uint64_t new_page_version = current_page_version + 1;
+        header->p_version = new_page_version;
+        
+        LogCodec::Encoder encoder;
+        size_t header_offset = STRUCT_OFFSET(InternalPage, hdr);
+        size_t header_size = sizeof(Header_Index);
+        encoder.AddUpdateBytes(header_offset, (char*)page_buffer + header_offset, header_size);
+        
+        redo_logger->Append(logical_region_id, page_addr, new_page_version,
+                           encoder.Buffer().data(), encoder.Buffer().size()
+#ifndef NDEBUG
+                           , RedoLogger::LOG_INDEX_PAGE_HEADER_CHANGE
+#endif
+                           );
+    }
+
+    void Btr::LogIndexPageContentChange(RedoLogger* redo_logger, GlobalAddress page_addr, void* page_buffer, 
+                                       size_t content_offset, size_t content_size) {
+        if (!redo_logger || !page_buffer) return;
+        
+        uint16_t logical_region_id = page_addr.nodeID;
+        Header_Index* header = (Header_Index*)((char*)page_buffer + STRUCT_OFFSET(InternalPage, hdr));
+        uint64_t current_page_version = header->p_version;
+        uint64_t new_page_version = current_page_version + 1;
+        header->p_version = new_page_version;
+        
+        LogCodec::Encoder encoder;
+        encoder.AddUpdateBytes(content_offset, (char*)page_buffer + content_offset, content_size);
+        
+        redo_logger->Append(logical_region_id, page_addr, new_page_version,
+                           encoder.Buffer().data(), encoder.Buffer().size()
+#ifndef NDEBUG
+                           , RedoLogger::LOG_INDEX_PAGE_CONTENT_CHANGE
+#endif
+                           );
+    }
+
+    void Btr::LogInternalPageSplit(RedoLogger* redo_logger, GlobalAddress old_page_addr, InternalPage* old_page,
+                                   GlobalAddress new_page_addr, InternalPage* new_page, RecordSchema* schema) {
+        if (!redo_logger || !old_page || !new_page) return;
+        
+        uint16_t logical_region_id_old = old_page_addr.nodeID;
+        uint16_t logical_region_id_new = new_page_addr.nodeID;
+        
+        // Log old page changes: header (last_index, sibling_ptr), min/max, and data removal
+        {
+            // Read current version, then increment for the new version after changes
+            uint64_t current_page_version = old_page->hdr.p_version;
+            uint64_t new_page_version = current_page_version + 1;
+            old_page->hdr.p_version = new_page_version;
+            
+            LogCodec::Encoder encoder;
+            size_t header_offset = STRUCT_OFFSET(InternalPage, hdr);
+            
+            // Log header changes: last_index and sibling_ptr
+            size_t last_index_offset = header_offset + offsetof(Header_Index, last_index);
+            encoder.AddUpdateBytes(last_index_offset, &old_page->hdr.last_index, sizeof(old_page->hdr.last_index));
+            
+            size_t sibling_ptr_offset = header_offset + offsetof(Header_Index, sibling_ptr);
+            encoder.AddUpdateBytes(sibling_ptr_offset, &old_page->hdr.sibling_ptr, sizeof(old_page->hdr.sibling_ptr));
+            
+            // Log min/max value changes (highest key changed)
+            size_t data_offset = STRUCT_OFFSET(InternalPage, data_);
+            uint32_t key_size = old_page->hdr.key_size;
+            size_t highest_offset = data_offset;  // highest is at data_[0]
+            encoder.AddUpdateBytes(highest_offset, old_page->data_, key_size);
+            
+            // Note: Data removal (records from m+1 to cnt) doesn't need explicit logging
+            // as the last_index change already indicates the valid range
+            
+            redo_logger->Append(logical_region_id_old, old_page_addr, new_page_version,
+                               encoder.Buffer().data(), encoder.Buffer().size()
+#ifndef NDEBUG
+                               , RedoLogger::LOG_INTERNAL_PAGE_SPLIT_OLD
+#endif
+                               );
+        }
+        
+        // Log new page: header initialization, min/max, and data
+        {
+            uint64_t new_page_version = 1;  // New page starts at version 1
+            new_page->hdr.p_version = new_page_version;
+            
+            LogCodec::Encoder encoder;
+            size_t header_offset = STRUCT_OFFSET(InternalPage, hdr);
+            size_t data_offset = STRUCT_OFFSET(InternalPage, data_);
+            uint32_t key_size = new_page->hdr.key_size;
+            uint32_t record_size = new_page->hdr.record_size;
+            size_t record_data_offset = data_offset + 2 * key_size;  // Skip lowest/highest keys
+            
+            // Log header initialization (key fields only)
+            size_t last_index_offset = header_offset + offsetof(Header_Index, last_index);
+            encoder.AddUpdateBytes(last_index_offset, &new_page->hdr.last_index, sizeof(new_page->hdr.last_index));
+            
+            size_t sibling_ptr_offset = header_offset + offsetof(Header_Index, sibling_ptr);
+            encoder.AddUpdateBytes(sibling_ptr_offset, &new_page->hdr.sibling_ptr, sizeof(new_page->hdr.sibling_ptr));
+            
+            size_t leftmost_ptr_offset = header_offset + offsetof(Header_Index, leftmost_ptr);
+            encoder.AddUpdateBytes(leftmost_ptr_offset, &new_page->hdr.leftmost_ptr, sizeof(new_page->hdr.leftmost_ptr));
+            
+            size_t level_offset = header_offset + offsetof(Header_Index, level);
+            encoder.AddUpdateBytes(level_offset, &new_page->hdr.level, sizeof(new_page->hdr.level));
+            
+            size_t this_page_g_ptr_offset = header_offset + offsetof(Header_Index, this_page_g_ptr);
+            encoder.AddUpdateBytes(this_page_g_ptr_offset, &new_page->hdr.this_page_g_ptr, sizeof(new_page->hdr.this_page_g_ptr));
+            
+            // Log min/max values
+            size_t lowest_offset = data_offset + key_size;  // lowest is at data_[key_size]
+            encoder.AddUpdateBytes(lowest_offset, new_page->data_ + key_size, key_size);
+            size_t highest_offset = data_offset;  // highest is at data_[0]
+            encoder.AddUpdateBytes(highest_offset, new_page->data_, key_size);
+            
+            // Log data (all records in the new page)
+            int num_records = new_page->hdr.last_index + 1;
+            if (num_records > 0) {
+                size_t data_size = num_records * record_size;
+                encoder.AddUpdateBytes(record_data_offset, new_page->data_ + 2 * key_size, data_size);
+            }
+            
+            redo_logger->Append(logical_region_id_new, new_page_addr, new_page_version,
+                               encoder.Buffer().data(), encoder.Buffer().size()
+#ifndef NDEBUG
+                               , RedoLogger::LOG_INTERNAL_PAGE_SPLIT_NEW
+#endif
+                               );
+        }
+    }
+
+    void Btr::LogLeafPageSplit(RedoLogger* redo_logger, GlobalAddress old_page_addr, LeafPage* old_page,
+                               GlobalAddress new_page_addr, LeafPage* new_page, RecordSchema* schema) {
+        if (!redo_logger || !old_page || !new_page) return;
+        
+        uint16_t logical_region_id_old = old_page_addr.nodeID;
+        uint16_t logical_region_id_new = new_page_addr.nodeID;
+        
+        // Log old page changes: header (last_index, sibling_ptr), min/max
+        {
+            // Read current version, then increment for the new version after changes
+            uint64_t current_page_version = old_page->hdr.p_version;
+            uint64_t new_page_version = current_page_version + 1;
+            old_page->hdr.p_version = new_page_version;
+            
+            LogCodec::Encoder encoder;
+            size_t header_offset = STRUCT_OFFSET(LeafPage, hdr);
+            
+            // Log header changes: last_index and sibling_ptr
+            size_t last_index_offset = header_offset + offsetof(Header_Index, last_index);
+            encoder.AddUpdateBytes(last_index_offset, &old_page->hdr.last_index, sizeof(old_page->hdr.last_index));
+            
+            size_t sibling_ptr_offset = header_offset + offsetof(Header_Index, sibling_ptr);
+            encoder.AddUpdateBytes(sibling_ptr_offset, &old_page->hdr.sibling_ptr, sizeof(old_page->hdr.sibling_ptr));
+            
+            // Log min/max value changes (highest key changed)
+            size_t data_offset = STRUCT_OFFSET(LeafPage, data_);
+            uint32_t key_size = old_page->hdr.key_size;
+            size_t highest_offset = data_offset;  // highest is at data_[0]
+            encoder.AddUpdateBytes(highest_offset, old_page->data_, key_size);
+            
+            // Note: Data removal doesn't need explicit logging as last_index change indicates valid range
+            
+            redo_logger->Append(logical_region_id_old, old_page_addr, new_page_version,
+                               encoder.Buffer().data(), encoder.Buffer().size()
+#ifndef NDEBUG
+                               , RedoLogger::LOG_LEAF_PAGE_SPLIT_OLD
+#endif
+                               );
+        }
+        
+        // Log new page: header initialization, min/max, and data
+        {
+            assert(new_page->hdr.p_version == 0);
+            uint64_t new_page_version = 1;  // New page starts at version    1
+            new_page->hdr.p_version = new_page_version;
+            
+            LogCodec::Encoder encoder;
+            size_t header_offset = STRUCT_OFFSET(LeafPage, hdr);
+            size_t data_offset = STRUCT_OFFSET(LeafPage, data_);
+            uint32_t key_size = new_page->hdr.key_size;
+            uint32_t record_size = new_page->hdr.record_size;
+            size_t record_data_offset = data_offset + 2 * key_size;  // Skip lowest/highest keys
+            
+            // Log header initialization (key fields only)
+            size_t last_index_offset = header_offset + offsetof(Header_Index, last_index);
+            encoder.AddUpdateBytes(last_index_offset, &new_page->hdr.last_index, sizeof(new_page->hdr.last_index));
+            
+            size_t sibling_ptr_offset = header_offset + offsetof(Header_Index, sibling_ptr);
+            encoder.AddUpdateBytes(sibling_ptr_offset, &new_page->hdr.sibling_ptr, sizeof(new_page->hdr.sibling_ptr));
+            
+            size_t this_page_g_ptr_offset = header_offset + offsetof(Header_Index, this_page_g_ptr);
+            encoder.AddUpdateBytes(this_page_g_ptr_offset, &new_page->hdr.this_page_g_ptr, sizeof(new_page->hdr.this_page_g_ptr));
+            
+            // Log min/max values
+            size_t lowest_offset = data_offset + key_size;  // lowest is at data_[key_size]
+            encoder.AddUpdateBytes(lowest_offset, new_page->data_ + key_size, key_size);
+            size_t highest_offset = data_offset;  // highest is at data_[0]
+            encoder.AddUpdateBytes(highest_offset, new_page->data_, key_size);
+            
+            // Log data (all records in the new page)
+            int num_records = new_page->hdr.last_index + 1;
+            if (num_records > 0) {
+                size_t data_size = num_records * record_size;
+                encoder.AddUpdateBytes(record_data_offset, new_page->data_ + 2 * key_size, data_size);
+            }
+            
+            redo_logger->Append(logical_region_id_new, new_page_addr, new_page_version,
+                               encoder.Buffer().data(), encoder.Buffer().size()
+#ifndef NDEBUG
+                               , RedoLogger::LOG_LEAF_PAGE_SPLIT_NEW
+#endif
+                               );
+        }
+    }
+
+    void Btr::LogNewRootPage(RedoLogger* redo_logger, GlobalAddress root_addr, InternalPage* root_page, RecordSchema* schema) {
+        if (!redo_logger || !root_page) return;
+        
+        uint16_t logical_region_id = root_addr.nodeID;
+        uint64_t new_page_version = 1;  // New root starts at version 1
+        root_page->hdr.p_version = new_page_version;
+        
+        LogCodec::Encoder encoder;
+        size_t header_offset = STRUCT_OFFSET(InternalPage, hdr);
+        size_t data_offset = STRUCT_OFFSET(InternalPage, data_);
+        uint32_t key_size = root_page->hdr.key_size;
+        uint32_t record_size = root_page->hdr.record_size;
+        size_t record_data_offset = data_offset + 2 * key_size;  // Skip lowest/highest keys
+        
+        // Log header initialization (key fields only)
+        size_t last_index_offset = header_offset + offsetof(Header_Index, last_index);
+        encoder.AddUpdateBytes(last_index_offset, &root_page->hdr.last_index, sizeof(root_page->hdr.last_index));
+        
+        size_t leftmost_ptr_offset = header_offset + offsetof(Header_Index, leftmost_ptr);
+        encoder.AddUpdateBytes(leftmost_ptr_offset, &root_page->hdr.leftmost_ptr, sizeof(root_page->hdr.leftmost_ptr));
+        
+        size_t level_offset = header_offset + offsetof(Header_Index, level);
+        encoder.AddUpdateBytes(level_offset, &root_page->hdr.level, sizeof(root_page->hdr.level));
+        
+        size_t this_page_g_ptr_offset = header_offset + offsetof(Header_Index, this_page_g_ptr);
+        encoder.AddUpdateBytes(this_page_g_ptr_offset, &root_page->hdr.this_page_g_ptr, sizeof(root_page->hdr.this_page_g_ptr));
+        
+        // Log min/max values
+        size_t lowest_offset = data_offset + key_size;  // lowest is at data_[key_size]
+        encoder.AddUpdateBytes(lowest_offset, root_page->data_ + key_size, key_size);
+        size_t highest_offset = data_offset;  // highest is at data_[0]
+        encoder.AddUpdateBytes(highest_offset, root_page->data_, key_size);
+        
+        // Log data (all records in the root page - typically just 1 record)
+        int num_records = root_page->hdr.last_index + 1;
+        if (num_records > 0) {
+            size_t data_size = num_records * record_size;
+            encoder.AddUpdateBytes(record_data_offset, root_page->data_ + 2 * key_size, data_size);
+        }
+        
+        redo_logger->Append(logical_region_id, root_addr, new_page_version,
+                           encoder.Buffer().data(), encoder.Buffer().size()
+#ifndef NDEBUG
+                           , RedoLogger::LOG_NEW_ROOT_PAGE
+#endif
+                           );
     }
 
 }

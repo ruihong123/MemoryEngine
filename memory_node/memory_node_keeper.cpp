@@ -374,16 +374,18 @@ void Memory_Node_Keeper::server_communication_thread(std::string client_ip,
     miss_poll_counter = 0;
     if (wc[0].wc_flags & IBV_WC_WITH_IMM) {
       // RDMA write with immediate data - this is likely a log flush notification
-      // imm_data contains the transferred size (bytes received)
-      // wr_id contains the logical_region_id (encoded by compute node)
+      // imm_data encodes both logical_region_id and transferred_size:
+      // Lower 8 bits: logical_region_id (0-255)
+      // Upper 24 bits: transferred_size (bytes received)
       uint32_t imm_data = wc[0].imm_data;
-      uint64_t wr_id = wc[0].wr_id;
       
-      // Extract logical_region_id from wr_id
-      uint16_t logical_region_id = static_cast<uint16_t>(wr_id);
+      // Extract logical_region_id from lower 8 bits
+      uint16_t logical_region_id = static_cast<uint16_t>(imm_data & 0xFF);
+      // Extract transferred_size from upper 24 bits
+      uint32_t transferred_size = (imm_data >> 8) & 0xFFFFFF;
       
       // Notify log replayer manager about received data
-      log_replayer_mgr_->HandleWriteWithImm(compute_node_id, logical_region_id, imm_data);
+      log_replayer_mgr_->HandleWriteWithImm(compute_node_id, logical_region_id, transferred_size);
       
       cv_temp.notify_all();
       rdma_mg->post_receive<RDMA_Request>(&recv_mr[buffer_position],
@@ -439,6 +441,10 @@ void Memory_Node_Keeper::server_communication_thread(std::string client_ip,
       rdma_mg->post_receive<RDMA_Request>(&recv_mr[buffer_position],
                                           compute_node_id, client_ip);
       log_segment_request_handler(receive_msg_buf, client_ip, compute_node_id);
+    } else if (receive_msg_buf->command == log_replay_status_query) {
+      rdma_mg->post_receive<RDMA_Request>(&recv_mr[buffer_position],
+                                          compute_node_id, client_ip);
+      log_replay_status_query_handler(receive_msg_buf, client_ip, compute_node_id);
     } else if (receive_msg_buf->command == put_qp_info) {
       //          printf("Put QP information for
       //          %u\n",receive_msg_buf->content.qp_config_xcompute.node_id_pairs);
@@ -872,6 +878,31 @@ void Memory_Node_Keeper::log_segment_request_handler(RDMA_Request* request,
   log_replayer_mgr_->HandleLogSegmentRequest(req);
   
   // TODO: Send reply if needed (currently the request doesn't expect a reply)
+}
+
+void Memory_Node_Keeper::log_replay_status_query_handler(RDMA_Request* request,
+                                                          std::string& client_ip,
+                                                          uint8_t target_node_id) {
+  // Handle log_replay_status_query RPC
+  // Compute node is asking if all logs have been replayed
+  const LogReplayStatusQuery& query = request->content.log_replay_status_query;
+  
+  // Wait for all logs to be replayed (this blocks until replay is complete)
+  log_replayer_mgr_->WaitForAllLogsReplayed();
+  
+  // Send reply indicating all logs are replayed
+  ibv_mr send_mr;
+  rdma_mg->Allocate_Local_RDMA_Slot(send_mr, Message);
+  RDMA_Reply* send_pointer = reinterpret_cast<RDMA_Reply*>(send_mr.addr);
+  *send_pointer = {};
+  send_pointer->content.log_replay_status_reply.all_logs_replayed = true;
+  send_pointer->received = true;
+  
+  rdma_mg->RDMA_Write(request->buffer, request->rkey, &send_mr,
+                      sizeof(RDMA_Reply), client_ip, IBV_SEND_SIGNALED, 1,
+                      target_node_id);
+  rdma_mg->Deallocate_Local_RDMA_Slot(send_mr.addr, Message);
+  delete request;
 }
 
 void Memory_Node_Keeper::Get_qp_info_handler(RDMA_Request *request,

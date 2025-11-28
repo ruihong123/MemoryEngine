@@ -234,7 +234,7 @@ namespace DSMEngine {
         bool internal_page_search(const DynamicCompoundKey &k, void *result_ptr, RecordSchema *index_schema_ptr);
 
         bool internal_page_store(GlobalAddress page_addr, const DynamicCompoundKey &k, GlobalAddress value, int level,
-                                 RecordSchema *schema_ptr);
+                                 RecordSchema *schema_ptr, class RedoLogger* redo_logger = nullptr);
     };
 
     class LeafPage {
@@ -328,10 +328,12 @@ namespace DSMEngine {
         void GetShallowByPosition(int pos, RecordSchema *schema_ptr, DynamicCompoundKey &key, void *&buff);
 
         // if node is full return true, if not full return false.
-        bool leaf_page_store(const DynamicCompoundKey &k, const Slice &v, int &cnt, RecordSchema *index_schema);
+        bool leaf_page_store(const DynamicCompoundKey &k, const Slice &v, int &cnt, RecordSchema *index_schema, 
+                            class RedoLogger* redo_logger = nullptr, GlobalAddress page_addr = GlobalAddress::Null());
 
         // if need merge return true, if not needed return false.
-        bool leaf_page_delete(const DynamicCompoundKey &k, int &cnt, SearchResult &result, RecordSchema *record_scheme);
+        bool leaf_page_delete(const DynamicCompoundKey &k, int &cnt, SearchResult &result, RecordSchema *record_scheme,
+                             class RedoLogger* redo_logger = nullptr, GlobalAddress page_addr = GlobalAddress::Null());
     };
 
 

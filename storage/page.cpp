@@ -5,6 +5,8 @@
 //#include <infiniband/verbs.h>
 #include "page.h"
 #include "Btr.h"
+#include "txn/RedoLogger.h"
+#include "txn/LogCodec.h"
 namespace DSMEngine {
     bool InternalPage::internal_page_search(const DynamicCompoundKey &k, void *result_ptr, RecordSchema* index_schema_ptr) {
         SearchResult& result = *(SearchResult*)result_ptr;
@@ -86,7 +88,7 @@ namespace DSMEngine {
     }
 
 
-    bool InternalPage::internal_page_store(GlobalAddress page_addr, const DynamicCompoundKey &k, GlobalAddress value, int level, RecordSchema* schema_ptr) {
+    bool InternalPage::internal_page_store(GlobalAddress page_addr, const DynamicCompoundKey &k, GlobalAddress value, int level, RecordSchema* schema_ptr, RedoLogger* redo_logger) {
         auto cnt = hdr.last_index + 1;
         assert(GetRecordValueByIndex(hdr.last_index) != GlobalAddress::Null());
         assert(GetRecordKeyByIndex(hdr.last_index, schema_ptr) != DynamicCompoundKey::MinValue(schema_ptr));
@@ -130,10 +132,48 @@ namespace DSMEngine {
 //        GlobalAddress sibling_addr = GlobalAddress::Null();
         assert(!is_update);
         hdr.reset_dirty_bounds();
+        
+        // Prepare logging before making changes
+        LogCodec::Encoder encoder;
+        bool need_logging = (redo_logger != nullptr);
+        uint64_t old_page_version = hdr.p_version;
+        uint64_t new_page_version = old_page_version + 1;
+        uint16_t logical_region_id = page_addr.nodeID;
+        
+        // Calculate offsets for logging
+        size_t header_offset = STRUCT_OFFSET(InternalPage, hdr);
+        size_t data_offset = STRUCT_OFFSET(InternalPage, data_);
+        uint32_t key_size = hdr.key_size;
+        uint32_t record_size = hdr.record_size;
+        size_t record_data_offset = data_offset + 2 * key_size;  // Skip lowest/highest keys
+        
         //no dirty boundary needs to be updated.
+        // Log the record shifts (moving records to make space)
+        if (need_logging && insert_index < cnt) {
+            // Calculate source and destination offsets for the shift
+            // Records from insert_index to cnt-1 need to move one position right
+            size_t num_records_to_move = cnt - insert_index;
+            size_t src_start_offset = record_data_offset + insert_index * record_size;
+            size_t dst_start_offset = src_start_offset + record_size;
+            size_t move_size = num_records_to_move * record_size;
+            
+            encoder.AddMemmove(dst_start_offset, src_start_offset, move_size);
+        }
+        
+        // Execute the shift
         for (int i = cnt; i > insert_index; --i) {
             SetRecordByIndex(i, GetRecordKeyByIndex(i - 1, schema_ptr), GetRecordValueByIndex(i - 1), schema_ptr);
         }
+        
+        // Log the new record insertion
+        if (need_logging) {
+            size_t new_record_offset = record_data_offset + insert_index * record_size;
+            // Log key
+            encoder.AddUpdateBytes(new_record_offset, k.start, key_size);
+            // Log value (GlobalAddress)
+            encoder.AddUpdateBytes(new_record_offset + key_size, &value, sizeof(GlobalAddress));
+        }
+        
         SetRecordByIndex(insert_index, k, value, schema_ptr);
 #ifndef NDEBUG
         uint16_t last_index_prev = hdr.last_index;
@@ -143,6 +183,24 @@ namespace DSMEngine {
         assert(hdr.last_index == last_index_prev + 1);
         assert(GetRecordValueByIndex(hdr.last_index) != GlobalAddress::Null());
         assert(GetRecordKeyByIndex(hdr.last_index, schema_ptr)  != DynamicCompoundKey::MinValue(schema_ptr));
+        
+        // Log header update (last_index changed)
+        if (need_logging) {
+            // Update page version in memory (for next operation)
+            hdr.p_version = new_page_version;
+            
+            size_t last_index_offset = header_offset + offsetof(Header_Index, last_index);
+            encoder.AddUpdateBytes(last_index_offset, &hdr.last_index, sizeof(hdr.last_index));
+            
+            // Append to redo log (page_version is already in RecordHeader, no need to log it in payload)
+            redo_logger->Append(logical_region_id, page_addr, new_page_version,
+                               encoder.Buffer().data(), encoder.Buffer().size()
+#ifndef NDEBUG
+                               , RedoLogger::LOG_INTERNAL_PAGE_STORE
+#endif
+                               );
+        }
+        
         return cnt == hdr.kCardinality;
     }
 
@@ -260,7 +318,7 @@ namespace DSMEngine {
     }
     // [lowest, highest)
     bool LeafPage::leaf_page_store(const DynamicCompoundKey &k, const Slice &v, int &cnt,
-                                          RecordSchema *index_schema) {
+                                          RecordSchema *index_schema, RedoLogger* redo_logger, GlobalAddress page_addr) {
         cnt = hdr.last_index + 1;
         bool is_update = false;
         uint16_t insert_index = 0;
@@ -329,14 +387,45 @@ namespace DSMEngine {
         assert(!is_update);
 
         tuple_start = static_cast<char*>(GetRecordPtrByIndex(insert_index));
+        
+        // Prepare logging before making changes
+        LogCodec::Encoder encoder;
+        bool need_logging = (redo_logger != nullptr && page_addr != GlobalAddress::Null());
+        uint64_t old_page_version = hdr.p_version;
+        // assert(old_page_version > 0);
+        uint64_t new_page_version = old_page_version + 1;
+        uint16_t logical_region_id = page_addr.nodeID;
+        
         if (insert_index <= hdr.last_index){
             // Move all the tuples at and after the insert_index,use memmove to avoid undefined behavior for overlapped address.
-            memmove(tuple_start + hdr.record_size, tuple_start, (hdr.last_index - insert_index+1)*hdr.record_size);
+            size_t move_size = (hdr.last_index - insert_index + 1) * hdr.record_size;
+            size_t src_offset = (char*)tuple_start - (char*)this;
+            size_t dst_offset = src_offset + hdr.record_size;
+            
+            // Log the memmove operation before executing it
+            if (need_logging) {
+                encoder.AddMemmove(dst_offset, src_offset, move_size);
+            }
+            
+            memmove(tuple_start + hdr.record_size, tuple_start, move_size);
             auto r = Record(index_schema, tuple_start);
             assert(v.size() == r.GetRecordSize());
+            
+            // Log the new record insertion
+            if (need_logging) {
+                encoder.AddUpdateBytes(src_offset, v.data(), hdr.record_size);
+            }
+            
             r.FillRecord(v.data_reference(), v.size());
         }else{
             assert(insert_index < hdr.kCardinality );
+            size_t insert_offset = (char*)tuple_start - (char*)this;
+            
+            // Log the new record insertion (no memmove needed)
+            if (need_logging) {
+                encoder.AddUpdateBytes(insert_offset, v.data(), hdr.record_size);
+            }
+            
             auto r = Record(index_schema, tuple_start);
             assert(v.size() == r.GetRecordSize());
             r.FillRecord(v.data_reference(), v.size());
@@ -344,6 +433,24 @@ namespace DSMEngine {
         cnt++;
         hdr.last_index++;
         assert(hdr.last_index < hdr.kCardinality);
+        
+        // Log header update (last_index changed)
+        if (need_logging) {
+            // Update page version in memory (for next operation)
+            hdr.p_version = new_page_version;
+            
+            size_t header_offset = STRUCT_OFFSET(LeafPage, hdr);
+            size_t last_index_offset = header_offset + offsetof(Header_Index, last_index);
+            encoder.AddUpdateBytes(last_index_offset, &hdr.last_index, sizeof(hdr.last_index));
+            
+            // Append to redo log (page_version is already in RecordHeader, no need to log it in payload)
+            redo_logger->Append(logical_region_id, page_addr, new_page_version, 
+                               encoder.Buffer().data(), encoder.Buffer().size()
+#ifndef NDEBUG
+                               , RedoLogger::LOG_LEAF_PAGE_STORE
+#endif
+                               );
+        }
 #ifdef DIRTY_ONLY_FLUSH
         // If the page get inserted, then the dirty range is the whole page, or flush to the end of tuple_start + (last_Index+1)*r.GetRecordSize()
         hdr.merge_dirty_bounds(sizeof(uint64_t), kLeafPageSize);
@@ -353,7 +460,7 @@ namespace DSMEngine {
     }
     // [lowest, highest)
     bool LeafPage::leaf_page_delete(const DynamicCompoundKey &k, int &cnt, SearchResult &result,
-                                         RecordSchema *record_scheme) {
+                                          RecordSchema *record_scheme, RedoLogger* redo_logger, GlobalAddress page_addr) {
 
         // It is problematic to just check whether the value is empty, because it is possible
         // that the buffer is not initialized as 0
@@ -414,15 +521,51 @@ namespace DSMEngine {
 //        if (!is_update) { // insert new item
 
         tuple_start = static_cast<char *>(GetRecordPtrByIndex(insert_index)); //data_ + insert_index * tuple_length;
+        
+        // Prepare logging before making changes
+        LogCodec::Encoder encoder;
+        bool need_logging = (redo_logger != nullptr && page_addr != GlobalAddress::Null() && result.find_value);
+        uint64_t old_page_version = hdr.p_version;
+        uint64_t new_page_version = old_page_version + 1;
+        uint16_t logical_region_id = page_addr.nodeID;
+        
         if (insert_index <= hdr.last_index){
             // Move all the tuples at and after the insert_index,use memmove to avoid undefined behavior for overlapped address.
-            memmove(tuple_start, tuple_start + tuple_length, (hdr.last_index - insert_index)*tuple_length);
+            size_t move_size = static_cast<size_t>(hdr.last_index - insert_index) * static_cast<size_t>(tuple_length);
+            size_t src_offset = (char*)tuple_start - (char*)this + tuple_length;
+            size_t dst_offset = (char*)tuple_start - (char*)this;
+            
+            // Log the memmove operation before executing it
+            if (need_logging && move_size > 0) {
+                encoder.AddMemmove(dst_offset, src_offset, move_size);
+            }
+            
+            memmove(tuple_start, tuple_start + tuple_length, move_size);
         }else{
             assert(false);
         }
         cnt--;
         hdr.last_index--;
         assert(hdr.last_index <= hdr.kCardinality-1);
+        
+        // Log header update (last_index changed)
+        if (need_logging) {
+            // Update page version in memory (for next operation)
+            hdr.p_version = new_page_version;
+            
+            size_t header_offset = STRUCT_OFFSET(LeafPage, hdr);
+            size_t last_index_offset = header_offset + offsetof(Header_Index, last_index);
+            encoder.AddUpdateBytes(last_index_offset, &hdr.last_index, sizeof(hdr.last_index));
+            
+            // Append to redo log (page_version is already in RecordHeader, no need to log it in payload)
+            redo_logger->Append(logical_region_id, page_addr, new_page_version, 
+                               encoder.Buffer().data(), encoder.Buffer().size()
+#ifndef NDEBUG
+                               , RedoLogger::LOG_LEAF_PAGE_DELETE
+#endif
+                               );
+        }
+        
 #ifdef DIRTY_ONLY_FLUSH
         // If the page get inserted, then the dirty range is the whole page, or flush to the end of tuple_start + (last_Index+1)*r.GetRecordSize()
         hdr.merge_dirty_bounds(sizeof(uint64_t), kLeafPageSize);

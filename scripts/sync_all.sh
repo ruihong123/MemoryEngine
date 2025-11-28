@@ -28,6 +28,7 @@ pkill -f memory_server >/dev/null 2>&1 || true
 pkill -f btree_bench >/dev/null 2>&1 || true
 rm -f ${home_dir}/scripts/log* >/dev/null 2>&1 || true
 rm -f ${home_dir}/scripts/results/* >/dev/null 2>&1 || true
+rm -f ${home_dir}/scripts/data/* >/dev/null 2>&1 || true
 rm -f ${home_dir}/debug/logdump.txt >/dev/null 2>&1 || true
 rm -f ${home_dir}/release/logdump.txt >/dev/null 2>&1 || true
 rm -f ${core_dump_dir}/core* >/dev/null 2>&1 || true
@@ -48,6 +49,7 @@ pkill -f memory_server >/dev/null 2>&1 || true
 pkill -f btree_bench >/dev/null 2>&1 || true
 rm -f ${home_dir}/scripts/log* >/dev/null 2>&1 || true
 rm -f ${home_dir}/scripts/results/* >/dev/null 2>&1 || true
+rm -f ${home_dir}/scripts/data/* >/dev/null 2>&1 || true
 rm -f ${home_dir}/debug/logdump.txt >/dev/null 2>&1 || true
 rm -f ${home_dir}/release/logdump.txt >/dev/null 2>&1 || true
 rm -f ${core_dump_dir}/core* >/dev/null 2>&1 || true

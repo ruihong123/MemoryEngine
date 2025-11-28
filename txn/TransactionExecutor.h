@@ -39,6 +39,7 @@ public:
     is_finish_ = false;
     total_count_ = 0;
     total_abort_count_ = 0;
+    hot_scan_count_ = 0;
     is_ready_ = new volatile bool[thread_count_];
     for (size_t i = 0; i < thread_count_; ++i) {
       is_ready_[i] = false;
@@ -278,6 +279,10 @@ private:
     }
     // epoch generator.
     std::cout << "start processing..." << std::endl;
+    // Reset hot scan count for this benchmark run
+    if (enable_hot_scan_) {
+      hot_scan_count_.store(0, std::memory_order_relaxed);
+    }
     is_begin_ = true;
     start_timestamp_ = timer_.GetTimePoint();
     thread_group.join_all();
@@ -302,6 +307,18 @@ private:
     perf_statistics_.thread_count_ = thread_count_;
     perf_statistics_.elapsed_time_ = elapsed_time;
     perf_statistics_.throughput_ = throughput;
+    
+    // Calculate hot scan throughput if enabled
+    if (enable_hot_scan_) {
+      long long hot_scan_count = hot_scan_count_.load(std::memory_order_relaxed);
+      perf_statistics_.hot_scan_count_ = hot_scan_count;
+      if (elapsed_time > 0) {
+        perf_statistics_.hot_scan_throughput_ = hot_scan_count * 1.0 / elapsed_time;
+      }
+      std::cout << "hot_scan_count=" << hot_scan_count
+                << ", hot_scan_throughput=" << perf_statistics_.hot_scan_throughput_
+                << "K tps" << std::endl;
+    }
 
     // Aggregate latency data from all threads
     AggregateLatencyData();
@@ -478,6 +495,7 @@ private:
   // profile count
   std::atomic<size_t> total_count_;
   std::atomic<size_t> total_abort_count_;
+  std::atomic<size_t> hot_scan_count_;
 
   PerfStatistics perf_statistics_;
   bool log_enabled_;
