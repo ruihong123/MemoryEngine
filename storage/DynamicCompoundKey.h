@@ -120,9 +120,33 @@ namespace DSMEngine {
                         if (va != vb) return va < vb ? -1 : 1;
                         break;
                     }
+                    case ValueType::INT8: {
+                        int8_t va = *reinterpret_cast<const int8_t *>(a);
+                        int8_t vb = *reinterpret_cast<const int8_t *>(b);
+                        if (va != vb) return va < vb ? -1 : 1;
+                        break;
+                    }
+                    case ValueType::INT16: {
+                        int16_t va = *reinterpret_cast<const int16_t *>(a);
+                        int16_t vb = *reinterpret_cast<const int16_t *>(b);
+                        if (va != vb) return va < vb ? -1 : 1;
+                        break;
+                    }
+                    case ValueType::INT32: {
+                        int32_t va = *reinterpret_cast<const int32_t *>(a);
+                        int32_t vb = *reinterpret_cast<const int32_t *>(b);
+                        if (va != vb) return va < vb ? -1 : 1;
+                        break;
+                    }
                     case ValueType::INT64: {
                         int64_t va = *reinterpret_cast<const int64_t *>(a);
                         int64_t vb = *reinterpret_cast<const int64_t *>(b);
+                        if (va != vb) return va < vb ? -1 : 1;
+                        break;
+                    }
+                    case ValueType::UINT32: {
+                        uint32_t va = *reinterpret_cast<const uint32_t *>(a);
+                        uint32_t vb = *reinterpret_cast<const uint32_t *>(b);
                         if (va != vb) return va < vb ? -1 : 1;
                         break;
                     }
@@ -132,7 +156,24 @@ namespace DSMEngine {
                         if (va != vb) return va < vb ? -1 : 1;
                         break;
                     }
+                    case ValueType::FLOAT: {
+                        float va = *reinterpret_cast<const float *>(a);
+                        float vb = *reinterpret_cast<const float *>(b);
+                        if (va != vb) return va < vb ? -1 : 1;
+                        break;
+                    }
+                    case ValueType::DOUBLE: {
+                        double va = *reinterpret_cast<const double *>(a);
+                        double vb = *reinterpret_cast<const double *>(b);
+                        if (va != vb) return va < vb ? -1 : 1;
+                        break;
+                    }
                     case ValueType::FIXCHAR: {
+                        int cmp = std::memcmp(a, b, size);
+                        if (cmp != 0) return cmp < 0 ? -1 : 1;
+                        break;
+                    }
+                    case ValueType::META: {
                         int cmp = std::memcmp(a, b, size);
                         if (cmp != 0) return cmp < 0 ? -1 : 1;
                         break;

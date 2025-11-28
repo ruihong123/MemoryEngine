@@ -24,7 +24,7 @@ core_dump_dir="/mnt/core_dump"
 
 # Working environment
 proj_dir="/users/Ruihong/MemoryEngine"
-bin_dir="${proj_dir}/release"
+bin_dir="${proj_dir}/debug"
 ssh_opts="-o StrictHostKeyChecking=no"
 
 # Memory and port configuration

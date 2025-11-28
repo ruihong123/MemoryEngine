@@ -23,6 +23,8 @@ pkill -f mvcc_storage_bench >/dev/null 2>&1 || true
 sudo pkill -f motor_mempool >/dev/null 2>&1 || true
 pkill -f memory_server_term >/dev/null 2>&1 || true
 pkill -f tpcc >/dev/null 2>&1 || true
+pkill -f tatp >/dev/null 2>&1 || true
+pkill -f smallbank >/dev/null 2>&1 || true
 pkill -f memory_server_tpcc >/dev/null 2>&1 || true
 pkill -f memory_server >/dev/null 2>&1 || true
 pkill -f btree_bench >/dev/null 2>&1 || true
@@ -44,6 +46,8 @@ pkill -f micro_bench >/dev/null 2>&1 || true
 pkill -f mvcc_storage_bench >/dev/null 2>&1 || true
 pkill -f memory_server_term >/dev/null 2>&1 || true
 pkill -f tpcc >/dev/null 2>&1 || true
+pkill -f tatp >/dev/null 2>&1 || true
+pkill -f smallbank >/dev/null 2>&1 || true
 pkill -f memory_server_tpcc >/dev/null 2>&1 || true
 pkill -f memory_server >/dev/null 2>&1 || true
 pkill -f btree_bench >/dev/null 2>&1 || true
