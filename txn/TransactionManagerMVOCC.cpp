@@ -328,7 +328,7 @@ namespace DSMEngine{
 #endif
                 uint64_t ds_epoch = 0;
                 {
-                    std::shared_lock<RWSpinMutex> l(delta_map_mtx);
+                    // std::shared_lock<RWSpinMutex> l(delta_map_mtx);
                     auto iter = delta_sections.lower_bound(prev_delta);
                     assert(iter != delta_sections.end());
                     delta_section = iter->second;
@@ -536,6 +536,25 @@ namespace DSMEngine{
     bool TransactionManager::CommitTransaction(CharArray &ret_str) {
         PROFILE_TIME_START(thread_id_, CC_COMMIT);
 
+        // For pure read transactions, skip validation and commit stages, just clean up
+        if (pure_read_txn) {
+            // Clean up access records
+            for (size_t i = 0; i < access_list_.access_count_; ++i) {
+                Access* access = access_list_.GetAccess(i);
+                delete access->access_global_record_;
+                access->access_global_record_ = nullptr;
+                access->access_addr_ = GlobalAddress::Null();
+                if (access->txn_local_tuple_ != nullptr) {
+                    delete access->txn_local_tuple_;
+                    access->txn_local_tuple_ = nullptr;
+                }
+            }
+            access_list_.Clear();
+            ClearStates();
+            PROFILE_TIME_END(thread_id_, CC_COMMIT);
+            return true;
+        }
+
         assert(locked_handles_.empty());
         std::map<uint64_t, Access*> sorted_access;
         // lock the access list in order to avoid deadlock.
@@ -547,8 +566,7 @@ namespace DSMEngine{
 //        uint64_t commit_ts = GlobalTimestamp::FetchAddMonotoneTimestamp();
         // -----------------(validate stage)----------------------------------------------
         // First let us check whether the transaciton need to abort.
-        if (!pure_read_txn){
-            for (auto iter : sorted_access){
+        for (auto iter : sorted_access){
                 Access* access = iter.second;
                 void*  page_buff;
                 Cache::Handle* handle;
@@ -634,7 +652,6 @@ namespace DSMEngine{
                     }
                 }
             }
-        }
         // -----------------(commit stage)----------------------------------------------
 #ifdef USE_SNAPSHOT_MANAGER
         uint64_t required_floor = max_seen_ts_;
@@ -649,7 +666,7 @@ namespace DSMEngine{
         for (size_t i = 0; i < access_list_.access_count_; ++i) {
             Access* access = access_list_.GetAccess(i);
             AccessType access_type = access->access_type_;
-            if (access_type == READ_WRITE) {
+            if (access_type == READ_WRITE &&  !access->txn_local_tuple_->dirty_col_ids.empty()) {
                 // TODO: Create a new delta_record in the delta section and update the prev_delta in the record's metadata.
                 //  Will this help in reduce the overhead of locking? probably not. Need experiment.
                 GlobalAddress delta_gadd = GlobalAddress::Null();

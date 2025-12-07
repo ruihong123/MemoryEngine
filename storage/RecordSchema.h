@@ -61,6 +61,7 @@ namespace DSMEngine {
             for (size_t i = 0; i < column_count_; ++i){
                 columns_[i] = columns[i];
                 columns_[i]->column_offset_ = column_offset_;
+                assert(column_offset_ <= 2048);
                 column_offset_ += columns_[i]->column_size_;
             }
         }

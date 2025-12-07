@@ -37,20 +37,33 @@ namespace DSMEngine {
         // (1): for primary index: stop at the largest key that smaller or equal than the target key.
         // (2): for secondary index: stop at the largest key that smaller or equal than the target key.
         //      If it is equal, it point to the frist one. If it is smaller, pointed to the last one.
+        
+        // Cache pointer calculations to avoid repeated computation in loop
+        uint16_t key_size = hdr.key_size;
+        uint64_t record_size = hdr.record_size;
+        char *data_ptr = data_ + 2 * key_size;
+        
+        // Reuse a single DynamicCompoundKey object instead of creating new ones each iteration
+        DynamicCompoundKey mid_key_wrapper(nullptr, index_schema_ptr);
+        
         while (left < right) {
-            mid = (left + right + 1) / 2;
-            DynamicCompoundKey mid_key = GetRecordKeyByIndex(mid, index_schema_ptr);
+            mid = (left + right + 1) >> 1;  // Bit shift is faster than division
+            
+            // Direct pointer calculation - avoid function call overhead
+            char *mid_ptr = data_ptr + mid * record_size;
+            mid_key_wrapper.start = mid_ptr;  // Reuse existing object, just update pointer
+            
             //TODO: return the first entry which equals to the target key.
-            if (k > mid_key) {
+            if (k > mid_key_wrapper) {
                 // Key at "mid" is smaller than "target".  Therefore all
                 // blocks before "mid" are uninteresting.
                 left = mid;
-            } else if(k < mid_key) {
+            } else if(k < mid_key_wrapper) {
                 // Key at "mid" is >= "target".  Therefore all blocks at or
                 // after "mid" are uninteresting.
                 right = mid - 1; // why mid -1 rather than mid
             }else{
-                target_global_ptr_buff = GetRecordValueByIndex(mid);
+                target_global_ptr_buff = *(GlobalAddress *)(mid_ptr + key_size);
                 result.next_level = target_global_ptr_buff;
 //                assert(result.this_key <= k);
                 assert(result.next_level != GlobalAddress::Null());
@@ -100,17 +113,30 @@ namespace DSMEngine {
         uint16_t left = 0;
         uint16_t right = hdr.last_index;
         uint16_t mid = 0;
+        
+        // Cache pointer calculations to avoid repeated computation in loop
+        uint16_t search_key_size = hdr.key_size;
+        uint64_t search_record_size = hdr.record_size;
+        char *data_ptr = data_ + 2 * search_key_size;
+        
+        // Reuse a single DynamicCompoundKey object instead of creating new ones each iteration
+        DynamicCompoundKey mid_key_wrapper(nullptr, schema_ptr);
+        
         if (k < GetRecordKeyByIndex(0, schema_ptr)) {
             insert_index = 0;
         }else{
             while (left < right) {
-                mid = (left + right + 1) / 2;
-                DynamicCompoundKey mid_key = GetRecordKeyByIndex(mid, schema_ptr);
-                if (k > mid_key) {
+                mid = (left + right + 1) >> 1;  // Bit shift is faster than division
+                
+                // Direct pointer calculation - avoid function call overhead
+                char *mid_ptr = data_ptr + mid * search_record_size;
+                mid_key_wrapper.start = mid_ptr;  // Reuse existing object, just update pointer
+                
+                if (k > mid_key_wrapper) {
                     // Key at "mid" is smaller than "target".  Therefore all
                     // blocks before "mid" are uninteresting.
                     left = mid;
-                } else if (k < mid_key) {
+                } else if (k < mid_key_wrapper) {
                     // Key at "mid" is >= "target".  Therefore all blocks at or
                     // after "mid" are uninteresting.
                     right = mid - 1;
@@ -222,11 +248,22 @@ namespace DSMEngine {
         assert(last_key < GetHighest(record_scheme));
         assert(hdr.record_size == record_scheme->GetRecordTotalSize());
 #endif
-        DynamicCompoundKey key_mid;
+        
+        // Cache pointer calculations to avoid repeated computation in loop
+        uint16_t key_size = hdr.key_size;
+        uint64_t record_size = hdr.record_size;
+        char *data_ptr = data_ + 2 * key_size;
+        
+        // Reuse a single DynamicCompoundKey object instead of creating new ones each iteration
+        DynamicCompoundKey key_mid(nullptr, record_scheme);
+        
         while (left < right) {
             // Bias-free midpoint; safe for uint16_t range.
-            mid = (left + right + 1) / 2;
-            key_mid = GetRecordKeyByIndex(mid, record_scheme);
+            mid = (left + right + 1) >> 1;  // Bit shift is faster than division
+            
+            // Direct pointer calculation - avoid function call overhead
+            char *mid_ptr = data_ptr + mid * record_size;
+            key_mid.start = mid_ptr;  // Reuse existing object, just update pointer
 
             if (k > key_mid) {
                 // Key at "mid" is smaller than "target".  Therefore all
@@ -243,7 +280,7 @@ namespace DSMEngine {
         }
         assert(left == right);
         assert(mid == right);
-        key_mid = GetRecordKeyByIndex(mid, record_scheme);
+        key_mid.start = data_ptr + mid * record_size;
 
         if (k < key_mid && mid == 0) {
 
@@ -283,25 +320,43 @@ namespace DSMEngine {
         assert(k < GetHighest(record_scheme) );
         assert(last_key < GetHighest(record_scheme));
 #endif
+        
+        // Cache pointer calculations to avoid repeated computation in loop
+        uint16_t key_size = hdr.key_size;
+        uint64_t record_size = hdr.record_size;
+        char *data_ptr = data_ + 2 * key_size;
+        
+        // Reuse a single DynamicCompoundKey object instead of creating new ones each iteration
+        // This avoids constructor overhead and potential memory allocations
+        DynamicCompoundKey mid_key_wrapper(nullptr, record_scheme);
+        
         while (left < right) {
-            mid = (left + right + 1) / 2;
-            DynamicCompoundKey temp_key = GetRecordKeyByIndex(mid, record_scheme);;
-            if (k > temp_key) {
+            // Calculate mid: (left + right + 1) / 2
+            // Compiler should optimize division by 2, but we can use bit shift: (left + right + 1) >> 1
+            mid = (left + right + 1) >> 1;  // Bit shift is faster than division
+            
+            // Direct pointer calculation - avoid function call overhead
+            char *mid_ptr = data_ptr + mid * record_size;
+            mid_key_wrapper.start = mid_ptr;  // Reuse existing object, just update pointer
+            
+            // Use single comparison with early exit for equality case
+            if (k > mid_key_wrapper) {
                 // Key at "mid" is smaller than "target".  Therefore all
                 // blocks before "mid" are uninteresting.
                 left = mid;
-            } else if (k < temp_key) {
+            } else if (k < mid_key_wrapper) {
                 // Key at "mid" is >= "target".  Therefore all blocks at or
                 // after "mid" are uninteresting.
                 right = mid - 1;
-            } else{
-                //Find the value.
+            } else {
+                // Found the key - early exit
                 assert(hdr.record_size > 0);
-                memcpy((void*)result.val.data(),temp_key.start, hdr.record_size);
+                memcpy((void*)result.val.data(), mid_ptr, hdr.record_size);
                 result.find_value = true;
                 return;
             }
         }
+        
         // Not find or find on the first entry.
         assert(right == left);
         tuple_start = static_cast<char *>(GetRecordPtrByIndex(right)); //data_ + right * tuple_length;
@@ -337,9 +392,22 @@ namespace DSMEngine {
             uint16_t left = 0;
             uint16_t right = hdr.last_index;
             uint16_t mid = 0;
+            
+            // Cache pointer calculations to avoid repeated computation in loop
+            uint16_t key_size = hdr.key_size;
+            uint64_t record_size = hdr.record_size;
+            char *data_ptr = data_ + 2 * key_size;
+            
+            // Reuse a single DynamicCompoundKey object instead of creating new ones each iteration
+            DynamicCompoundKey temp_key(nullptr, index_schema);
+            
             while (left < right) {
-                mid = (left + right + 1) / 2;
-                DynamicCompoundKey temp_key = GetRecordKeyByIndex(mid, index_schema);
+                mid = (left + right + 1) >> 1;  // Bit shift is faster than division
+                
+                // Direct pointer calculation - avoid function call overhead
+                char *mid_ptr = data_ptr + mid * record_size;
+                temp_key.start = mid_ptr;  // Reuse existing object, just update pointer
+                
                 if (k > temp_key) {
                     // Key at "mid" is smaller than "target".  Therefore all
                     // blocks before "mid" are uninteresting.
@@ -351,7 +419,7 @@ namespace DSMEngine {
                 } else{
                     //Find the value.
                     assert(v.size() == hdr.record_size);
-                    memcpy(temp_key.start, v.data(), hdr.record_size);
+                    memcpy(mid_ptr, v.data(), hdr.record_size);
                     // TODO: for search secondary index with duplicated key, the new inserted enty will be inserted into the first node contain that duplicated key,
                     //  but it may not inserted in the first position with in the node.
                     left = mid;
@@ -361,8 +429,9 @@ namespace DSMEngine {
             assert(left == right);
             mid = left;
 
-            DynamicCompoundKey temp_key = GetRecordKeyByIndex(left, index_schema);
-            tuple_start = static_cast<char*>(GetRecordPtrByIndex(left));
+            char *left_ptr = data_ptr + left * record_size;
+            temp_key.start = left_ptr;
+            tuple_start = left_ptr;
             if ((k > temp_key )){
                 insert_index = left +1;
             } else if (k < temp_key){
@@ -485,10 +554,22 @@ namespace DSMEngine {
             uint16_t left = 0;
             uint16_t right = hdr.last_index;
             uint16_t mid = 0;
+            
+            // Cache pointer calculations to avoid repeated computation in loop
+            uint16_t key_size = hdr.key_size;
+            uint64_t record_size = hdr.record_size;
+            char *data_ptr = data_ + 2 * key_size;
+            
+            // Reuse a single DynamicCompoundKey object instead of creating new ones each iteration
+            DynamicCompoundKey temp_key(nullptr, record_scheme);
+            
             while (left < right) {
-                mid = (left + right + 1) / 2;
-//                tuple_start = static_cast<char*>(GetRecordPtrByIndex(mid));
-                DynamicCompoundKey temp_key = GetRecordKeyByIndex(mid, record_scheme);
+                mid = (left + right + 1) >> 1;  // Bit shift is faster than division
+                
+                // Direct pointer calculation - avoid function call overhead
+                char *mid_ptr = data_ptr + mid * record_size;
+                temp_key.start = mid_ptr;  // Reuse existing object, just update pointer
+                
                 if (k > temp_key) {
                     // Key at "mid" is smaller than "target".  Therefore all
                     // blocks before "mid" are uninteresting.
@@ -507,8 +588,9 @@ namespace DSMEngine {
             }
             assert(left == right);
             mid = left;
-            tuple_start =  static_cast<char*>(GetRecordPtrByIndex(left));
-            DynamicCompoundKey temp_key = GetRecordKeyByIndex(left, record_scheme);
+            char *left_ptr = data_ptr + left * record_size;
+            tuple_start = left_ptr;
+            temp_key.start = left_ptr;
             if ((k != temp_key )){
                 result.find_value = false;
                 return false;

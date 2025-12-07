@@ -1002,7 +1002,6 @@ LocalBuffer::LocalBuffer(const CacheConfig &cache_config) {
             rdma_mg = RDMA_Manager::Get_Instance(nullptr);
         }
 
-        ibv_mr * cas_mr = rdma_mg->Get_local_CAS_mr();
         if (remote_urging_type.load() > 0){
             lock_pending_num.fetch_add(1);
             uint16_t handover_degree = write_lock_counter.load() + read_lock_counter.load()/PARALLEL_DEGREE;
@@ -1079,6 +1078,7 @@ LocalBuffer::LocalBuffer(const CacheConfig &cache_config) {
                         value = mr;
 
                     }
+                    ibv_mr * cas_mr = rdma_mg->Get_local_CAS_mr();
                     rdma_mg->global_Rlock_and_read_page_with_INVALID(mr, page_addr, page_size, lock_addr, cas_mr);
                     remote_lock_status.store(1);
                 }else{
@@ -1120,7 +1120,6 @@ LocalBuffer::LocalBuffer(const CacheConfig &cache_config) {
             rdma_mg = RDMA_Manager::Get_Instance(nullptr);
         }
 
-        ibv_mr * cas_mr = rdma_mg->Get_local_CAS_mr();
         if (remote_urging_type.load() > 0){
 //            lock_pending_num.fetch_add(1);
             //TODO: pontential bug below, if there is try lock then the read write counter may not be updated but neve cleared.
@@ -1199,6 +1198,7 @@ LocalBuffer::LocalBuffer(const CacheConfig &cache_config) {
                         value = mr;
 
                     }
+                    ibv_mr * cas_mr = rdma_mg->Get_local_CAS_mr();
                     if (!rdma_mg->global_Rlock_and_read_page_with_INVALID(mr, page_addr, page_size, lock_addr, cas_mr,5)){
                         rw_mtx.unlock();
                         return false;
@@ -1242,9 +1242,6 @@ LocalBuffer::LocalBuffer(const CacheConfig &cache_config) {
     }
 
     void Cache_Handle::reader_post_access(GlobalAddress page_addr, size_t page_size, GlobalAddress lock_addr, ibv_mr *mr) {
-        ibv_mr * cas_mr = rdma_mg->Get_local_CAS_mr();
-
-
 //        assert(handle->refs.load() == 2);
 #ifdef LOCAL_LOCK_DEBUG
         {

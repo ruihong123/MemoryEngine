@@ -16,13 +16,13 @@ namespace DSMEngine{
 		class GlobalTimestamp{
 		public:
 			///////////////////////
-			static uint64_t FetchAddMonotoneTimestamp(){
+	    static uint64_t FetchAddMonotoneTimestamp(){
                 if (!rdma_mg){
                     rdma_mg = RDMA_Manager::Get_Instance();
                 }
 #ifdef BETTER_TS_ACQUIRE
 #ifdef USE_SNAPSHOT_MANAGER
-                EnsureSnapshotThreadStarted();
+                // EnsureSnapshotThreadStarted();
                 return local_ts_next.fetch_add(1, std::memory_order_acq_rel);
 #else
                 uint64_t ts_start = 0;
@@ -34,7 +34,7 @@ namespace DSMEngine{
                     }else{
                         return ts_start++;
                     }
-				}else {
+		    }else {
 					uint64_t ts_temp = rdma_mg->FetchAddNextTimestamp(8);
                     // Atomically update latest_timestamp if temp is larger
                     uint64_t current = latest_timestamp.load(std::memory_order_acquire);
@@ -50,11 +50,13 @@ namespace DSMEngine{
                     ts_end = ts_temp + 8;
                     CTS_mtx.unlock();
                     return ts_temp;
+		    }
 #endif
 #else
                 return rdma_mg->FetchAddNextTimestamp(1);
+
 #endif
-				}
+
 				// return rdma_mg->FetchAddNextTimestamp(1);
 
 			}
@@ -63,9 +65,9 @@ namespace DSMEngine{
                     rdma_mg = RDMA_Manager::Get_Instance();
                 }
 #ifdef USE_SNAPSHOT_MANAGER
-                EnsureSnapshotThreadStarted();
-                return global_read_snapshot.load(std::memory_order_acquire);
-                // return local_ts_next.load(std::memory_order_relaxed);
+                // EnsureSnapshotThreadStarted();
+                // return global_read_snapshot.load(std::memory_order_acquire);
+                return local_ts_next.load(std::memory_order_relaxed);
 #else
 #ifdef BETTER_TS_ACQUIRE
                 // this optimization can reduce unnecessary RDMA read over the network.

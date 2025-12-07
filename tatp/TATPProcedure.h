@@ -22,7 +22,8 @@ namespace DSMEngine {
                 GetSubscriberDataParam* gsd_param = static_cast<GetSubscriberDataParam*>(param);
 
                 // Read subscriber record
-                DynamicCompoundKey sub_key = TATPKeyGenerator::GenerateSubscriberKey(gsd_param->s_id_);
+                RecordSchema* index_schema = transaction_manager_->GetPrimaryIndexSchema(SUBSCRIBER_TABLE_ID);
+                DynamicCompoundKey sub_key = TATPKeyGenerator::GenerateSubscriberKey(gsd_param->s_id_, index_schema);
                 Record* sub_record         = nullptr;
                 DB_QUERY(SearchRecord(SUBSCRIBER_TABLE_ID, sub_key, sub_record, READ_ONLY));
 
@@ -30,6 +31,12 @@ namespace DSMEngine {
                 if (sub_record) {
                     ret.Memcpy(ret.size_, sub_record->data_ptr_, sub_record->GetRecordSize());
                     ret.size_ += sub_record->GetRecordSize();
+#if defined(TO)
+                    Cache::Handle* handle = (Cache::Handle*) sub_record->Get_Handle();
+                    if (handle) {
+                        transaction_manager_->ReleaseLatchForGCL(handle->gptr, handle);
+                    }
+#endif
                 }
 
                 return transaction_manager_->CommitTransaction(ret);
@@ -48,21 +55,38 @@ namespace DSMEngine {
                 GetNewDestinationParam* gnd_param = static_cast<GetNewDestinationParam*>(param);
 
                 // Read special facility record
+                RecordSchema* sf_index_schema = transaction_manager_->GetPrimaryIndexSchema(SPECIAL_FACILITY_TABLE_ID);
                 DynamicCompoundKey sf_key =
-                    TATPKeyGenerator::GenerateSpecialFacilityKey(gnd_param->s_id_, gnd_param->sf_type_);
+                    TATPKeyGenerator::GenerateSpecialFacilityKey(gnd_param->s_id_, gnd_param->sf_type_, sf_index_schema);
                 Record* sf_record = nullptr;
                 DB_QUERY(SearchRecord(SPECIAL_FACILITY_TABLE_ID, sf_key, sf_record, READ_ONLY));
 
+                if (sf_record) {
+#if defined(TO)
+                    Cache::Handle* handle = (Cache::Handle*) sf_record->Get_Handle();
+                    if (handle) {
+                        transaction_manager_->ReleaseLatchForGCL(handle->gptr, handle);
+                    }
+#endif
+                }
+
                 // Read call forwarding records for start_time range
+                RecordSchema* cf_index_schema = transaction_manager_->GetPrimaryIndexSchema(CALL_FORWARDING_TABLE_ID);
                 for (uint8_t start_time = gnd_param->start_time_; start_time <= gnd_param->end_time_; ++start_time) {
                     DynamicCompoundKey cf_key =
-                        TATPKeyGenerator::GenerateCallForwardingKey(gnd_param->s_id_, gnd_param->sf_type_, start_time);
+                        TATPKeyGenerator::GenerateCallForwardingKey(gnd_param->s_id_, gnd_param->sf_type_, start_time, cf_index_schema);
                     Record* cf_record = nullptr;
                     DB_QUERY(SearchRecord(CALL_FORWARDING_TABLE_ID, cf_key, cf_record, READ_ONLY));
 
                     if (cf_record) {
                         ret.Memcpy(ret.size_, cf_record->data_ptr_, cf_record->GetRecordSize());
                         ret.size_ += cf_record->GetRecordSize();
+#if defined(TO)
+                        Cache::Handle* handle = (Cache::Handle*) cf_record->Get_Handle();
+                        if (handle) {
+                            transaction_manager_->ReleaseLatchForGCL(handle->gptr, handle);
+                        }
+#endif
                     }
                 }
 
@@ -82,8 +106,9 @@ namespace DSMEngine {
                 GetAccessDataParam* gad_param = static_cast<GetAccessDataParam*>(param);
 
                 // Read access info record
+                RecordSchema* index_schema = transaction_manager_->GetPrimaryIndexSchema(ACCESS_INFO_TABLE_ID);
                 DynamicCompoundKey ai_key =
-                    TATPKeyGenerator::GenerateAccessInfoKey(gad_param->s_id_, gad_param->ai_type_);
+                    TATPKeyGenerator::GenerateAccessInfoKey(gad_param->s_id_, gad_param->ai_type_, index_schema);
                 Record* ai_record = nullptr;
                 DB_QUERY(SearchRecord(ACCESS_INFO_TABLE_ID, ai_key, ai_record, READ_ONLY));
 
@@ -96,6 +121,12 @@ namespace DSMEngine {
                     ret.size_ += sizeof(uint8_t);
                     ret.Memcpy(ret.size_, (char*) &data2, sizeof(uint8_t));
                     ret.size_ += sizeof(uint8_t);
+#if defined(TO)
+                    Cache::Handle* handle = (Cache::Handle*) ai_record->Get_Handle();
+                    if (handle) {
+                        transaction_manager_->ReleaseLatchForGCL(handle->gptr, handle);
+                    }
+#endif
                 }
 
                 return transaction_manager_->CommitTransaction(ret);
@@ -114,33 +145,37 @@ namespace DSMEngine {
                 UpdateSubscriberDataParam* usd_param = static_cast<UpdateSubscriberDataParam*>(param);
 
                 // Update subscriber bit_1
-                DynamicCompoundKey sub_key = TATPKeyGenerator::GenerateSubscriberKey(usd_param->s_id_);
+                RecordSchema* sub_index_schema = transaction_manager_->GetPrimaryIndexSchema(SUBSCRIBER_TABLE_ID);
+                DynamicCompoundKey sub_key = TATPKeyGenerator::GenerateSubscriberKey(usd_param->s_id_, sub_index_schema);
                 Record* sub_record         = nullptr;
                 DB_QUERY(SearchRecord(SUBSCRIBER_TABLE_ID, sub_key, sub_record, READ_WRITE));
 
                 if (sub_record) {
                     sub_record->SetColumn(2, &usd_param->bit_1_); // bit_[1]
+#if defined(TO)
+                    Cache::Handle* handle = (Cache::Handle*) sub_record->Get_Handle();
+                    if (handle) {
+                        transaction_manager_->ReleaseLatchForGCL(handle->gptr, handle);
+                    }
+#endif
                 }
 
-#if defined(TO)
-                Cache::Handle* handle = (Cache::Handle*) sub_record->Get_Handle();
-                transaction_manager_->ReleaseLatchForGCL(handle->gptr, handle);
-#endif
-
                 // Update special facility data_a
+                RecordSchema* sf_index_schema = transaction_manager_->GetPrimaryIndexSchema(SPECIAL_FACILITY_TABLE_ID);
                 DynamicCompoundKey sf_key =
-                    TATPKeyGenerator::GenerateSpecialFacilityKey(usd_param->s_id_, usd_param->sf_type_);
+                    TATPKeyGenerator::GenerateSpecialFacilityKey(usd_param->s_id_, usd_param->sf_type_, sf_index_schema);
                 Record* sf_record = nullptr;
                 DB_QUERY(SearchRecord(SPECIAL_FACILITY_TABLE_ID, sf_key, sf_record, READ_WRITE));
 
                 if (sf_record) {
                     sf_record->SetColumn(4, &usd_param->data_a_);
-                }
-
 #if defined(TO)
-                handle = (Cache::Handle*) sf_record->Get_Handle();
-                transaction_manager_->ReleaseLatchForGCL(handle->gptr, handle);
+                    Cache::Handle* handle = (Cache::Handle*) sf_record->Get_Handle();
+                    if (handle) {
+                        transaction_manager_->ReleaseLatchForGCL(handle->gptr, handle);
+                    }
 #endif
+                }
 
                 return transaction_manager_->CommitTransaction(ret);
             }
@@ -158,18 +193,20 @@ namespace DSMEngine {
                 UpdateLocationParam* ul_param = static_cast<UpdateLocationParam*>(param);
 
                 // Update subscriber vlr_location
-                DynamicCompoundKey sub_key = TATPKeyGenerator::GenerateSubscriberKey(ul_param->s_id_);
+                RecordSchema* index_schema = transaction_manager_->GetPrimaryIndexSchema(SUBSCRIBER_TABLE_ID);
+                DynamicCompoundKey sub_key = TATPKeyGenerator::GenerateSubscriberKey(ul_param->s_id_, index_schema);
                 Record* sub_record         = nullptr;
                 DB_QUERY(SearchRecord(SUBSCRIBER_TABLE_ID, sub_key, sub_record, READ_WRITE));
 
                 if (sub_record) {
                     sub_record->SetColumn(33, &ul_param->vlr_location_); // vlr_location field
-                }
-
 #if defined(TO)
-                Cache::Handle* handle = (Cache::Handle*) sub_record->Get_Handle();
-                transaction_manager_->ReleaseLatchForGCL(handle->gptr, handle);
+                    Cache::Handle* handle = (Cache::Handle*) sub_record->Get_Handle();
+                    if (handle) {
+                        transaction_manager_->ReleaseLatchForGCL(handle->gptr, handle);
+                    }
 #endif
+                }
 
                 return transaction_manager_->CommitTransaction(ret);
             }
@@ -187,8 +224,9 @@ namespace DSMEngine {
                 InsertCallForwardingParam* icf_param = static_cast<InsertCallForwardingParam*>(param);
 
                 // Read special facility to check if active
+                RecordSchema* sf_index_schema = transaction_manager_->GetPrimaryIndexSchema(SPECIAL_FACILITY_TABLE_ID);
                 DynamicCompoundKey sf_key =
-                    TATPKeyGenerator::GenerateSpecialFacilityKey(icf_param->s_id_, icf_param->sf_type_);
+                    TATPKeyGenerator::GenerateSpecialFacilityKey(icf_param->s_id_, icf_param->sf_type_, sf_index_schema);
                 Record* sf_record = nullptr;
                 DB_QUERY(SearchRecord(SPECIAL_FACILITY_TABLE_ID, sf_key, sf_record, READ_WRITE));
 
@@ -199,12 +237,13 @@ namespace DSMEngine {
                         is_active = 1;
                         sf_record->SetColumn(2, &is_active);
                     }
-                }
-
 #if defined(TO)
-                Cache::Handle* handle = (Cache::Handle*) sf_record->Get_Handle();
-                transaction_manager_->ReleaseLatchForGCL(handle->gptr, handle);
+                    Cache::Handle* handle = (Cache::Handle*) sf_record->Get_Handle();
+                    if (handle) {
+                        transaction_manager_->ReleaseLatchForGCL(handle->gptr, handle);
+                    }
 #endif
+                }
 
                 // Insert new call forwarding record
                 Cache::Handle* cf_handle;
@@ -218,8 +257,9 @@ namespace DSMEngine {
                 cf_record->SetColumn(3, &icf_param->end_time_);
                 cf_record->SetColumn(4, icf_param->numberx_);
 
+                RecordSchema* cf_index_schema = transaction_manager_->GetPrimaryIndexSchema(CALL_FORWARDING_TABLE_ID);
                 DynamicCompoundKey cf_key = TATPKeyGenerator::GenerateCallForwardingKey(
-                    icf_param->s_id_, icf_param->sf_type_, icf_param->start_time_);
+                    icf_param->s_id_, icf_param->sf_type_, icf_param->start_time_, cf_index_schema);
                 DB_QUERY(InsertRecord(CALL_FORWARDING_TABLE_ID, cf_key, 1, cf_record, cf_handle, cf_addr));
 
                 return transaction_manager_->CommitTransaction(ret);
@@ -238,17 +278,20 @@ namespace DSMEngine {
                 DeleteCallForwardingParam* dcf_param = static_cast<DeleteCallForwardingParam*>(param);
 
                 // Delete call forwarding record
+                RecordSchema* index_schema = transaction_manager_->GetPrimaryIndexSchema(CALL_FORWARDING_TABLE_ID);
                 DynamicCompoundKey cf_key = TATPKeyGenerator::GenerateCallForwardingKey(
-                    dcf_param->s_id_, dcf_param->sf_type_, dcf_param->start_time_);
+                    dcf_param->s_id_, dcf_param->sf_type_, dcf_param->start_time_, index_schema);
                 Record* cf_record = nullptr;
-                DB_QUERY(SearchRecord(CALL_FORWARDING_TABLE_ID, cf_key, cf_record, DELETE_ONLY));
+                DB_QUERY(SearchRecord(CALL_FORWARDING_TABLE_ID, cf_key, cf_record, READ_ONLY));
 
-#if defined(TO)
                 if (cf_record) {
+#if defined(TO)
                     Cache::Handle* handle = (Cache::Handle*) cf_record->Get_Handle();
-                    transaction_manager_->ReleaseLatchForGCL(handle->gptr, handle);
-                }
+                    if (handle) {
+                        transaction_manager_->ReleaseLatchForGCL(handle->gptr, handle);
+                    }
 #endif
+                }
 
                 return transaction_manager_->CommitTransaction(ret);
             }

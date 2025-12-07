@@ -21,7 +21,7 @@ namespace DSMEngine {
         enum TableType : size_t { ACCOUNTS_TABLE_ID, SAVINGS_TABLE_ID, CHECKING_TABLE_ID, kTableCount };
 
         /******************** constants *************************/
-        const int DEFAULT_NUM_ACCOUNTS = 100000;
+        const int DEFAULT_NUM_ACCOUNTS = 80000000;
         const int BALANCE_MIN          = 10000;
         const int BALANCE_MAX          = 50000;
         const int NAME_LENGTH          = 64;
@@ -37,6 +37,10 @@ namespace DSMEngine {
         // Transaction amount range
         const int TRANSFER_AMOUNT_MIN = 1;
         const int TRANSFER_AMOUNT_MAX = 1000;
+
+        // Hot table scanner configuration
+        // Percentage of users to scan per transaction (10% = 0.1)
+        const double HOT_SCAN_USER_PERCENTAGE = 0.001;
 
     } // namespace SmallBankBenchmark
 } // namespace DSMEngine

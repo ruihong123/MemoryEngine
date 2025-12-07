@@ -14,7 +14,7 @@ SRC_HOME=$bin/..
 # hosts_file specify a list of host names and port numbers, with the host names in the first column
 #Compute_file="../tpcc/compute.txt"
 #Memory_file="../tpcc/memory.txt"
-conf_file_all=$bin/../connection_cloudlab_2replicas.conf
+conf_file_all=$bin/../connection_cloudlab_noreplica.conf
 conf_file=$bin/../connection_replication.conf
 memcached_conf_file_all=$bin/../memcached_cloudlab_servers.conf
 memcached_conf_file=$bin/../memcached_ip.conf
@@ -24,7 +24,7 @@ output_dir="/users/Ruihong/MemoryEngine/scripts/data"
 core_dump_dir="/mnt/core_dump"
 # working environment
 proj_dir="/users/Ruihong/MemoryEngine"
-bin_dir="${proj_dir}/debug"
+bin_dir="${proj_dir}/release"
 script_dir="${proj_dir}/database/scripts"
 ssh_opts="-o StrictHostKeyChecking=no"
 
@@ -171,18 +171,18 @@ run_tpcc () {
 
 vary_query_ratio () {
   #read_ratios=(0 30 50 70 90 100)
-  thread_number=(8)
-  WarehouseNum=(8)
+  thread_number=(1)
+  WarehouseNum=(256)
   FREQUENCY_DELIVERY=(100 0 0 0 0 1 33 0 0)
   FREQUENCY_PAYMENT=(0 100 0 0 0 10 33 0 50)
   FREQUENCY_NEW_ORDER=(0 0 100 0 0 10 33 0 50)
   FREQUENCY_ORDER_STATUS=(0 0 0 100 0 1 0 50 0)
   FREQUENCY_STOCK_LEVEL=(0 0 0 0 100 1 0 50 0)
   # Logging options: empty string for disabled, "-log" for enabled
-  logging_options=("-log") # "-log"
+  logging_options=("") # "-log"
   hot_table_scanner_options=("") # "-hot"
   for ware_num in ${WarehouseNum[@]}; do
-    for qr_index in 5; do
+    for qr_index in 0 1 2 3 4 5; do
       for thread_n in ${thread_number[@]}; do
         for logging_opt in "${logging_options[@]}"; do
           for hot_table_scanner_opt in "${hot_table_scanner_options[@]}"; do

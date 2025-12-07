@@ -26,6 +26,8 @@ struct PerfStatistics {
 
     hot_scan_count_ = 0;
     hot_scan_throughput_ = 0.0;
+    hot_scan_abort_count_ = 0;
+    hot_scan_avg_latency_ = 0.0;
 
     agg_total_count_ = 0;
     agg_thread_count_ = 0;
@@ -36,6 +38,8 @@ struct PerfStatistics {
     agg_throughput_ = 0.0;
     agg_hot_scan_count_ = 0;
     agg_hot_scan_throughput_ = 0.0;
+    agg_hot_scan_abort_count_ = 0;
+    agg_hot_scan_avg_latency_ = 0.0;
   }
 
   // Set transaction type names for latency reporting
@@ -96,8 +100,15 @@ struct PerfStatistics {
            agg_throughput_ / agg_node_num_,
            agg_throughput_ / agg_thread_count_);
     if (agg_hot_scan_count_ > 0) {
-      printf("hot_scan_total_count\t%lld\nhot_scan_throughput\t%lf\n",
-             agg_hot_scan_count_, agg_hot_scan_throughput_);
+      // Recalculate aggregated throughput from total count and average elapsed time
+      double avg_elapsed_time = agg_elapsed_time_ * 1.0 / agg_node_num_;
+      double agg_hot_scan_throughput = 0.0;
+      if (avg_elapsed_time > 0) {
+        agg_hot_scan_throughput = agg_hot_scan_count_ * 1.0 / avg_elapsed_time;
+      }
+      double hot_scan_abort_rate = agg_hot_scan_abort_count_ * 1.0 / (agg_hot_scan_count_ + agg_hot_scan_abort_count_);
+      printf("hot_scan_total_count\t%lld\nhot_scan_throughput\t%lf\nhot_scan_abort_count\t%lld\nhot_scan_abort_rate\t%lf\nhot_scan_avg_latency\t%lf\n",
+             agg_hot_scan_count_, agg_hot_scan_throughput, agg_hot_scan_abort_count_, hot_scan_abort_rate, agg_hot_scan_avg_latency_);
     }
     uint64_t invalidation_num = 0;
     uint64_t hit_valid_num = 0;
@@ -152,7 +163,15 @@ struct PerfStatistics {
     agg_thread_count_ += obj.thread_count_;
     agg_elapsed_time_ += obj.elapsed_time_;
     agg_hot_scan_count_ += obj.hot_scan_count_;
-    agg_hot_scan_throughput_ += obj.hot_scan_throughput_;
+    agg_hot_scan_abort_count_ += obj.hot_scan_abort_count_;
+    // For average latency, simply average the averages (simpler but less accurate)
+    if (agg_node_num_ == 0) {
+      // First node: use its average directly
+      agg_hot_scan_avg_latency_ = obj.hot_scan_avg_latency_;
+    } else {
+      // Subsequent nodes: average of averages
+      agg_hot_scan_avg_latency_ = (agg_hot_scan_avg_latency_ * agg_node_num_ + obj.hot_scan_avg_latency_) / (agg_node_num_ + 1);
+    }
     agg_node_num_++;
   }
 
@@ -173,8 +192,12 @@ struct PerfStatistics {
   // Hot scan transaction statistics
   long long hot_scan_count_;
   double hot_scan_throughput_;
+  long long hot_scan_abort_count_;
+  double hot_scan_avg_latency_;
   long long agg_hot_scan_count_;
   double agg_hot_scan_throughput_;
+  long long agg_hot_scan_abort_count_;
+  double agg_hot_scan_avg_latency_;
 
   // Latency tracking: recorded locally on each node, but only printed on master
   // Note: Not aggregated across nodes (complex containers cannot be serialized

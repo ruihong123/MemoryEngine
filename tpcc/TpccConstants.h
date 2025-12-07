@@ -146,6 +146,10 @@ const double MAX_PAYMENT = 5000.0;
 //Indicates "brand" items and stock in i_data and s_data.
 const std::string ORIGINAL_STRING = "ORIGINAL";
 
+// Hot table scanner configuration
+// Percentage of warehouses to scan per transaction (10% = 0.1)
+const double HOT_SCAN_WAREHOUSE_PERCENTAGE = 0.01;
+
 }
 }
 

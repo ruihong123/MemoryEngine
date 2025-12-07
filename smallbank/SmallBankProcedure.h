@@ -22,11 +22,13 @@ namespace DSMEngine {
                 AmalgamateParam* amal_param = static_cast<AmalgamateParam*>(param);
 
                 // Read savings and checking for account 0
-                DynamicCompoundKey savings_key_0 = SmallBankKeyGenerator::GenerateSavingsKey(amal_param->custid_0_);
+                RecordSchema* savings_index_schema = transaction_manager_->GetPrimaryIndexSchema(SAVINGS_TABLE_ID);
+                DynamicCompoundKey savings_key_0 = SmallBankKeyGenerator::GenerateSavingsKey(amal_param->custid_0_, savings_index_schema);
                 Record* savings_record_0         = nullptr;
                 DB_QUERY(SearchRecord(SAVINGS_TABLE_ID, savings_key_0, savings_record_0, READ_WRITE));
 
-                DynamicCompoundKey checking_key_0 = SmallBankKeyGenerator::GenerateCheckingKey(amal_param->custid_0_);
+                RecordSchema* checking_index_schema = transaction_manager_->GetPrimaryIndexSchema(CHECKING_TABLE_ID);
+                DynamicCompoundKey checking_key_0 = SmallBankKeyGenerator::GenerateCheckingKey(amal_param->custid_0_, checking_index_schema);
                 Record* checking_record_0         = nullptr;
                 DB_QUERY(SearchRecord(CHECKING_TABLE_ID, checking_key_0, checking_record_0, READ_WRITE));
 
@@ -44,13 +46,18 @@ namespace DSMEngine {
 
 #if defined(TO)
                 Cache::Handle* handle = (Cache::Handle*) savings_record_0->Get_Handle();
-                transaction_manager_->ReleaseLatchForGCL(handle->gptr, handle);
+                if (handle) {
+                    transaction_manager_->ReleaseLatchForGCL(handle->gptr, handle);
+                }
                 handle = (Cache::Handle*) checking_record_0->Get_Handle();
-                transaction_manager_->ReleaseLatchForGCL(handle->gptr, handle);
+                if (handle) {
+                    transaction_manager_->ReleaseLatchForGCL(handle->gptr, handle);
+                }
 #endif
 
                 // Update checking for account 1
-                DynamicCompoundKey checking_key_1 = SmallBankKeyGenerator::GenerateCheckingKey(amal_param->custid_1_);
+                RecordSchema* checking_index_schema_1 = transaction_manager_->GetPrimaryIndexSchema(CHECKING_TABLE_ID);
+                DynamicCompoundKey checking_key_1 = SmallBankKeyGenerator::GenerateCheckingKey(amal_param->custid_1_, checking_index_schema_1);
                 Record* checking_record_1         = nullptr;
                 DB_QUERY(SearchRecord(CHECKING_TABLE_ID, checking_key_1, checking_record_1, READ_WRITE));
 
@@ -61,7 +68,9 @@ namespace DSMEngine {
 
 #if defined(TO)
                 handle = (Cache::Handle*) checking_record_1->Get_Handle();
-                transaction_manager_->ReleaseLatchForGCL(handle->gptr, handle);
+                if (handle) {
+                    transaction_manager_->ReleaseLatchForGCL(handle->gptr, handle);
+                }
 #endif
 
                 return transaction_manager_->CommitTransaction(ret);
@@ -80,11 +89,13 @@ namespace DSMEngine {
                 BalanceParam* bal_param = static_cast<BalanceParam*>(param);
 
                 // Read savings and checking
-                DynamicCompoundKey savings_key = SmallBankKeyGenerator::GenerateSavingsKey(bal_param->custid_);
+                RecordSchema* savings_index_schema = transaction_manager_->GetPrimaryIndexSchema(SAVINGS_TABLE_ID);
+                DynamicCompoundKey savings_key = SmallBankKeyGenerator::GenerateSavingsKey(bal_param->custid_, savings_index_schema);
                 Record* savings_record         = nullptr;
                 DB_QUERY(SearchRecord(SAVINGS_TABLE_ID, savings_key, savings_record, READ_ONLY));
 
-                DynamicCompoundKey checking_key = SmallBankKeyGenerator::GenerateCheckingKey(bal_param->custid_);
+                RecordSchema* checking_index_schema = transaction_manager_->GetPrimaryIndexSchema(CHECKING_TABLE_ID);
+                DynamicCompoundKey checking_key = SmallBankKeyGenerator::GenerateCheckingKey(bal_param->custid_, checking_index_schema);
                 Record* checking_record         = nullptr;
                 DB_QUERY(SearchRecord(CHECKING_TABLE_ID, checking_key, checking_record, READ_ONLY));
 
@@ -95,6 +106,17 @@ namespace DSMEngine {
                 double total = savings_bal + checking_bal;
                 ret.Memcpy(ret.size_, (char*) &total, sizeof(double));
                 ret.size_ += sizeof(double);
+
+#if defined(TO)
+                Cache::Handle* handle = (Cache::Handle*) savings_record->Get_Handle();
+                if (handle) {
+                    transaction_manager_->ReleaseLatchForGCL(handle->gptr, handle);
+                }
+                handle = (Cache::Handle*) checking_record->Get_Handle();
+                if (handle) {
+                    transaction_manager_->ReleaseLatchForGCL(handle->gptr, handle);
+                }
+#endif
 
                 return transaction_manager_->CommitTransaction(ret);
             }
@@ -111,7 +133,8 @@ namespace DSMEngine {
             virtual bool Execute(TxnParam* param, CharArray& ret) {
                 DepositCheckingParam* deposit_param = static_cast<DepositCheckingParam*>(param);
 
-                DynamicCompoundKey checking_key = SmallBankKeyGenerator::GenerateCheckingKey(deposit_param->custid_);
+                RecordSchema* index_schema = transaction_manager_->GetPrimaryIndexSchema(CHECKING_TABLE_ID);
+                DynamicCompoundKey checking_key = SmallBankKeyGenerator::GenerateCheckingKey(deposit_param->custid_, index_schema);
                 Record* checking_record         = nullptr;
                 DB_QUERY(SearchRecord(CHECKING_TABLE_ID, checking_key, checking_record, READ_WRITE));
 
@@ -122,7 +145,9 @@ namespace DSMEngine {
 
 #if defined(TO)
                 Cache::Handle* handle = (Cache::Handle*) checking_record->Get_Handle();
-                transaction_manager_->ReleaseLatchForGCL(handle->gptr, handle);
+                if (handle) {
+                    transaction_manager_->ReleaseLatchForGCL(handle->gptr, handle);
+                }
 #endif
 
                 return transaction_manager_->CommitTransaction(ret);
@@ -141,8 +166,9 @@ namespace DSMEngine {
                 SendPaymentParam* payment_param = static_cast<SendPaymentParam*>(param);
 
                 // Deduct from account 0's checking
+                RecordSchema* checking_index_schema = transaction_manager_->GetPrimaryIndexSchema(CHECKING_TABLE_ID);
                 DynamicCompoundKey checking_key_0 =
-                    SmallBankKeyGenerator::GenerateCheckingKey(payment_param->custid_0_);
+                    SmallBankKeyGenerator::GenerateCheckingKey(payment_param->custid_0_, checking_index_schema);
                 Record* checking_record_0 = nullptr;
                 DB_QUERY(SearchRecord(CHECKING_TABLE_ID, checking_key_0, checking_record_0, READ_WRITE));
 
@@ -153,12 +179,14 @@ namespace DSMEngine {
 
 #if defined(TO)
                 Cache::Handle* handle = (Cache::Handle*) checking_record_0->Get_Handle();
-                transaction_manager_->ReleaseLatchForGCL(handle->gptr, handle);
+                if (handle) {
+                    transaction_manager_->ReleaseLatchForGCL(handle->gptr, handle);
+                }
 #endif
 
                 // Add to account 1's checking
                 DynamicCompoundKey checking_key_1 =
-                    SmallBankKeyGenerator::GenerateCheckingKey(payment_param->custid_1_);
+                    SmallBankKeyGenerator::GenerateCheckingKey(payment_param->custid_1_, checking_index_schema);
                 Record* checking_record_1 = nullptr;
                 DB_QUERY(SearchRecord(CHECKING_TABLE_ID, checking_key_1, checking_record_1, READ_WRITE));
 
@@ -169,7 +197,9 @@ namespace DSMEngine {
 
 #if defined(TO)
                 handle = (Cache::Handle*) checking_record_1->Get_Handle();
-                transaction_manager_->ReleaseLatchForGCL(handle->gptr, handle);
+                if (handle) {
+                    transaction_manager_->ReleaseLatchForGCL(handle->gptr, handle);
+                }
 #endif
 
                 return transaction_manager_->CommitTransaction(ret);
@@ -187,7 +217,8 @@ namespace DSMEngine {
             virtual bool Execute(TxnParam* param, CharArray& ret) {
                 TransactSavingsParam* transact_param = static_cast<TransactSavingsParam*>(param);
 
-                DynamicCompoundKey savings_key = SmallBankKeyGenerator::GenerateSavingsKey(transact_param->custid_);
+                RecordSchema* index_schema = transaction_manager_->GetPrimaryIndexSchema(SAVINGS_TABLE_ID);
+                DynamicCompoundKey savings_key = SmallBankKeyGenerator::GenerateSavingsKey(transact_param->custid_, index_schema);
                 Record* savings_record         = nullptr;
                 DB_QUERY(SearchRecord(SAVINGS_TABLE_ID, savings_key, savings_record, READ_WRITE));
 
@@ -198,7 +229,9 @@ namespace DSMEngine {
 
 #if defined(TO)
                 Cache::Handle* handle = (Cache::Handle*) savings_record->Get_Handle();
-                transaction_manager_->ReleaseLatchForGCL(handle->gptr, handle);
+                if (handle) {
+                    transaction_manager_->ReleaseLatchForGCL(handle->gptr, handle);
+                }
 #endif
 
                 return transaction_manager_->CommitTransaction(ret);
@@ -216,11 +249,13 @@ namespace DSMEngine {
             virtual bool Execute(TxnParam* param, CharArray& ret) {
                 WriteCheckParam* check_param = static_cast<WriteCheckParam*>(param);
 
-                DynamicCompoundKey savings_key = SmallBankKeyGenerator::GenerateSavingsKey(check_param->custid_);
+                RecordSchema* savings_index_schema = transaction_manager_->GetPrimaryIndexSchema(SAVINGS_TABLE_ID);
+                DynamicCompoundKey savings_key = SmallBankKeyGenerator::GenerateSavingsKey(check_param->custid_, savings_index_schema);
                 Record* savings_record         = nullptr;
                 DB_QUERY(SearchRecord(SAVINGS_TABLE_ID, savings_key, savings_record, READ_ONLY));
 
-                DynamicCompoundKey checking_key = SmallBankKeyGenerator::GenerateCheckingKey(check_param->custid_);
+                RecordSchema* checking_index_schema = transaction_manager_->GetPrimaryIndexSchema(CHECKING_TABLE_ID);
+                DynamicCompoundKey checking_key = SmallBankKeyGenerator::GenerateCheckingKey(check_param->custid_, checking_index_schema);
                 Record* checking_record         = nullptr;
                 DB_QUERY(SearchRecord(CHECKING_TABLE_ID, checking_key, checking_record, READ_WRITE));
 
@@ -237,8 +272,14 @@ namespace DSMEngine {
                 checking_record->SetColumn(1, &checking_bal);
 
 #if defined(TO)
-                Cache::Handle* handle = (Cache::Handle*) checking_record->Get_Handle();
-                transaction_manager_->ReleaseLatchForGCL(handle->gptr, handle);
+                Cache::Handle* handle = (Cache::Handle*) savings_record->Get_Handle();
+                if (handle) {
+                    transaction_manager_->ReleaseLatchForGCL(handle->gptr, handle);
+                }
+                handle = (Cache::Handle*) checking_record->Get_Handle();
+                if (handle) {
+                    transaction_manager_->ReleaseLatchForGCL(handle->gptr, handle);
+                }
 #endif
 
                 return transaction_manager_->CommitTransaction(ret);

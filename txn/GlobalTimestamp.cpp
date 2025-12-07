@@ -63,7 +63,7 @@ namespace DSMEngine{
         if (minimum == 0){
             return;
         }
-        EnsureSnapshotThreadStarted();
+        // EnsureSnapshotThreadStarted();
         uint64_t current = local_ts_next.load(std::memory_order_relaxed);
         while (current < minimum){
             if (local_ts_next.compare_exchange_weak(

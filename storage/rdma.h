@@ -952,6 +952,9 @@ namespace DSMEngine
 
         bool Send_heart_beat_xcompute(uint16_t target_memory_node_id);
 
+        // Print memory allocation statistics (only on memory nodes)
+        void PrintMemoryAllocationStats();
+
         int Remote_Memory_Deregister();
 
         // new query pair creation and connection to remote Memory by RDMA send and receive
@@ -1364,6 +1367,11 @@ namespace DSMEngine
         name_to_mem_pool;
         std::unordered_map<Chunk_type, size_t> name_to_chunksize;
         std::unordered_map<Chunk_type, size_t> name_to_allocated_size;
+        // Track allocated memory per compute node (only on memory nodes)
+        std::map<uint16_t, size_t> compute_node_allocated_size;
+        // Track allocated memory per region and pool type (only on compute nodes)
+        // Structure: target_region_id -> pool_name -> allocated_size
+        std::map<uint16_t, std::map<Chunk_type, size_t>> compute_region_pool_allocated;
         std::shared_mutex local_mem_mutex;
         //Compute node is even, memory node is odd.
         static uint16_t node_id;

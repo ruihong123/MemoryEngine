@@ -5,8 +5,9 @@
 #include "TATPParams.h"
 #include "TATPKeyGenerator.h"
 #include "TransactionExecutor.h"
-#include <chrono>
-#include <xmmintrin.h>
+#include <cmath>
+#include <atomic>
+#include <memory>
 
 namespace DSMEngine {
 namespace TATPBenchmark {
@@ -61,13 +62,16 @@ protected:
 
     const int64_t start_sub = tatp_scale_params.starting_subscriber_;
     const int64_t end_sub = tatp_scale_params.ending_subscriber_;
-    if (start_sub <= 0 || end_sub < start_sub) {
+    const int64_t global_total_subscribers = tatp_scale_params.num_subscribers_; // Global total across all partitions
+    if (start_sub < 0 || end_sub < start_sub || global_total_subscribers <= 0) {
       return;
     }
 
-    // Create alternating scan between ACCESS_INFO and SPECIAL_FACILITY tables
-    // Each node scans only its own partition (start_sub to end_sub) to avoid starvation
-    // Each transaction scans ONE subscriber's records before committing (long-running transaction)
+    // Calculate number of users to scan per transaction (10% by default)
+    // Based on global total, not just local partition
+    const int64_t users_per_scan = std::max(static_cast<int64_t>(1), static_cast<int64_t>(std::ceil(global_total_subscribers * HOT_SCAN_USER_PERCENTAGE)));
+
+    // Create scan task that scans all data for 10% of users per transaction
     auto access_it = storage_manager_->tables_.find(ACCESS_INFO_TABLE_ID);
     auto sf_it = storage_manager_->tables_.find(SPECIAL_FACILITY_TABLE_ID);
     if (access_it == storage_manager_->tables_.end() || 
@@ -77,134 +81,118 @@ protected:
     auto access_schema = access_it->second->GetPrimaryIndexSchema();
     auto sf_schema = sf_it->second->GetPrimaryIndexSchema();
     
-    // State tracking for subscriber-by-subscriber scans
-    enum ScanTableType {
-      SCAN_ACCESS_INFO = 0,
-      SCAN_SPECIAL_FACILITY = 1
-    };
-    auto current_subscriber = std::make_shared<int64_t>(start_sub); // Current subscriber being scanned
-    auto access_scan_state = std::make_shared<int>(AI_TYPE_MIN); // Current access info type
-    auto sf_scan_state = std::make_shared<int>(SF_TYPE_MIN); // Current special facility type
-    auto scan_table = std::make_shared<int>(SCAN_ACCESS_INFO); // Which table to scan (0=access_info, 1=special_facility)
-    auto in_scan = std::make_shared<bool>(false); // true if currently scanning a subscriber
+    // State tracking for scanning multiple users per transaction
+    auto current_user_start = std::make_shared<int64_t>(start_sub); // Start of current user batch
+    auto current_user = std::make_shared<int64_t>(start_sub); // Current user being scanned
+    auto current_ai_type = std::make_shared<int>(AI_TYPE_MIN); // Current access info type
+    auto current_sf_type = std::make_shared<int>(SF_TYPE_MIN); // Current special facility type
+    auto scan_table = std::make_shared<int>(0); // 0=access_info, 1=special_facility
+    auto in_scan = std::make_shared<bool>(false); // true if currently scanning
     
     tasks.push_back(
-        HotTableScanTask{"tatp_access_info_special_facility_alternating_scan",
-                         [current_subscriber, access_scan_state, sf_scan_state, 
+        HotTableScanTask("tatp_multi_user_scan",
+                         [current_user_start, current_user, current_ai_type, current_sf_type,
                           access_schema, sf_schema, scan_table, in_scan, 
-                          start_sub, end_sub](TransactionManager &mgr) {
+                          start_sub, global_total_subscribers, users_per_scan]
+                         (TransactionManager &mgr, const std::atomic<bool> &should_run) -> bool {
                            Record *record = nullptr;
                            
-                           if (!(*in_scan)) {
-                             // Start a new subscriber scan
-                             *in_scan = true;
+                           // Loop until a transaction completes (commits or aborts)
+                           while (should_run.load(std::memory_order_acquire)) {
+                             if (!(*in_scan)) {
+                               // Start a new scan batch
+                               *in_scan = true;
+                               *current_user = *current_user_start;
+                               *current_ai_type = AI_TYPE_MIN;
+                               *current_sf_type = SF_TYPE_MIN;
+                               *scan_table = 0; // Start with access_info
+                             }
+                             
+                             // Scan all data for users in current batch
                              switch (*scan_table) {
-                               case SCAN_ACCESS_INFO:
-                                 // Reset access info scan to beginning of current subscriber
-                                 *access_scan_state = AI_TYPE_MIN;
+                               case 0: { // Scan access_info
+                                 int64_t sub = *current_user;
+                                 int ai_type = *current_ai_type;
+                                 
+                                 // Read access_info record
+                                 DynamicCompoundKey key = TATPKeyGenerator::GenerateAccessInfoKey(sub, ai_type, access_schema);
+                                 if (!mgr.SearchRecord(ACCESS_INFO_TABLE_ID, key, record, READ_ONLY)) {
+                                   *in_scan = false;
+                                   return false; // Transaction aborted
+                                 }
+                                 
+                                 // Advance to next access_info type
+                                 ++ai_type;
+                                 if (ai_type > AI_TYPE_MAX) {
+                                   // Finished all access_info for current user, move to next user
+                                   ai_type = AI_TYPE_MIN;
+                                   ++sub;
+                                   // Check if we've exceeded the batch or global total
+                                   int64_t batch_end = *current_user_start + users_per_scan - 1;
+                                   if (sub > batch_end || sub >= global_total_subscribers) {
+                                     // Finished all access_info for all users in batch, switch to special_facility
+                                     *scan_table = 1;
+                                     *current_user = *current_user_start;
+                                     *current_sf_type = SF_TYPE_MIN;
+                                   } else {
+                                     *current_user = sub;
+                                   }
+                                   *current_ai_type = ai_type;
+                                 } else {
+                                   *current_ai_type = ai_type;
+                                 }
                                  break;
-                               case SCAN_SPECIAL_FACILITY:
-                                 // Reset special facility scan to beginning of current subscriber
-                                 *sf_scan_state = SF_TYPE_MIN;
+                               }
+                               case 1: { // Scan special_facility
+                                 int64_t sub = *current_user;
+                                 int sf_type = *current_sf_type;
+                                 
+                                 // Read special_facility record
+                                 DynamicCompoundKey key = TATPKeyGenerator::GenerateSpecialFacilityKey(sub, sf_type, sf_schema);
+                                 if (!mgr.SearchRecord(SPECIAL_FACILITY_TABLE_ID, key, record, READ_ONLY)) {
+                                   *in_scan = false;
+                                   return false; // Transaction aborted
+                                 }
+                                 
+                                 // Advance to next special_facility type
+                                 ++sf_type;
+                                 if (sf_type > SF_TYPE_MAX) {
+                                   // Finished all special_facility for current user, move to next user
+                                   sf_type = SF_TYPE_MIN;
+                                   ++sub;
+                                   // Check if we've exceeded the batch or global total
+                                   int64_t batch_end = *current_user_start + users_per_scan - 1;
+                                   if (sub > batch_end || sub >= global_total_subscribers) {
+                                     // Finished scanning all data for all users in batch
+                                     // Commit transaction
+                                     CharArray ret;
+                                     bool committed = mgr.CommitTransaction(ret);
+                                     if (committed) {
+                                       *in_scan = false;
+                                       // Move to next batch of users (round-robin globally)
+                                       *current_user_start += users_per_scan;
+                                       if (*current_user_start >= global_total_subscribers) {
+                                         // Wrap around: start from 0 (first subscriber globally)
+                                         *current_user_start = 0;
+                                       }
+                                       return true; // Transaction committed
+                                     } else {
+                                       *in_scan = false;
+                                       return false; // Transaction aborted
+                                     }
+                                   } else {
+                                     *current_user = sub;
+                                   }
+                                   *current_sf_type = sf_type;
+                                 } else {
+                                   *current_sf_type = sf_type;
+                                 }
                                  break;
+                               }
                              }
                            }
-                           
-                           switch (*scan_table) {
-                             case SCAN_ACCESS_INFO: {
-                               // Scan all access info records for ONE subscriber in one transaction
-                               int64_t sub = *current_subscriber;
-                               int &ai_type = *access_scan_state;
-                               
-                               // Read current access info record
-                               DynamicCompoundKey key =
-                                   TATPKeyGenerator::GenerateAccessInfoKey(sub, ai_type, access_schema);
-                               if (!mgr.SearchRecord(ACCESS_INFO_TABLE_ID, key, record, READ_ONLY)) {
-                                 // If read fails, abort and retry
-                                 mgr.AbortTransaction();
-                                 *in_scan = false;
-                                 return;
-                               }
-                               
-                               // Advance to next access info type
-                               ++ai_type;
-                               if (ai_type > AI_TYPE_MAX) {
-                                 // Finished scanning all access info records for current subscriber
-                                 // Now commit
-                                 CharArray ret;
-                                 if (mgr.CommitTransaction(ret)) {
-                                   *in_scan = false;
-                                   *scan_table = SCAN_SPECIAL_FACILITY; // Switch to special facility next
-                                   // Move to next subscriber (wrap around if needed)
-                                   ++(*current_subscriber);
-                                   if (*current_subscriber > end_sub) {
-                                     *current_subscriber = start_sub;
-                                   }
-                                   // Break time after scan commit (500us)
-                                   auto break_start = std::chrono::high_resolution_clock::now();
-                                   while (std::chrono::duration_cast<std::chrono::microseconds>(
-                                             std::chrono::high_resolution_clock::now() - break_start)
-                                             .count() < 500) {
-                                     _mm_pause(); // CPU pause hint for spin loop
-                                   }
-                                 } else {
-                                   // Commit failed, abort and retry
-                                   mgr.AbortTransaction();
-                                   *in_scan = false;
-                                 }
-                                 return;
-                               }
-                               // Continue scanning (don't commit yet)
-                               break;
-                             }
-                             case SCAN_SPECIAL_FACILITY: {
-                               // Scan all special facility records for ONE subscriber in one transaction
-                               int64_t sub = *current_subscriber;
-                               int &sf_type = *sf_scan_state;
-                               
-                               // Read current special facility record
-                               DynamicCompoundKey key =
-                                   TATPKeyGenerator::GenerateSpecialFacilityKey(sub, sf_type, sf_schema);
-                               if (!mgr.SearchRecord(SPECIAL_FACILITY_TABLE_ID, key, record, READ_ONLY)) {
-                                 // If read fails, abort and retry
-                                 mgr.AbortTransaction();
-                                 *in_scan = false;
-                                 return;
-                               }
-                               
-                               // Advance to next special facility type
-                               ++sf_type;
-                               if (sf_type > SF_TYPE_MAX) {
-                                 // Finished scanning all special facility records for current subscriber
-                                 // Now commit
-                                 CharArray ret;
-                                 if (mgr.CommitTransaction(ret)) {
-                                   *in_scan = false;
-                                   *scan_table = SCAN_ACCESS_INFO; // Switch to access info next
-                                   // Move to next subscriber (wrap around if needed)
-                                   ++(*current_subscriber);
-                                   if (*current_subscriber > end_sub) {
-                                     *current_subscriber = start_sub;
-                                   }
-                                   // Break time after scan commit (500us)
-                                   auto break_start = std::chrono::high_resolution_clock::now();
-                                   while (std::chrono::duration_cast<std::chrono::microseconds>(
-                                             std::chrono::high_resolution_clock::now() - break_start)
-                                             .count() < 500) {
-                                     _mm_pause(); // CPU pause hint for spin loop
-                                   }
-                                 } else {
-                                   // Commit failed, abort and retry
-                                   mgr.AbortTransaction();
-                                   *in_scan = false;
-                                 }
-                                 return;
-                               }
-                               // Continue scanning (don't commit yet)
-                               break;
-                             }
-                           }
-                         }});
+                           return false; // Should not reach here, but return false if loop exits
+                         }));
   }
 };
 

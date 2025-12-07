@@ -83,7 +83,7 @@ int main(int argc, char *argv[]) {
   sourcer.Start();
 
   IORedirector redirector1(gThreadCount);
-  TpccSource sourcer1(&tpcc_scale_params, &redirector1, num_txn / 4,
+  TpccSource sourcer1(&tpcc_scale_params, &redirector1, num_txn/4,
                       WORKLOAD_PATTERN, gThreadCount, dist_ratio,
                       config.GetMyPartitionId());
   //    TpccSource sourcer1(&tpcc_scale_params, &redirector1, num_txn/1000,

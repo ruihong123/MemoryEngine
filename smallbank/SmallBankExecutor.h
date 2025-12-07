@@ -6,8 +6,9 @@
 #include "SmallBankKeyGenerator.h"
 #include "SmallBankProcedure.h"
 #include "TransactionExecutor.h"
-#include <chrono>
-#include <xmmintrin.h>
+#include <cmath>
+#include <atomic>
+#include <memory>
 
 namespace DSMEngine {
 namespace SmallBankBenchmark {
@@ -52,13 +53,16 @@ protected:
 
     const int64_t start_cust = smallbank_scale_params.starting_account_;
     const int64_t end_cust = smallbank_scale_params.ending_account_;
-    if (start_cust <= 0 || end_cust < start_cust) {
+    const int64_t global_total_accounts = smallbank_scale_params.num_accounts_; // Global total across all partitions
+    if (start_cust < 0 || end_cust < start_cust || global_total_accounts <= 0) {
       return;
     }
 
-    // Create alternating scan between SAVINGS and CHECKING tables
-    // Each node scans only its own partition (start_cust to end_cust) to avoid starvation
-    // Each transaction scans ONE customer's records before committing (long-running transaction)
+    // Calculate number of users to scan per transaction (10% by default)
+    // Based on global total, not just local partition
+    const int64_t users_per_scan = std::max(static_cast<int64_t>(1), static_cast<int64_t>(std::ceil(global_total_accounts * HOT_SCAN_USER_PERCENTAGE)));
+
+    // Create scan task that scans all data for 10% of users per transaction
     auto savings_it = storage_manager_->tables_.find(SAVINGS_TABLE_ID);
     auto checking_it = storage_manager_->tables_.find(CHECKING_TABLE_ID);
     if (savings_it == storage_manager_->tables_.end() || 
@@ -68,107 +72,94 @@ protected:
     auto savings_schema = savings_it->second->GetPrimaryIndexSchema();
     auto checking_schema = checking_it->second->GetPrimaryIndexSchema();
     
-    // State tracking for customer-by-customer scans
-    enum ScanTableType {
-      SCAN_SAVINGS = 0,
-      SCAN_CHECKING = 1
-    };
-    auto current_customer = std::make_shared<int64_t>(start_cust); // Current customer being scanned
-    auto scan_table = std::make_shared<int>(SCAN_SAVINGS); // Which table to scan (0=savings, 1=checking)
-    auto in_scan = std::make_shared<bool>(false); // true if currently scanning a customer
+    // State tracking for scanning multiple users per transaction
+    auto current_user_start = std::make_shared<int64_t>(start_cust); // Start of current user batch
+    auto current_user = std::make_shared<int64_t>(start_cust); // Current user being scanned
+    auto scan_table = std::make_shared<int>(0); // 0=savings, 1=checking
+    auto in_scan = std::make_shared<bool>(false); // true if currently scanning
     
     tasks.push_back(
-        HotTableScanTask{"smallbank_savings_checking_alternating_scan",
-                         [current_customer, savings_schema, checking_schema, 
-                          scan_table, in_scan, start_cust, end_cust](TransactionManager &mgr) {
+        HotTableScanTask("smallbank_multi_user_scan",
+                         [current_user_start, current_user, savings_schema, checking_schema, 
+                          scan_table, in_scan, start_cust, global_total_accounts, users_per_scan]
+                         (TransactionManager &mgr, const std::atomic<bool> &should_run) -> bool {
                            Record *record = nullptr;
                            
-                           if (!(*in_scan)) {
-                             // Start a new customer scan
-                             *in_scan = true;
-                           }
-                           
-                           switch (*scan_table) {
-                             case SCAN_SAVINGS: {
-                               // Scan savings record for ONE customer in one transaction
-                               int64_t cust = *current_customer;
-                               
-                               // Read current savings record
-                               DynamicCompoundKey key =
-                                   SmallBankKeyGenerator::GenerateSavingsKey(cust, savings_schema);
-                               if (!mgr.SearchRecord(SAVINGS_TABLE_ID, key, record, READ_ONLY)) {
-                                 // If read fails, abort and retry
-                                 mgr.AbortTransaction();
-                                 *in_scan = false;
-                                 return;
-                               }
-                               
-                               // Finished scanning savings record for current customer
-                               // Now commit
-                               CharArray ret;
-                               if (mgr.CommitTransaction(ret)) {
-                                 *in_scan = false;
-                                 *scan_table = SCAN_CHECKING; // Switch to checking next
-                                 // Move to next customer (wrap around if needed)
-                                 ++(*current_customer);
-                                 if (*current_customer > end_cust) {
-                                   *current_customer = start_cust;
-                                 }
-                                 // Break time after scan commit (500us)
-                                 auto break_start = std::chrono::high_resolution_clock::now();
-                                 while (std::chrono::duration_cast<std::chrono::microseconds>(
-                                           std::chrono::high_resolution_clock::now() - break_start)
-                                           .count() < 500) {
-                                   _mm_pause(); // CPU pause hint for spin loop
-                                 }
-                               } else {
-                                 // Commit failed, abort and retry
-                                 mgr.AbortTransaction();
-                                 *in_scan = false;
-                               }
-                               return;
+                           // Loop until a transaction completes (commits or aborts)
+                           while (should_run.load(std::memory_order_acquire)) {
+                             if (!(*in_scan)) {
+                               // Start a new scan batch
+                               *in_scan = true;
+                               *current_user = *current_user_start;
+                               *scan_table = 0; // Start with savings
                              }
-                             case SCAN_CHECKING: {
-                               // Scan checking record for ONE customer in one transaction
-                               int64_t cust = *current_customer;
-                               
-                               // Read current checking record
-                               DynamicCompoundKey key =
-                                   SmallBankKeyGenerator::GenerateCheckingKey(cust, checking_schema);
-                               if (!mgr.SearchRecord(CHECKING_TABLE_ID, key, record, READ_ONLY)) {
-                                 // If read fails, abort and retry
-                                 mgr.AbortTransaction();
-                                 *in_scan = false;
-                                 return;
-                               }
-                               
-                               // Finished scanning checking record for current customer
-                               // Now commit
-                               CharArray ret;
-                               if (mgr.CommitTransaction(ret)) {
-                                 *in_scan = false;
-                                 *scan_table = SCAN_SAVINGS; // Switch to savings next
-                                 // Move to next customer (wrap around if needed)
-                                 ++(*current_customer);
-                                 if (*current_customer > end_cust) {
-                                   *current_customer = start_cust;
+                             
+                             // Scan all data for users in current batch
+                             switch (*scan_table) {
+                               case 0: { // Scan savings
+                                 int64_t cust = *current_user;
+                                 
+                                 // Read savings record
+                                 DynamicCompoundKey key = SmallBankKeyGenerator::GenerateSavingsKey(cust, savings_schema);
+                                 if (!mgr.SearchRecord(SAVINGS_TABLE_ID, key, record, READ_ONLY)) {
+                                   *in_scan = false;
+                                   return false; // Transaction aborted
                                  }
-                                 // Break time after scan commit (500us)
-                                 auto break_start = std::chrono::high_resolution_clock::now();
-                                 while (std::chrono::duration_cast<std::chrono::microseconds>(
-                                           std::chrono::high_resolution_clock::now() - break_start)
-                                           .count() < 500) {
-                                   _mm_pause(); // CPU pause hint for spin loop
+                                 
+                                 // Advance to next user
+                                 ++cust;
+                                 // Check if we've exceeded the batch or global total
+                                 int64_t batch_end = *current_user_start + users_per_scan - 1;
+                                 if (cust > batch_end || cust >= global_total_accounts) {
+                                   // Finished all savings for all users in batch, switch to checking
+                                   *scan_table = 1;
+                                   *current_user = *current_user_start;
+                                 } else {
+                                   *current_user = cust;
                                  }
-                               } else {
-                                 // Commit failed, abort and retry
-                                 mgr.AbortTransaction();
-                                 *in_scan = false;
+                                 break;
                                }
-                               return;
+                               case 1: { // Scan checking
+                                 int64_t cust = *current_user;
+                                 
+                                 // Read checking record
+                                 DynamicCompoundKey key = SmallBankKeyGenerator::GenerateCheckingKey(cust, checking_schema);
+                                 if (!mgr.SearchRecord(CHECKING_TABLE_ID, key, record, READ_ONLY)) {
+                                   *in_scan = false;
+                                   return false; // Transaction aborted
+                                 }
+                                 
+                                 // Advance to next user
+                                 ++cust;
+                                 // Check if we've exceeded the batch or global total
+                                 int64_t batch_end = *current_user_start + users_per_scan - 1;
+                                 if (cust > batch_end || cust >= global_total_accounts) {
+                                   // Finished scanning all data for all users in batch
+                                   // Commit transaction
+                                   CharArray ret;
+                                   bool committed = mgr.CommitTransaction(ret);
+                                   if (committed) {
+                                     *in_scan = false;
+                                     // Move to next batch of users (round-robin globally)
+                                     *current_user_start += users_per_scan;
+                                     if (*current_user_start >= global_total_accounts) {
+                                       // Wrap around: start from 0 (first account globally)
+                                       *current_user_start = 0;
+                                     }
+                                     return true; // Transaction committed
+                                   } else {
+                                     *in_scan = false;
+                                     return false; // Transaction aborted
+                                   }
+                                 } else {
+                                   *current_user = cust;
+                                 }
+                                 break;
+                               }
                              }
                            }
-                         }});
+                           return false; // Should not reach here, but return false if loop exits
+                         }));
   }
 };
 

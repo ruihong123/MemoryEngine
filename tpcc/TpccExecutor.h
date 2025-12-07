@@ -7,6 +7,9 @@
 #include "TpccKeyGenerator.h"
 #include "TpccProcedure.h"
 #include "TransactionExecutor.h"
+#include <cmath>
+#include <atomic>
+#include <memory>
 
 namespace DSMEngine {
 namespace TpccBenchmark {
@@ -87,59 +90,21 @@ protected:
 
     const int start_wh = tpcc_scale_params.starting_warehouse_;
     const int end_wh = tpcc_scale_params.ending_warehouse_;
+    const int global_total_warehouses = tpcc_scale_params.num_warehouses_; // Global total across all partitions
     const int max_items = tpcc_scale_params.num_items_;
     const int max_district = tpcc_scale_params.num_districts_per_warehouse_;
     const int max_customer = tpcc_scale_params.num_customers_per_district_;
-    const int max_order = tpcc_scale_params.num_customers_per_district_;
-    const int max_new_order = tpcc_scale_params.num_new_orders_per_district_;
 
-    if (start_wh <= 0 || end_wh < start_wh || max_items <= 0 ||
+    if (start_wh <= 0 || end_wh < start_wh || global_total_warehouses <= 0 || max_items <= 0 ||
         max_district <= 0 || max_customer <= 0) {
       return;
     }
 
-    struct StockCursor {
-      int warehouse;
-      int item;
-      int start_wh;
-      int end_wh;
-      int max_item;
-      void Advance() {
-        ++item;
-        if (item > max_item) {
-          item = 1;
-          ++warehouse;
-          if (warehouse > end_wh) {
-            warehouse = start_wh;
-          }
-        }
-      }
-    };
+    // Calculate number of warehouses to scan per transaction (10% by default, configurable)
+    // Based on global total, not just local partition
+    const int warehouses_per_scan = std::max(1, static_cast<int>(std::ceil(global_total_warehouses * HOT_SCAN_WAREHOUSE_PERCENTAGE)));
 
-    // District table is the best choice for long-running reads because it's
-    // updated by both NewOrder (45%) and Payment (43%) transactions, so a
-    // long-running read will block ~88% of all write transactions
-    struct DistrictCursor {
-      int warehouse;
-      int district;
-      int start_wh;
-      int end_wh;
-      int max_district;
-      void Advance() {
-          ++district;
-          if (district > max_district) {
-            district = 1;
-            ++warehouse;
-            if (warehouse > end_wh) {
-              warehouse = start_wh;
-          }
-        }
-      }
-    };
-
-    // Create alternating scan between district, stock, warehouse, and customer tables
-    // Each node scans only its own partition (start_wh to end_wh) to avoid starvation
-    // Each transaction scans ONE warehouse (or one district for customers) before committing (long-running transaction)
+    // Create scan task that scans all data for 10% of warehouses per transaction
     auto district_table_it = storage_manager_->tables_.find(DISTRICT_TABLE_ID);
     auto stock_table_it = storage_manager_->tables_.find(STOCK_TABLE_ID);
     auto warehouse_table_it = storage_manager_->tables_.find(WAREHOUSE_TABLE_ID);
@@ -157,238 +122,185 @@ protected:
     auto warehouse_schema = warehouse_table_it->second->GetPrimaryIndexSchema();
     auto customer_schema = customer_table_it->second->GetPrimaryIndexSchema();
     
-    // State tracking for warehouse-by-warehouse scans
-    enum ScanTableType {
-      SCAN_DISTRICT = 0,
-      SCAN_STOCK = 1,
-      SCAN_WAREHOUSE = 2,
-      SCAN_CUSTOMER = 3
-    };
-    auto current_warehouse = std::make_shared<int>(start_wh); // Current warehouse being scanned
-    auto current_district = std::make_shared<int>(1); // Current district for customer scan
-    auto district_scan_state = std::make_shared<int>(1); // Current district (1 to max_district)
-    auto stock_scan_state = std::make_shared<int>(1); // Current item (1 to max_items)
-    auto customer_scan_state = std::make_shared<int>(1); // Current customer (1 to max_customer)
-    auto scan_table = std::make_shared<int>(SCAN_DISTRICT); // Which table to scan
+    // State tracking for scanning multiple warehouses per transaction
+    auto current_warehouse_start = std::make_shared<int>(start_wh); // Start of current warehouse batch
+    auto current_wh = std::make_shared<int>(start_wh); // Current warehouse being scanned
+    auto current_district = std::make_shared<int>(1); // Current district
+    auto current_customer = std::make_shared<int>(1); // Current customer
+    auto current_item = std::make_shared<int>(1); // Current item
+    auto scan_phase = std::make_shared<int>(0); // 0=district, 1=stock, 2=warehouse, 3=customer
     auto in_scan = std::make_shared<bool>(false); // true if currently scanning
     
     tasks.push_back(
-        HotTableScanTask{"tpcc_multi_table_scan",
-                         [current_warehouse, current_district, district_scan_state, stock_scan_state, 
-                          customer_scan_state, district_schema, stock_schema, warehouse_schema, 
-                          customer_schema, scan_table, in_scan, 
-                          start_wh, end_wh, max_district, max_items, max_customer](TransactionManager &mgr) {
+        HotTableScanTask("tpcc_multi_warehouse_scan",
+                         [current_warehouse_start, current_wh, current_district, current_customer, current_item,
+                          district_schema, stock_schema, warehouse_schema, customer_schema,
+                          scan_phase, in_scan, start_wh, global_total_warehouses, max_district, max_items, max_customer,
+                          warehouses_per_scan](TransactionManager &mgr, const std::atomic<bool> &should_run) -> bool {
                            Record *record = nullptr;
                            
-                           if (!(*in_scan)) {
-                             // Start a new scan
-                             *in_scan = true;
-                             switch (*scan_table) {
-                               case SCAN_DISTRICT:
-                                 // Reset district scan to beginning of current warehouse
-                                 *district_scan_state = 1;
-                                 break;
-                               case SCAN_STOCK:
-                                 // Reset stock scan to beginning of current warehouse
-                                 *stock_scan_state = 1;
-                                 break;
-                               case SCAN_WAREHOUSE:
-                                 // Warehouse scan is just one record, no state to reset
-                                 break;
-                               case SCAN_CUSTOMER:
-                                 // Reset customer scan to beginning of current district
-                                 *customer_scan_state = 1;
-                                 break;
+                           // Loop until a transaction completes (commits or aborts)
+                           while (should_run.load(std::memory_order_acquire)) {
+                             if (!(*in_scan)) {
+                               // Start a new scan batch
+                               *in_scan = true;
+                               *current_wh = *current_warehouse_start;
+                               *current_district = 1;
+                               *current_customer = 1;
+                               *current_item = 1;
+                               *scan_phase = 0; // Start with districts
                              }
-                           }
-                           
-                           switch (*scan_table) {
-                             case SCAN_DISTRICT: {
-                               // Scan all districts in ONE warehouse in one transaction
-                               int wh = *current_warehouse;
-                               int &d = *district_scan_state;
-                               
-                               // Read current district record
-                               DynamicCompoundKey key =
-                                   GetDistrictPrimaryKey(d, wh, district_schema);
-                               if (!mgr.SearchRecord(DISTRICT_TABLE_ID, key, record, READ_ONLY)) {
-                                 // If read fails, abort and retry
-                                 mgr.AbortTransaction();
-                                 *in_scan = false;
-                                 return;
-                               }
-                               
-                               // Advance to next district
-                               ++d;
-                               if (d > max_district) {
-                                 // Finished scanning all districts in current warehouse
-                                 // Spin for 10us to simulate aggregation/processing work
-                                //  auto spin_start = std::chrono::high_resolution_clock::now();
-                                //  while (std::chrono::duration_cast<std::chrono::microseconds>(
-                                //            std::chrono::high_resolution_clock::now() - spin_start)
-                                //            .count() < 100) {
-                                //    _mm_pause(); // CPU pause hint for spin loop
-                                //  }
-                                 // Now commit
-                                 CharArray ret;
-                                 if (mgr.CommitTransaction(ret)) {
+                             
+                             // Scan all data for warehouses in current batch
+                             switch (*scan_phase) {
+                               case 0: { // Scan districts
+                                 int wh = *current_wh;
+                                 int d = *current_district;
+                                 
+                                 // Read district record
+                                 DynamicCompoundKey key = GetDistrictPrimaryKey(d, wh, district_schema);
+                                 if (!mgr.SearchRecord(DISTRICT_TABLE_ID, key, record, READ_ONLY)) {
                                    *in_scan = false;
-                                   *scan_table = SCAN_STOCK; // Switch to stock next
-                                   // Break time after scan commit (500us)
-                                  //  auto break_start = std::chrono::high_resolution_clock::now();
-                                  //  while (std::chrono::duration_cast<std::chrono::microseconds>(
-                                  //            std::chrono::high_resolution_clock::now() - break_start)
-                                  //            .count() < 500) {
-                                  //    _mm_pause(); // CPU pause hint for spin loop
-                                  //  }
-                                 } else {
-                                   // Commit failed, abort and retry
-                                   mgr.AbortTransaction();
-                                   *in_scan = false;
+                                   return false; // Transaction aborted
                                  }
-                                 return;
-                               }
-                               // Continue scanning (don't commit yet)
-                               break;
-                             }
-                             case SCAN_STOCK: {
-                               // Scan all stock items in ONE warehouse in one transaction
-                               int wh = *current_warehouse;
-                               int &item = *stock_scan_state;
                                
-                               // Read current stock record
-                               DynamicCompoundKey key =
-                                   GetStockPrimaryKey(item, wh, stock_schema);
-                               if (!mgr.SearchRecord(STOCK_TABLE_ID, key, record, READ_ONLY)) {
-                                 // If read fails, abort and retry
-                                 mgr.AbortTransaction();
-                                 *in_scan = false;
-                                 return;
-                              }
-                               
-                               // Advance to next stock item
-                               ++item;
-                               if (item > max_items) {
-                                 // Finished scanning all stock items in current warehouse
-                                 // Spin for 10us to simulate aggregation/processing work
-                                //  auto spin_start = std::chrono::high_resolution_clock::now();
-                                //  while (std::chrono::duration_cast<std::chrono::microseconds>(
-                                //            std::chrono::high_resolution_clock::now() - spin_start)
-                                //            .count() < 100) {
-                                //    _mm_pause(); // CPU pause hint for spin loop
-                                //  }
-                                 // Now commit
-                                CharArray ret;
-                                if (mgr.CommitTransaction(ret)) {
-                                   *in_scan = false;
-                                   *scan_table = SCAN_WAREHOUSE; // Switch to warehouse next (same warehouse)
-                                   // Break time after scan commit (500us)
-                                  //  auto break_start = std::chrono::high_resolution_clock::now();
-                                  //  while (std::chrono::duration_cast<std::chrono::microseconds>(
-                                  //            std::chrono::high_resolution_clock::now() - break_start)
-                                  //            .count() < 500) {
-                                  //    _mm_pause(); // CPU pause hint for spin loop
-                                  //  }
-                                 } else {
-                                   // Commit failed, abort and retry
-                                   mgr.AbortTransaction();
-                                   *in_scan = false;
-                                 }
-                                 return;
-                               }
-                               // Continue scanning (don't commit yet)
-                               break;
-                             }
-                             case SCAN_WAREHOUSE: {
-                               // Scan warehouse record for current warehouse
-                               int wh = *current_warehouse;
-                               
-                               // Read warehouse record
-                               DynamicCompoundKey key =
-                                   GetWarehousePrimaryKey(wh, warehouse_schema);
-                               if (!mgr.SearchRecord(WAREHOUSE_TABLE_ID, key, record, READ_ONLY)) {
-                                 // If read fails, abort and retry
-                                 mgr.AbortTransaction();
-                                 *in_scan = false;
-                                 return;
-                               }
-                               
-                               // Finished scanning warehouse record (only one record per warehouse)
-                               // Now commit
-                               CharArray ret;
-                               if (mgr.CommitTransaction(ret)) {
-                                 *in_scan = false;
-                                 *scan_table = SCAN_CUSTOMER; // Switch to customer next (same warehouse)
-                                 // Break time after scan commit (500us)
-                                //  auto break_start = std::chrono::high_resolution_clock::now();
-                                //  while (std::chrono::duration_cast<std::chrono::microseconds>(
-                                //            std::chrono::high_resolution_clock::now() - break_start)
-                                //            .count() < 500) {
-                                //    _mm_pause(); // CPU pause hint for spin loop
-                                //  }
-                               } else {
-                                 // Commit failed, abort and retry
-                                 mgr.AbortTransaction();
-                                 *in_scan = false;
-                               }
-                               return;
-                             }
-                             case SCAN_CUSTOMER: {
-                               // Scan all customers in ONE district in one transaction
-                               int wh = *current_warehouse;
-                               int d = *current_district;
-                               int &c = *customer_scan_state;
-                               
-                               // Read current customer record
-                               DynamicCompoundKey key =
-                                   GetCustomerPrimaryKey(c, d, wh, customer_schema);
-                               if (!mgr.SearchRecord(CUSTOMER_TABLE_ID, key, record, READ_ONLY)) {
-                                 // If read fails, abort and retry
-                                 mgr.AbortTransaction();
-                                 *in_scan = false;
-                                 return;
-                               }
-                               
-                               // Advance to next customer
-                               ++c;
-                               if (c > max_customer) {
-                                 // Finished scanning all customers in current district
-                                 // Now commit
-                                 CharArray ret;
-                                 if (mgr.CommitTransaction(ret)) {
-                                   *in_scan = false;
-                                   // Move to next district
-                                   ++(*current_district);
-                                   *customer_scan_state = 1; // Reset for next district
-                                   if (*current_district > max_district) {
-                                     // Finished all districts in warehouse, move to next warehouse
-                                     *current_district = 1;
-                                     ++(*current_warehouse);
-                                     if (*current_warehouse > end_wh) {
-                                       *current_warehouse = start_wh;
-                                     }
-                                     *scan_table = SCAN_DISTRICT; // Switch to district next (new warehouse)
+                                 // Advance to next district
+                                 ++d;
+                                 if (d > max_district) {
+                                   // Finished all districts for current warehouse, move to next warehouse
+                                   d = 1;
+                                   ++wh;
+                                   // Check if we've exceeded the batch or global total
+                                   int batch_end = *current_warehouse_start + warehouses_per_scan - 1;
+                                   if (wh > batch_end || wh > global_total_warehouses) {
+                                     // Finished all districts for all warehouses in batch, move to stock phase
+                                     *scan_phase = 1;
+                                     *current_wh = *current_warehouse_start;
+                                     *current_item = 1;
+                                   } else {
+                                     *current_wh = wh;
                                    }
-                                   // Otherwise, continue with SCAN_CUSTOMER for next district (same warehouse)
-                                   // Break time after scan commit (500us)
-                                  //  auto break_start = std::chrono::high_resolution_clock::now();
-                                  //  while (std::chrono::duration_cast<std::chrono::microseconds>(
-                                  //            std::chrono::high_resolution_clock::now() - break_start)
-                                  //            .count() < 500) {
-                                  //    _mm_pause(); // CPU pause hint for spin loop
-                                  //  }
+                                   *current_district = d;
                                  } else {
-                                   // Commit failed, abort and retry
-                                   mgr.AbortTransaction();
-                                   *in_scan = false;
+                                   *current_district = d;
                                  }
-                                 return;
+                                 break;
                                }
-                               // Continue scanning (don't commit yet)
-                               break;
+                               case 1: { // Scan stock
+                                 int wh = *current_wh;
+                                 int item = *current_item;
+                                 
+                                 // Read stock record
+                                 DynamicCompoundKey key = GetStockPrimaryKey(item, wh, stock_schema);
+                                 if (!mgr.SearchRecord(STOCK_TABLE_ID, key, record, READ_ONLY)) {
+                                   *in_scan = false;
+                                   return false; // Transaction aborted
+                                 }
+                                 
+                                 // Advance to next item
+                                 ++item;
+                                 if (item > max_items) {
+                                   // Finished all items for current warehouse, move to next warehouse
+                                   item = 1;
+                                   ++wh;
+                                   // Check if we've exceeded the batch or global total
+                                   int batch_end = *current_warehouse_start + warehouses_per_scan - 1;
+                                   if (wh > batch_end || wh > global_total_warehouses) {
+                                     // Finished all stock for all warehouses in batch, move to warehouse phase
+                                     *scan_phase = 2;
+                                     *current_wh = *current_warehouse_start;
+                                   } else {
+                                     *current_wh = wh;
+                                   }
+                                   *current_item = item;
+                                 } else {
+                                   *current_item = item;
+                                 }
+                                 break;
+                               }
+                               case 2: { // Scan warehouses
+                                 int wh = *current_wh;
+                                 
+                                 // Read warehouse record
+                                 DynamicCompoundKey key = GetWarehousePrimaryKey(wh, warehouse_schema);
+                                 if (!mgr.SearchRecord(WAREHOUSE_TABLE_ID, key, record, READ_ONLY)) {
+                                   *in_scan = false;
+                                   return false; // Transaction aborted
+                                 }
+                                 
+                                 // Advance to next warehouse
+                                 ++wh;
+                                 // Check if we've exceeded the batch or global total
+                                 int batch_end = *current_warehouse_start + warehouses_per_scan - 1;
+                                 if (wh > batch_end || wh > global_total_warehouses) {
+                                   // Finished all warehouses in batch, move to customer phase
+                                   *scan_phase = 3;
+                                   *current_wh = *current_warehouse_start;
+                                   *current_district = 1;
+                                   *current_customer = 1;
+                                 } else {
+                                   *current_wh = wh;
+                                 }
+                                 break;
+                               }
+                               case 3: { // Scan customers
+                                 int wh = *current_wh;
+                                 int d = *current_district;
+                                 int c = *current_customer;
+                                 
+                                 // Read customer record
+                                 DynamicCompoundKey key = GetCustomerPrimaryKey(c, d, wh, customer_schema);
+                                 if (!mgr.SearchRecord(CUSTOMER_TABLE_ID, key, record, READ_ONLY)) {
+                                   *in_scan = false;
+                                   return false; // Transaction aborted
+                                 }
+                                 
+                                 // Advance to next customer
+                                 ++c;
+                                 if (c > max_customer) {
+                                   // Finished all customers for current district, move to next district
+                                   c = 1;
+                                   ++d;
+                                   if (d > max_district) {
+                                     // Finished all districts for current warehouse, move to next warehouse
+                                     d = 1;
+                                     ++wh;
+                                     // Check if we've exceeded the batch or global total
+                                     int batch_end = *current_warehouse_start + warehouses_per_scan - 1;
+                                     if (wh > batch_end || wh > global_total_warehouses) {
+                                       // Finished scanning all data for all warehouses in batch
+                                       // Commit transaction
+                                       CharArray ret;
+                                       bool committed = mgr.CommitTransaction(ret);
+                                       if (committed) {
+                                         *in_scan = false;
+                                         // Move to next batch of warehouses (round-robin globally)
+                                         *current_warehouse_start += warehouses_per_scan;
+                                         if (*current_warehouse_start > global_total_warehouses) {
+                                           // Wrap around: start from 1 (first warehouse globally)
+                                           *current_warehouse_start = 1;
+                                         }
+                                         return true; // Transaction committed
+                                       } else {
+                                         *in_scan = false;
+                                         return false; // Transaction aborted
+                                       }
+                                     } else {
+                                       *current_wh = wh;
+                                     }
+                                   } else {
+                                     *current_district = d;
+                                   }
+                                   *current_customer = c;
+                                 } else {
+                                   *current_customer = c;
+                                 }
+                                 break;
+                               }
                              }
                            }
-                         }});
+                           return false; // Should not reach here, but return false if loop exits
+                         }));
   }
 };
 } // namespace TpccBenchmark

@@ -11,7 +11,7 @@
 // When defined, all benchmarks use compressed uint64_t keys instead of
 // multi-field keys This affects both Table.h index schema creation and all
 // KeyGenerator implementations
-// #define COMPRESSED_TPCC_KEY
+#define COMPRESSED_TPCC_KEY
 
 namespace DSMEngine {
 typedef uint32_t HashcodeType;
@@ -33,7 +33,7 @@ enum SourceType : size_t { RANDOM_SOURCE, PARTITION_SOURCE };
 
 // storage
 const size_t kMaxTableNum = 16;
-const size_t kMaxColumnNum = 32;
+const size_t kMaxColumnNum = 64;
 const size_t kMaxAttributeLength = 64; // largest attribute length 64Bytes.
 const size_t kMaxSecondaryIndexNum = 5;
 const uint64_t kHashIndexBucketHeaderNum = 1000007;

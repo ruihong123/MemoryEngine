@@ -125,8 +125,8 @@ namespace DSMEngine {
 
         GlobalAddress SearchPriIndex(const DynamicCompoundKey key) {
             GlobalAddress tuple_gaddr = GlobalAddress::Null();
-            char key_value_pair[1024];
-            memset(key_value_pair, 0, 1024);
+            char key_value_pair[64];
+            // memset(key_value_pair, 0, 1024);
             Slice retrieved_slice(key_value_pair, primary_index_->index_scheme_ptr->GetRecordTotalSize());
             bool find = primary_index_->search(key, retrieved_slice);
             if (find) {
@@ -145,6 +145,10 @@ namespace DSMEngine {
         void ReportTableSize() const {
             uint64_t size = primary_index_->GetRecordCount() * schema_ptr_->GetRecordTotalSize();
             std::cout << "table_id=" << table_id_ << ", size=" << size * 1.0 / 1000 / 1000 << "MB" << std::endl;
+        }
+
+        uint64_t GetRecordCount() const {
+            return primary_index_->GetRecordCount();
         }
 
         size_t GetTableId() const {

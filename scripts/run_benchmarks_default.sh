@@ -1,10 +1,11 @@
 #!/bin/bash
 # Testing script to run TPCC, TATP, and SmallBank benchmarks with default query ratios
-# Usage: ./run_benchmarks_default.sh [benchmark_name] [--hot] [--no-hot] [--no-log]
+# Usage: ./run_benchmarks_default.sh [benchmark_name] [--hot] [--no-hot] [--both] [--no-log]
 #   If benchmark_name is specified, runs only that benchmark (tpcc|tatp|smallbank)
 #   If not specified, runs all three benchmarks sequentially
 #   --hot: Enable hot table scanner / long-running scan queries (default: disabled)
 #   --no-hot: Disable hot table scanner (explicitly, this is the default)
+#   --both: Run each benchmark both with and without hot scanner (runs twice)
 #   --no-log: Disable file logging (output redirected to /dev/null)
 
 set -o nounset
@@ -24,7 +25,7 @@ core_dump_dir="/mnt/core_dump"
 
 # Working environment
 proj_dir="/users/Ruihong/MemoryEngine"
-bin_dir="${proj_dir}/debug"
+bin_dir="${proj_dir}/release"
 ssh_opts="-o StrictHostKeyChecking=no"
 
 # Memory and port configuration
@@ -34,15 +35,24 @@ port=$((13000+RANDOM%1000))
 
 # Default benchmark parameters
 default_threads=8
-default_warehouses=8
-default_txns=1000000
+default_warehouses=256
 default_dist_ratio=100
+
+# Benchmark-specific transaction counts (based on 8GB cache warmup estimation)
+# See CACHE_WARMUP_ESTIMATION.md for detailed rationale
+# TPC-C: Larger records (~6.5KB/txn), better locality -> fewer txns needed
+tpcc_txns=2000000
+# TATP: Small records (~120B/txn), high cardinality (40M subscribers) -> more txns needed
+tatp_txns=50000000
+# SmallBank: Small records (~120B/txn), very high cardinality (200M accounts) -> more txns needed
+smallbank_txns=35000000
 
 # Hot table scanner configuration (can be overridden via command line)
 enable_hot_table_scanner=false
+run_both_modes=false
 
 # File logging configuration (can be overridden via command line)
-enable_file_logging=true
+enable_file_logging=false
 
 # Default TPC-C query ratios (standard TPC-C mix)
 # Frequency weights: Delivery=1, Payment=10, NewOrder=10, OrderStatus=1, StockLevel=1
@@ -136,18 +146,30 @@ cleanup() {
 
 # Function to run TPCC benchmark
 run_tpcc() {
-  echo ""
-  echo "========================================="
-  echo "Running TPCC Benchmark"
-  echo "========================================="
+  local hot_scanner_enabled=$1
+  local suffix=""
+  if [ "$hot_scanner_enabled" = true ]; then
+    suffix="_hot"
+    echo ""
+    echo "========================================="
+    echo "Running TPCC Benchmark (WITH hot scanner)"
+    echo "========================================="
+  else
+    suffix="_nohot"
+    echo ""
+    echo "========================================="
+    echo "Running TPCC Benchmark (WITHOUT hot scanner)"
+    echo "========================================="
+  fi
   echo "Query Ratios (Standard TPC-C mix): NewOrder=${TPCC_NEW_ORDER}%, Payment=${TPCC_PAYMENT}%, OrderStatus=${TPCC_ORDER_STATUS}%, Delivery=${TPCC_DELIVERY}%, StockLevel=${TPCC_STOCK_LEVEL}%"
+  echo "Transaction count: ${tpcc_txns} (optimized for 8GB cache warmup)"
   
   if [ "$enable_file_logging" = true ]; then
-    output_file="${output_dir}/tpcc_default.log"
+    output_file="${output_dir}/tpcc_default${suffix}.log"
   else
     output_file="/dev/null"
   fi
-  benchmark_args="-p$port -sf${default_warehouses} -sf1 -c${default_threads} -rde${TPCC_DELIVERY} -rpa${TPCC_PAYMENT} -rne${TPCC_NEW_ORDER} -ror${TPCC_ORDER_STATUS} -rst${TPCC_STOCK_LEVEL} -t${default_txns} -f${conf_file} -lat"
+  benchmark_args="-p$port -sf${default_warehouses} -sf1 -c${default_threads} -rde${TPCC_DELIVERY} -rpa${TPCC_PAYMENT} -rne${TPCC_NEW_ORDER} -ror${TPCC_ORDER_STATUS} -rst${TPCC_STOCK_LEVEL} -t${tpcc_txns} -f${conf_file} -lat"
   
   # Add cache size if not specified
   if [[ " ${benchmark_args} " != *" -cs"* ]]; then
@@ -155,19 +177,28 @@ run_tpcc() {
   fi
   
   # Add hot table scanner flag if enabled
-  if [ "$enable_hot_table_scanner" = true ]; then
+  if [ "$hot_scanner_enabled" = true ]; then
     benchmark_args="${benchmark_args} -hot"
     echo "Hot table scanner: ENABLED"
   else
     echo "Hot table scanner: DISABLED"
   fi
   
+  # Restart memcached before starting benchmark
+  read -r -a memcached_node <<< $(head -n 1 $memcached_conf_file)
+  echo "Restarting memcached on ${memcached_node[0]} before benchmark run"
+  ssh -o StrictHostKeyChecking=no ${memcached_node[0]} "sudo service memcached restart"
+  
   # Start memory servers for TPCC
   for ((i=0;i<${#memory_nodes[@]};i++)); do
     memory=${memory_nodes[$i]}
-    script_memory="ulimit -c unlimited && cd ${bin_dir} && ./memory_server_tpcc $port $(($remote_mem_size)) $((2*$i +1)) > ${output_file} 2>&1"
-    echo "Starting memory server on $memory"
+    # Create separate log file for each memory server to capture errors
+    memory_log_file="${output_dir}/memory_server_${memory}_${suffix}.log"
+    script_memory="ulimit -c unlimited && cd ${bin_dir} && ./memory_server_tpcc $port $(($remote_mem_size)) $((2*$i +1)) > ${memory_log_file} 2>&1"
+    echo "Starting memory server on $memory (logs: ${memory_log_file})"
+    # Enable coredump on memory nodes
     ssh ${ssh_opts} ${memory} "echo '$core_dump_dir/core$memory' | sudo tee /proc/sys/kernel/core_pattern"
+    echo "[DEBUG] $memory: ssh ${ssh_opts} ${memory} \"$script_memory\""
     ssh ${ssh_opts} ${memory} "$script_memory" &
     sleep 1
   done
@@ -180,6 +211,7 @@ run_tpcc() {
   # Start master node
   echo "Starting master node on $master_host"
   ssh ${ssh_opts} ${master_host} "echo '$core_dump_dir/core$master_host' | sudo tee /proc/sys/kernel/core_pattern"
+  echo "[DEBUG] $master_host: ssh ${ssh_opts} ${master_host} \"ulimit -S -c unlimited && $script_compute -sn$master_host -nid0 | tee -a ${output_file}\""
   ssh ${ssh_opts} ${master_host} "ulimit -S -c unlimited && $script_compute -sn$master_host -nid0 | tee -a ${output_file}" &
   
   # Start worker nodes
@@ -187,6 +219,7 @@ run_tpcc() {
     compute=${compute_nodes[$i]}
     echo "Starting worker node on $compute"
     ssh ${ssh_opts} ${compute} "echo '$core_dump_dir/core$compute' | sudo tee /proc/sys/kernel/core_pattern"
+    echo "[DEBUG] $compute: ssh ${ssh_opts} ${compute} \"ulimit -S -c unlimited && $script_compute -sn$compute -nid$((2*$i)) | tee -a ${output_file}\""
     ssh ${ssh_opts} ${compute} "ulimit -S -c unlimited && $script_compute -sn$compute -nid$((2*$i)) | tee -a ${output_file}" &
   done
   
@@ -202,18 +235,30 @@ run_tpcc() {
 
 # Function to run TATP benchmark
 run_tatp() {
-  echo ""
-  echo "========================================="
-  echo "Running TATP Benchmark"
-  echo "========================================="
+  local hot_scanner_enabled=$1
+  local suffix=""
+  if [ "$hot_scanner_enabled" = true ]; then
+    suffix="_hot"
+    echo ""
+    echo "========================================="
+    echo "Running TATP Benchmark (WITH hot scanner)"
+    echo "========================================="
+  else
+    suffix="_nohot"
+    echo ""
+    echo "========================================="
+    echo "Running TATP Benchmark (WITHOUT hot scanner)"
+    echo "========================================="
+  fi
   echo "Query Ratios (hardcoded in code): GetSubscriberData=35%, GetNewDestination=10%, GetAccessData=35%, UpdateSubscriberData=2%, UpdateLocation=14%, InsertCallForwarding=2%, DeleteCallForwarding=2%"
+  echo "Transaction count: ${tatp_txns} (optimized for 8GB cache warmup)"
   
   if [ "$enable_file_logging" = true ]; then
-    output_file="${output_dir}/tatp_default.log"
+    output_file="${output_dir}/tatp_default${suffix}.log"
   else
     output_file="/dev/null"
   fi
-  benchmark_args="-p$port -sf100000 -c${default_threads} -t${default_txns} -f${conf_file} -lat"
+  benchmark_args="-p$port -sf100000 -c${default_threads} -t${tatp_txns} -f${conf_file} -lat"
   
   # Add cache size if not specified
   if [[ " ${benchmark_args} " != *" -cs"* ]]; then
@@ -221,19 +266,27 @@ run_tatp() {
   fi
   
   # Add hot table scanner flag if enabled
-  if [ "$enable_hot_table_scanner" = true ]; then
+  if [ "$hot_scanner_enabled" = true ]; then
     benchmark_args="${benchmark_args} -hot"
     echo "Hot table scanner: ENABLED"
   else
     echo "Hot table scanner: DISABLED"
   fi
   
+  
+  # Restart memcached before starting benchmark
+  read -r -a memcached_node <<< $(head -n 1 $memcached_conf_file)
+  echo "Restarting memcached on ${memcached_node[0]} before benchmark run"
+  ssh -o StrictHostKeyChecking=no ${memcached_node[0]} "sudo service memcached restart"
+  
   # Start memory servers for TATP (using memory_server_tpcc for transaction benchmarks)
   for ((i=0;i<${#memory_nodes[@]};i++)); do
     memory=${memory_nodes[$i]}
     script_memory="ulimit -c unlimited && cd ${bin_dir} && ./memory_server_tpcc $port $(($remote_mem_size)) $((2*$i +1)) > ${output_file} 2>&1"
     echo "Starting memory server on $memory"
+    # Enable coredump on memory nodes
     ssh ${ssh_opts} ${memory} "echo '$core_dump_dir/core$memory' | sudo tee /proc/sys/kernel/core_pattern"
+    echo "[DEBUG] $memory: ssh ${ssh_opts} ${memory} \"$script_memory\""
     ssh ${ssh_opts} ${memory} "$script_memory" &
     sleep 1
   done
@@ -246,6 +299,7 @@ run_tatp() {
   # Start master node
   echo "Starting master node on $master_host"
   ssh ${ssh_opts} ${master_host} "echo '$core_dump_dir/core$master_host' | sudo tee /proc/sys/kernel/core_pattern"
+  echo "[DEBUG] $master_host: ssh ${ssh_opts} ${master_host} \"ulimit -S -c unlimited && $script_compute -sn$master_host -nid0 | tee -a ${output_file}\""
   ssh ${ssh_opts} ${master_host} "ulimit -S -c unlimited && $script_compute -sn$master_host -nid0 | tee -a ${output_file}" &
   
   # Start worker nodes
@@ -253,6 +307,7 @@ run_tatp() {
     compute=${compute_nodes[$i]}
     echo "Starting worker node on $compute"
     ssh ${ssh_opts} ${compute} "echo '$core_dump_dir/core$compute' | sudo tee /proc/sys/kernel/core_pattern"
+    echo "[DEBUG] $compute: ssh ${ssh_opts} ${compute} \"ulimit -S -c unlimited && $script_compute -sn$compute -nid$((2*$i)) | tee -a ${output_file}\""
     ssh ${ssh_opts} ${compute} "ulimit -S -c unlimited && $script_compute -sn$compute -nid$((2*$i)) | tee -a ${output_file}" &
   done
   
@@ -268,18 +323,30 @@ run_tatp() {
 
 # Function to run SmallBank benchmark
 run_smallbank() {
-  echo ""
-  echo "========================================="
-  echo "Running SmallBank Benchmark"
-  echo "========================================="
+  local hot_scanner_enabled=$1
+  local suffix=""
+  if [ "$hot_scanner_enabled" = true ]; then
+    suffix="_hot"
+    echo ""
+    echo "========================================="
+    echo "Running SmallBank Benchmark (WITH hot scanner)"
+    echo "========================================="
+  else
+    suffix="_nohot"
+    echo ""
+    echo "========================================="
+    echo "Running SmallBank Benchmark (WITHOUT hot scanner)"
+    echo "========================================="
+  fi
   echo "Query Ratios (hardcoded in code): Amalgamate=15%, Balance=15%, DepositChecking=15%, SendPayment=25%, TransactSavings=15%, WriteCheck=15%"
+  echo "Transaction count: ${smallbank_txns} (optimized for 8GB cache warmup)"
   
   if [ "$enable_file_logging" = true ]; then
-    output_file="${output_dir}/smallbank_default.log"
+    output_file="${output_dir}/smallbank_default${suffix}.log"
   else
     output_file="/dev/null"
   fi
-  benchmark_args="-p$port -sf100000 -c${default_threads} -t${default_txns} -f${conf_file} -lat"
+  benchmark_args="-p$port -sf100000 -c${default_threads} -t${smallbank_txns} -f${conf_file} -lat"
   
   # Add cache size if not specified
   if [[ " ${benchmark_args} " != *" -cs"* ]]; then
@@ -287,19 +354,25 @@ run_smallbank() {
   fi
   
   # Add hot table scanner flag if enabled
-  if [ "$enable_hot_table_scanner" = true ]; then
+  if [ "$hot_scanner_enabled" = true ]; then
     benchmark_args="${benchmark_args} -hot"
     echo "Hot table scanner: ENABLED"
   else
     echo "Hot table scanner: DISABLED"
   fi
   
+  # Restart memcached before starting benchmark
+  read -r -a memcached_node <<< $(head -n 1 $memcached_conf_file)
+  echo "Restarting memcached on ${memcached_node[0]} before benchmark run"
+  ssh -o StrictHostKeyChecking=no ${memcached_node[0]} "sudo service memcached restart"
   # Start memory servers for SmallBank (using memory_server_tpcc for transaction benchmarks)
   for ((i=0;i<${#memory_nodes[@]};i++)); do
     memory=${memory_nodes[$i]}
     script_memory="ulimit -c unlimited && cd ${bin_dir} && ./memory_server_tpcc $port $(($remote_mem_size)) $((2*$i +1)) > ${output_file} 2>&1"
     echo "Starting memory server on $memory"
+    # Enable coredump on memory nodes
     ssh ${ssh_opts} ${memory} "echo '$core_dump_dir/core$memory' | sudo tee /proc/sys/kernel/core_pattern"
+    echo "[DEBUG] $memory: ssh ${ssh_opts} ${memory} \"$script_memory\""
     ssh ${ssh_opts} ${memory} "$script_memory" &
     sleep 1
   done
@@ -312,6 +385,7 @@ run_smallbank() {
   # Start master node
   echo "Starting master node on $master_host"
   ssh ${ssh_opts} ${master_host} "echo '$core_dump_dir/core$master_host' | sudo tee /proc/sys/kernel/core_pattern"
+  echo "[DEBUG] $master_host: ssh ${ssh_opts} ${master_host} \"ulimit -S -c unlimited && $script_compute -sn$master_host -nid0 | tee -a ${output_file}\""
   ssh ${ssh_opts} ${master_host} "ulimit -S -c unlimited && $script_compute -sn$master_host -nid0 | tee -a ${output_file}" &
   
   # Start worker nodes
@@ -319,6 +393,7 @@ run_smallbank() {
     compute=${compute_nodes[$i]}
     echo "Starting worker node on $compute"
     ssh ${ssh_opts} ${compute} "echo '$core_dump_dir/core$compute' | sudo tee /proc/sys/kernel/core_pattern"
+    echo "[DEBUG] $compute: ssh ${ssh_opts} ${compute} \"ulimit -S -c unlimited && $script_compute -sn$compute -nid$((2*$i)) | tee -a ${output_file}\""
     ssh ${ssh_opts} ${compute} "ulimit -S -c unlimited && $script_compute -sn$compute -nid$((2*$i)) | tee -a ${output_file}" &
   done
   
@@ -346,6 +421,10 @@ main() {
         enable_hot_table_scanner=false
         shift
         ;;
+      --both)
+        run_both_modes=true
+        shift
+        ;;
       --no-log)
         enable_file_logging=false
         shift
@@ -361,10 +440,11 @@ main() {
         ;;
       *)
         echo "Unknown option: $1"
-        echo "Usage: $0 [benchmark_name] [--hot] [--no-hot] [--no-log]"
+        echo "Usage: $0 [benchmark_name] [--hot] [--no-hot] [--both] [--no-log]"
         echo "  benchmark_name: tpcc, tatp, or smallbank (optional, runs all if not specified)"
         echo "  --hot: Enable hot table scanner (long-running scan queries)"
         echo "  --no-hot: Disable hot table scanner (default)"
+        echo "  --both: Run each benchmark both with and without hot scanner (runs twice)"
         echo "  --no-log: Disable file logging (output to /dev/null)"
         exit 1
         ;;
@@ -375,22 +455,56 @@ main() {
   if [ -n "$benchmark_name" ]; then
     setup_config
     
-    case $benchmark_name in
-      tpcc)
-        run_tpcc
-        ;;
-      tatp)
-        run_tatp
-        ;;
-      smallbank)
-        run_smallbank
-        ;;
-      *)
-        echo "Unknown benchmark: $benchmark_name"
-        echo "Valid benchmarks: tpcc, tatp, smallbank"
-        exit 1
-        ;;
-    esac
+    if [ "$run_both_modes" = true ]; then
+      # Run benchmark both with and without hot scanner
+      echo "Running $benchmark_name benchmark in both modes (with and without hot scanner)..."
+      case $benchmark_name in
+        tpcc)
+          run_tpcc false
+          # cleanup
+          sleep 10
+          port=$((port + 100))
+          run_tpcc true
+          ;;
+        tatp)
+          run_tatp false
+          cleanup
+          sleep 10
+          port=$((port + 100))
+          run_tatp true
+          ;;
+        smallbank)
+          run_smallbank false
+          cleanup
+          sleep 10
+          port=$((port + 100))
+          run_smallbank true
+          ;;
+        *)
+          echo "Unknown benchmark: $benchmark_name"
+          echo "Valid benchmarks: tpcc, tatp, smallbank"
+          exit 1
+          ;;
+      esac
+    else
+      # Run benchmark with specified hot scanner setting
+      case $benchmark_name in
+        tpcc)
+          run_tpcc $enable_hot_table_scanner
+          ;;
+        tatp)
+          run_tatp $enable_hot_table_scanner
+          ;;
+        smallbank)
+          run_smallbank $enable_hot_table_scanner
+          ;;
+        *)
+          echo "Unknown benchmark: $benchmark_name"
+          echo "Valid benchmarks: tpcc, tatp, smallbank"
+          exit 1
+          ;;
+      esac
+    fi
     
     cleanup
   else
@@ -398,7 +512,9 @@ main() {
     setup_config
     
     echo "Running all benchmarks sequentially..."
-    if [ "$enable_hot_table_scanner" = true ]; then
+    if [ "$run_both_modes" = true ]; then
+      echo "Mode: Running each benchmark BOTH with and without hot scanner"
+    elif [ "$enable_hot_table_scanner" = true ]; then
       echo "Hot table scanner: ENABLED for all benchmarks"
     else
       echo "Hot table scanner: DISABLED for all benchmarks"
@@ -410,33 +526,84 @@ main() {
     fi
     echo ""
     
-    run_tpcc
-    cleanup
-    sleep 5
-    
-    # Use different port for next benchmark
-    port=$((port + 100))
-    run_tatp
-    cleanup
-    sleep 5
-    
-    # Use different port for next benchmark
-    port=$((port + 100))
-    run_smallbank
-    cleanup
-    
-    echo ""
-    echo "========================================="
-    echo "All benchmarks completed!"
-    if [ "$enable_file_logging" = true ]; then
-      echo "Results are in: $output_dir"
-      echo "  - TPCC: ${output_dir}/tpcc_default.log"
-      echo "  - TATP: ${output_dir}/tatp_default.log"
-      echo "  - SmallBank: ${output_dir}/smallbank_default.log"
+    if [ "$run_both_modes" = true ]; then
+      # Run each benchmark twice (with and without hot scanner)
+      run_tpcc false
+      cleanup
+      sleep 10
+      port=$((port + 100))
+      run_tpcc true
+      cleanup
+      sleep 10
+      
+      port=$((port + 100))
+      run_tatp false
+      cleanup
+      sleep 10
+      port=$((port + 100))
+      run_tatp true
+      cleanup
+      sleep 10
+      
+      port=$((port + 100))
+      run_smallbank false
+      cleanup
+      sleep 10
+      port=$((port + 100))
+      run_smallbank true
+      cleanup
+      
+      echo ""
+      echo "========================================="
+      echo "All benchmarks completed (both modes)!"
+      if [ "$enable_file_logging" = true ]; then
+        echo "Results are in: $output_dir"
+        echo "  - TPCC (no hot): ${output_dir}/tpcc_default_nohot.log"
+        echo "  - TPCC (hot): ${output_dir}/tpcc_default_hot.log"
+        echo "  - TATP (no hot): ${output_dir}/tatp_default_nohot.log"
+        echo "  - TATP (hot): ${output_dir}/tatp_default_hot.log"
+        echo "  - SmallBank (no hot): ${output_dir}/smallbank_default_nohot.log"
+        echo "  - SmallBank (hot): ${output_dir}/smallbank_default_hot.log"
+      else
+        echo "File logging was disabled (--no-log flag used)"
+      fi
+      echo "========================================="
     else
-      echo "File logging was disabled (--no-log flag used)"
+      # Run each benchmark once with specified setting
+      run_tpcc $enable_hot_table_scanner
+      cleanup
+      sleep 10
+      
+      # Use different port for next benchmark
+      port=$((port + 100))
+      run_tatp $enable_hot_table_scanner
+      cleanup
+      sleep 10
+      
+      # Use different port for next benchmark
+      port=$((port + 100))
+      run_smallbank $enable_hot_table_scanner
+      cleanup
+      
+      echo ""
+      echo "========================================="
+      echo "All benchmarks completed!"
+      if [ "$enable_file_logging" = true ]; then
+        echo "Results are in: $output_dir"
+        local suffix=""
+        if [ "$enable_hot_table_scanner" = true ]; then
+          suffix="_hot"
+        else
+          suffix="_nohot"
+        fi
+        echo "  - TPCC: ${output_dir}/tpcc_default${suffix}.log"
+        echo "  - TATP: ${output_dir}/tatp_default${suffix}.log"
+        echo "  - SmallBank: ${output_dir}/smallbank_default${suffix}.log"
+      else
+        echo "File logging was disabled (--no-log flag used)"
+      fi
+      echo "========================================="
     fi
-    echo "========================================="
   fi
 }
 

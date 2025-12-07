@@ -40,6 +40,8 @@ public:
     total_count_ = 0;
     total_abort_count_ = 0;
     hot_scan_count_ = 0;
+    hot_scan_abort_count_ = 0;
+    hot_scan_total_latency_ns_ = 0;
     is_ready_ = new volatile bool[thread_count_];
     for (size_t i = 0; i < thread_count_; ++i) {
       is_ready_[i] = false;
@@ -279,9 +281,11 @@ private:
     }
     // epoch generator.
     std::cout << "start processing..." << std::endl;
-    // Reset hot scan count for this benchmark run
+    // Reset hot scan statistics for this benchmark run
     if (enable_hot_scan_) {
       hot_scan_count_.store(0, std::memory_order_relaxed);
+      hot_scan_abort_count_.store(0, std::memory_order_relaxed);
+      hot_scan_total_latency_ns_.store(0, std::memory_order_relaxed);
     }
     is_begin_ = true;
     start_timestamp_ = timer_.GetTimePoint();
@@ -308,16 +312,29 @@ private:
     perf_statistics_.elapsed_time_ = elapsed_time;
     perf_statistics_.throughput_ = throughput;
     
-    // Calculate hot scan throughput if enabled
+    // Calculate hot scan statistics if enabled
     if (enable_hot_scan_) {
       long long hot_scan_count = hot_scan_count_.load(std::memory_order_relaxed);
+      long long hot_scan_abort_count = hot_scan_abort_count_.load(std::memory_order_relaxed);
+      uint64_t hot_scan_total_latency = hot_scan_total_latency_ns_.load(std::memory_order_relaxed);
       perf_statistics_.hot_scan_count_ = hot_scan_count;
+      perf_statistics_.hot_scan_abort_count_ = hot_scan_abort_count;
       if (elapsed_time > 0) {
         perf_statistics_.hot_scan_throughput_ = hot_scan_count * 1.0 / elapsed_time;
       }
+      // Calculate average latency based on ALL transactions (committed + aborted)
+      // This matches how normal transactions record latency
+      long long total_txn_count = hot_scan_count + hot_scan_abort_count;
+      if (total_txn_count > 0) {
+        perf_statistics_.hot_scan_avg_latency_ = hot_scan_total_latency * 1.0 / total_txn_count / 1000.0; // Convert to microseconds
+      }
+      double abort_rate = hot_scan_abort_count * 1.0 / (hot_scan_count + hot_scan_abort_count);
       std::cout << "hot_scan_count=" << hot_scan_count
                 << ", hot_scan_throughput=" << perf_statistics_.hot_scan_throughput_
-                << "K tps" << std::endl;
+                << "K tps, hot_scan_abort_count=" << hot_scan_abort_count
+                << ", hot_scan_abort_rate=" << abort_rate
+                << ", hot_scan_avg_latency=" << perf_statistics_.hot_scan_avg_latency_
+                << " us (based on " << total_txn_count << " total transactions)" << std::endl;
     }
 
     // Aggregate latency data from all threads
@@ -465,7 +482,13 @@ private:
 protected:
   struct HotTableScanTask {
     std::string name;
-    std::function<void(TransactionManager &)> run_once;
+    // Function that processes transactions in a loop, returns true if transaction committed, false if aborted
+    // The function contains a while loop that continues while should_run is true
+    // Returns immediately when a transaction completes (commits or aborts)
+    std::function<bool(TransactionManager &, const std::atomic<bool> &should_run)> run;
+    HotTableScanTask(const std::string &n, 
+                     std::function<bool(TransactionManager &, const std::atomic<bool> &should_run)> f)
+        : name(n), run(f) {}
   };
 
   virtual void
@@ -496,6 +519,8 @@ private:
   std::atomic<size_t> total_count_;
   std::atomic<size_t> total_abort_count_;
   std::atomic<size_t> hot_scan_count_;
+  std::atomic<size_t> hot_scan_abort_count_;
+  std::atomic<uint64_t> hot_scan_total_latency_ns_; // Total latency in nanoseconds
 
   PerfStatistics perf_statistics_;
   bool log_enabled_;

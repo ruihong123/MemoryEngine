@@ -65,6 +65,8 @@ namespace DSMEngine {
                 size_t col_ids[] = {0};
                 schema->SetPrimaryColumns(col_ids, 1);
                 schema->SetPartitionColumns(col_ids, 1);
+                assert(schema->GetColumnSize(32) == 4);
+
             }
 
             static void InitAccessInfoSchema(RecordSchema*& schema) {

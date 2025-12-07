@@ -70,14 +70,14 @@ namespace DSMEngine {
                 rdma_mg->Set_message_handling_func(ProcessSnapshotPush, SnapshotPush);
             }
 
-            uint8_t target_node_id    = 2 * ((rdma_mg->node_id / 2) % rdma_mg->GetLogicalMemNodeNum()) + 1;
-            GlobalAddress remote_addr = rdma_mg->Allocate_Remote_RDMA_Slot(Chunk_type::DeltaChunk, target_node_id);
-            assert((remote_addr.offset % 128 * define::MB) % 10 * define::MB == 0);
-            ibv_mr* local_mr = new ibv_mr{};
-            rdma_mg->Allocate_Local_RDMA_Slot(*local_mr, DeltaChunk);
 #ifdef SINGLE_DELTA_PER_NODE
             std::unique_lock<RWSpinMutex> lck1(delta_map_mtx);
             if (ds_for_write == nullptr) {
+                uint8_t target_node_id    = 2 * ((rdma_mg->node_id / 2) % rdma_mg->GetLogicalMemNodeNum()) + 1;
+                GlobalAddress remote_addr = rdma_mg->Allocate_Remote_RDMA_Slot(Chunk_type::DeltaChunk, target_node_id);
+                assert((remote_addr.offset % 128 * define::MB) % 10 * define::MB == 0);
+                ibv_mr* local_mr = new ibv_mr{};
+                rdma_mg->Allocate_Local_RDMA_Slot(*local_mr, DeltaChunk);
                 ds_for_write =
                     new DeltaSectionWrap(rdma_mg->node_id, remote_addr, rdma_mg->delta_section_size, local_mr);
 
@@ -87,6 +87,11 @@ namespace DSMEngine {
             }
             lck1.unlock();
 #else
+            uint8_t target_node_id    = 2 * ((rdma_mg->node_id / 2) % rdma_mg->GetLogicalMemNodeNum()) + 1;
+            GlobalAddress remote_addr = rdma_mg->Allocate_Remote_RDMA_Slot(Chunk_type::DeltaChunk, target_node_id);
+            assert((remote_addr.offset % 128 * define::MB) % 10 * define::MB == 0);
+            ibv_mr* local_mr = new ibv_mr{};
+            rdma_mg->Allocate_Local_RDMA_Slot(*local_mr, DeltaChunk);
             ds_for_write = new DeltaSectionWrap(rdma_mg->node_id, remote_addr, rdma_mg->delta_section_size, local_mr);
             std::unique_lock<std::shared_mutex> lck1(delta_map_mtx);
             delta_sections.insert(std::make_pair(remote_addr, ds_for_write));
@@ -206,11 +211,11 @@ namespace DSMEngine {
                 }
                 return ret;
             } else {
-                printf("table_id=%d cannot find the record with  key=%s\n",
-                    table_id, primary_key.start);
-                fflush(stdout);
-                // Not found return true, and let the caller to handle check whetehr record is still null to figure out
-                // whether the tuple is found or not.
+                // Record not found - this is legitimate in some cases (e.g., optional records in TATP)
+                // Return true and let the caller check if record is still null to determine if tuple was found
+                // printf("table_id=%d cannot find the record with  key=%s\n",
+                //     table_id, primary_key.start);
+                // fflush(stdout);
                 return true;
             }
         }
@@ -309,7 +314,9 @@ namespace DSMEngine {
         static void BroadCastLeastSP(uint64_t least_sp);
         void ClearStates() {
             locked_handles_.clear();
-            ReleaseSnapshot();
+            if(!is_first_access_){
+                ReleaseSnapshot();
+            }
             is_first_access_ = true;
             pure_read_txn    = true;
             have_rolled_back = false;

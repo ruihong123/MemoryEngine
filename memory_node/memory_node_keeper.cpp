@@ -8,6 +8,8 @@
 //#include "db/table_cache.h"
 #include <cassert>
 #include <cctype>
+#include <cerrno>
+#include <cstring>
 #include <fstream>
 #include <limits>
 #include <list>
@@ -322,6 +324,12 @@ void Memory_Node_Keeper::server_communication_thread(std::string client_ip,
     // Need to be detached.
     thread_sync.detach();
   }
+  
+  // Print memory allocation statistics after all compute nodes connect
+  if (rdma_mg->memory_connection_counter.load() ==
+      rdma_mg->compute_nodes.size()) {
+    rdma_mg->PrintMemoryAllocationStats();
+  }
   //  if(poll_completion(wc, 2, client_ip))
   //    printf("The main qp not create correctly");
   //  else
@@ -532,14 +540,21 @@ int Memory_Node_Keeper::server_sock_connect(const char *servername, int port) {
   socklen_t len = sizeof(struct sockaddr);
   struct addrinfo hints = {
       .ai_flags = AI_PASSIVE, .ai_family = AF_INET, .ai_socktype = SOCK_STREAM};
-  if (sprintf(service, "%d", port) < 0)
+  printf("[DEBUG] server_sock_connect: port=%d, servername=%s\n", port, servername ? servername : "(NULL)");
+  if (sprintf(service, "%d", port) < 0) {
+    printf("[DEBUG] sprintf() failed: port=%d, service buffer size=%zu\n", port, sizeof(service));
     goto sock_connect_exit;
+  }
+  printf("[DEBUG] sprintf() succeeded: service=\"%s\" (port=%d)\n", service, port);
   /* Resolve DNS address, use sockfd as temp storage */
   sockfd = getaddrinfo(servername, service, &hints, &resolved_addr);
   if (sockfd < 0) {
+    printf("[DEBUG] getaddrinfo() failed: servername=%s, service=%s, port=%d, error=%s (%d)\n",
+           servername ? servername : "(NULL)", service, port, gai_strerror(sockfd), sockfd);
     fprintf(stderr, "%s for %s:%d\n", gai_strerror(sockfd), servername, port);
     goto sock_connect_exit;
   }
+  printf("[DEBUG] getaddrinfo() succeeded: resolved_addr=%p\n", (void*)resolved_addr);
 
   /* Search through results and find the one we want */
   for (iterator = resolved_addr; iterator; iterator = iterator->ai_next) {
@@ -547,12 +562,24 @@ int Memory_Node_Keeper::server_sock_connect(const char *servername, int port) {
                     iterator->ai_protocol);
     int option = 1;
     setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &option, sizeof(int));
-    if (sockfd >= 0) {
-      /* Server mode. Set up listening socket an accept a connection */
-      listenfd = sockfd;
-      sockfd = -1;
-      if (bind(listenfd, iterator->ai_addr, iterator->ai_addrlen))
-        goto sock_connect_exit;
+      if (sockfd >= 0) {
+        /* Server mode. Set up listening socket an accept a connection */
+        listenfd = sockfd;
+        sockfd = -1;
+        if (bind(listenfd, iterator->ai_addr, iterator->ai_addrlen)) {
+          char addr_str[INET_ADDRSTRLEN] = {0};
+          if (iterator->ai_family == AF_INET) {
+            struct sockaddr_in* sin = (struct sockaddr_in*)iterator->ai_addr;
+            inet_ntop(AF_INET, &sin->sin_addr, addr_str, INET_ADDRSTRLEN);
+          }
+          printf("[DEBUG] bind() failed: port=%d, listenfd=%d, errno=%d (%s), addr=%s, family=%d\n",
+                 port, listenfd, errno, strerror(errno), 
+                 iterator->ai_family == AF_INET ? addr_str : "N/A", iterator->ai_family);
+          printf("[DEBUG] SO_REUSEADDR was set, checking if port %d is already in use\n", port);
+          printf("[DEBUG] bind() error details: ai_addrlen=%u, ai_socktype=%d, ai_protocol=%d\n",
+                 iterator->ai_addrlen, iterator->ai_socktype, iterator->ai_protocol);
+          goto sock_connect_exit;
+        }
       listen(listenfd, 20);
       while (!exit_all_threads_) {
 
@@ -644,6 +671,7 @@ void Memory_Node_Keeper::create_mr_1GB_handler(RDMA_Request *request,
         return;
       }
     } catch (const std::runtime_error &e) {
+      assert(false);
       lck.unlock();
       fprintf(stderr, "Exception in memory registration: %s\n", e.what());
       // Send error reply for exception case
@@ -663,6 +691,22 @@ void Memory_Node_Keeper::create_mr_1GB_handler(RDMA_Request *request,
   send_pointer->content.mr = *mr;
   assert(send_pointer->content.mr.length == define::Alloc_Granu);
   send_pointer->received = true;
+  
+  // Track allocation per compute node
+  {
+    std::unique_lock<std::shared_mutex> lck(rdma_mg->local_mem_mutex);
+    rdma_mg->compute_node_allocated_size[target_node_id] += mr->length;
+    printf("[Memory Node %u] Allocated %.2f MB (%.2f GB) to Compute Node %u. "
+           "Total for Compute Node %u: %.2f GB\n",
+           rdma_mg->node_id,
+           mr->length / (1024.0 * 1024.0),
+           mr->length / (1024.0 * 1024.0 * 1024.0),
+           target_node_id,
+           target_node_id,
+           rdma_mg->compute_node_allocated_size[target_node_id] / (1024.0 * 1024.0 * 1024.0));
+    fflush(stdout);
+  }
+  
   // printf("Node %u: Writing MR to client %s at position %p\n",
   // rdma_mg->node_id, client_ip.c_str(), request->buffer); fflush(stdout);
   rdma_mg->RDMA_Write(request->buffer, request->rkey, &send_mr,

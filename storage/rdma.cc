@@ -217,7 +217,7 @@ namespace DSMEngine {
                            RECEIVE_OUTSTANDING_SIZE * message_size);
         Mempool_initialize(BigPage, BIGPAGESIZE, 16 * 1024 * 1024);
         Mempool_initialize(Regular_Page, remote_block_size, 256ull * 1024ull * 1024);
-        Mempool_initialize(DeltaChunk, delta_section_size, 32 * delta_section_size);
+        Mempool_initialize(DeltaChunk, delta_section_size, 4 * delta_section_size);
         printf(
             "atomic uint8_t, uint16_t, uint32_t and uint64_t are, %lu %lu %lu %lu\n ",
             sizeof(std::atomic<uint8_t>), sizeof(std::atomic<uint16_t>),
@@ -1063,7 +1063,7 @@ namespace DSMEngine {
                                              ibv_mr **p2mrpointer, size_t size,
                                              Chunk_type pool_name,
                                              uint16_t logical_region_id) {
-        printf("Local memory register for logical region %u\n", logical_region_id);
+        // printf("Local memory register for logical region %u\n", logical_region_id);
         int mr_flags = 0;
 
         // For memory nodes: check if this node hosts the requested logical region
@@ -1115,12 +1115,12 @@ namespace DSMEngine {
             //  std::printf("Memory registeration size: %zu time elapse (%ld) us\n",
             //  size, duration.count());
             local_mem_regions.push_back(*p2mrpointer);
-            fprintf(stdout,
-                    "New MR was registered with addr=%p, lkey=0x%x, rkey=0x%x, "
-                    "flags=0x%x, size=%lu, total registered size is %lu\n",
-                    (*p2mrpointer)->addr, (*p2mrpointer)->lkey, (*p2mrpointer)->rkey,
-                    mr_flags, size, total_registered_size);
-            fflush(stdout);
+            // fprintf(stdout,
+            //         "New MR was registered with addr=%p, lkey=0x%x, rkey=0x%x, "
+            //         "flags=0x%x, size=%lu, total registered size is %lu\n",
+            //         (*p2mrpointer)->addr, (*p2mrpointer)->lkey, (*p2mrpointer)->rkey,
+            //         mr_flags, size, total_registered_size);
+            // fflush(stdout);
         }
 
         if (!*p2mrpointer) {
@@ -1162,9 +1162,9 @@ namespace DSMEngine {
         int mr_flags = 0;
         uint64_t size = gb_number * define::GB;
 
-        std::fprintf(stderr, "Pre allocate registered memory %zu GB %30s\r", size,
+        std::fprintf(stdout, "Pre allocate registered memory %zu GB %30s\r", size,
                      "");
-        std::fflush(stderr);
+        std::fflush(stdout);
         ibv_mr *mrpointer;
 
         // Calculate total required size for this physical node
@@ -1234,6 +1234,10 @@ namespace DSMEngine {
             }
         }
         preregistered_region = mrpointer;
+        
+        // Update total_registered_size to include preregistered memory
+        
+        total_registered_size += mrpointer->length;
 
         // Organize pre_allocated_pool by logical region ID (all copies)
         for (auto &[logical_id, group]: logical_groups) {
@@ -2446,8 +2450,13 @@ namespace DSMEngine {
         std::vector<uint16_t> answered_nodes;
         // #endif
 
-        while (1) {
-            for (auto iter: res->sock_map) {
+        while (!exit_flag) {
+            if (res == nullptr) {
+                break;
+            }
+            auto map = res->sock_map;
+            for (auto iter: map) {
+                
                 // Read is a block function
                 rc = read(iter.second, buffer, 100);
                 if (rc > 0) {
@@ -2467,6 +2476,9 @@ namespace DSMEngine {
                     rc = 0;
                 } else if (rc == -1) {
                     printf("The socket return is not normal, %lu, target node is \n", rc);
+                }
+                if (res == nullptr) {
+                    break;
                 }
             }
         }
@@ -3150,7 +3162,7 @@ namespace DSMEngine {
         attr.qp_state = IBV_QPS_RTS;
         attr.timeout = 0xe;
         attr.retry_cnt = 5;
-        attr.rnr_retry = 5;
+        attr.rnr_retry = 7;
         attr.sq_psn = 0;
         attr.max_rd_atomic =
                 ATOMIC_OUTSTANDING_SIZE; // allow RDMA atomic andn RDMA read batched.
@@ -5305,9 +5317,9 @@ namespace DSMEngine {
                 // then this code path could happen, we can just ignore this case.
 
                 // TODO: what else problem can such an intermidiate state cause?
-                printf("Node id %u Write invalidation target compute node is itself1 or "
-                       "is out of range (temporal faulty latch state), page_addr is %p\n",
-                       node_id, page_addr);
+                // printf("Node id %u Write invalidation target compute node is itself1 or "
+                //        "is out of range (temporal faulty latch state), page_addr is %p\n",
+                //        node_id, page_addr);
                 //                assert(false);
             }
         }
@@ -6455,13 +6467,13 @@ namespace DSMEngine {
 
         // TODO: If we want to use async unlock, we need to enlarge the max outstand
         // work request that the queue pair support.
-        //  Calculate actual operations needed based on REPLICA_TYPE
+        //  Calculate actual operations needed based on replica_type_
         size_t actual_operations;
-#if REPLICA_TYPE == REPLICA_WRITE_PRIMARY_ONLY
-        actual_operations = 2; // Only primary: write + unlock
-#else
-        actual_operations = replicas.size() * 2; // All replicas: write + unlock each
-#endif
+        if (GetReplicaType() == REPLICA_WRITE_PRIMARY_ONLY) {
+            actual_operations = 2; // Only primary: write + unlock
+        } else {
+            actual_operations = replicas.size() * 2; // All replicas: write + unlock each
+        }
         assert(((DataPage *)page_buffer->addr)->hdr.this_page_g_ptr == page_addr);
         // Create SR matrix based on actual operations needed
         std::vector<struct ibv_send_wr> sr(actual_operations);
@@ -6506,56 +6518,56 @@ namespace DSMEngine {
         volatile uint64_t substract = (~add) + 1;
 
         // Prepare write operations for all replicas (all async by default)
-#if REPLICA_TYPE == REPLICA_WRITE_PRIMARY_ONLY
-        // Check async state only for primary node (for atomic operations)
-        uint16_t primary_phys_id = GetPrimaryPhysicalId(page_addr.nodeID);
-        Async_Tasks *primary_tasks =
-                (Async_Tasks *) async_tasks.at(primary_phys_id)->Get();
-        if (UNLIKELY(!primary_tasks)) {
-            primary_tasks = new Async_Tasks();
-            async_tasks[primary_phys_id]->Reset(primary_tasks);
-        }
-        uint32_t *primary_counter = &primary_tasks->counter;
-        bool use_async_for_atomic =
-                (*primary_counter < (ATOMIC_OUTSTANDING_SIZE - 3));
-        ibv_mr *cas_buf = nullptr;
-        ibv_mr *data_buf = nullptr;
-        if (use_async_for_atomic) {
-            cas_buf = primary_tasks->mrs[*primary_counter];
-            data_buf = primary_tasks->mrs[*primary_counter + 1];
-            memcpy(data_buf->addr, tbFlushed_local_mr.addr, page_size);
+        if (GetReplicaType() == REPLICA_WRITE_PRIMARY_ONLY) {
+            // Check async state only for primary node (for atomic operations)
+            uint16_t primary_phys_id = GetPrimaryPhysicalId(page_addr.nodeID);
+            Async_Tasks *primary_tasks =
+                    (Async_Tasks *) async_tasks.at(primary_phys_id)->Get();
+            if (UNLIKELY(!primary_tasks)) {
+                primary_tasks = new Async_Tasks();
+                async_tasks[primary_phys_id]->Reset(primary_tasks);
+            }
+            uint32_t *primary_counter = &primary_tasks->counter;
+            bool use_async_for_atomic =
+                    (*primary_counter < (ATOMIC_OUTSTANDING_SIZE - 3));
+            ibv_mr *cas_buf = nullptr;
+            ibv_mr *data_buf = nullptr;
+            if (use_async_for_atomic) {
+                cas_buf = primary_tasks->mrs[*primary_counter];
+                data_buf = primary_tasks->mrs[*primary_counter + 1];
+                memcpy(data_buf->addr, tbFlushed_local_mr.addr, page_size);
+            } else {
+                cas_buf = Get_local_CAS_mr();
+                data_buf = &tbFlushed_local_mr;
+            }
+            *(uint64_t *) cas_buf->addr = 0;
+            // Write only to primary replica
+            // All writes are async by default (send_flag = 0)
+            Prepare_WR_Write(sr[0], sge[0], tbFlushed_gaddr, data_buf, page_size,
+                             send_flags, Regular_Page);
+
+            // Atomic operation checks async state
+            uint32_t atomic_flags = use_async_for_atomic ? 0 : IBV_SEND_SIGNALED;
+            Prepare_WR_FAA(sr[1], sge[1], remote_lock_addr, cas_buf, substract,
+                           atomic_flags, Regular_Page);
+            sr[0].next = &sr[1];
+
+            // Submit to primary node
+            int num_wrs = use_async_for_atomic ? 0 : 1; // Async: 0, Sync: 1
+            Batch_Submit_WRs(sr.data(), num_wrs, primary_phys_id);
+
+            // Update async state for primary node
+            if (use_async_for_atomic) {
+                // primary_tasks->work_type[primary_tasks->counter] =
+                //     (Async_Tasks::write_replica_async);
+                primary_tasks->counter += 2;
+                async_succeed = true;
+            } else {
+                // Reset counter when using sync operations
+                primary_tasks->counter = 0;
+            }
+
         } else {
-            cas_buf = Get_local_CAS_mr();
-            data_buf = &tbFlushed_local_mr;
-        }
-        *(uint64_t *) cas_buf->addr = 0;
-        // Write only to primary replica
-        // All writes are async by default (send_flag = 0)
-        Prepare_WR_Write(sr[0], sge[0], tbFlushed_gaddr, data_buf, page_size,
-                         send_flags, Regular_Page);
-
-        // Atomic operation checks async state
-        uint32_t atomic_flags = use_async_for_atomic ? 0 : IBV_SEND_SIGNALED;
-        Prepare_WR_FAA(sr[1], sge[1], remote_lock_addr, cas_buf, substract,
-                       atomic_flags, Regular_Page);
-        sr[0].next = &sr[1];
-
-        // Submit to primary node
-        int num_wrs = use_async_for_atomic ? 0 : 1; // Async: 0, Sync: 1
-        Batch_Submit_WRs(sr.data(), num_wrs, primary_phys_id);
-
-        // Update async state for primary node
-        if (use_async_for_atomic) {
-            // primary_tasks->work_type[primary_tasks->counter] =
-            //     (Async_Tasks::write_replica_async);
-            primary_tasks->counter += 2;
-            async_succeed = true;
-        } else {
-            // Reset counter when using sync operations
-            primary_tasks->counter = 0;
-        }
-
-#else
         // New replication logic: async replica writes -> poll replica completions ->
         // sync primary + atomic
         assert(replicas.size() >= 1);
@@ -6607,7 +6619,7 @@ namespace DSMEngine {
                          primary_physical_id); // 1 work request for sync operations
 
         async_succeed = false; // All operations are synchronous now
-#endif
+        }
 
         assert(page_addr.nodeID == remote_lock_addr.nodeID);
         return async_succeed;
@@ -6627,13 +6639,13 @@ namespace DSMEngine {
         assert(!replicas.empty() && "Replicas cannot be empty");
         //   uint16_t primary_phys_id = GetPrimaryPhysicalId(page_addr.nodeID);
 
-        // Calculate actual operations needed based on REPLICA_TYPE
+        // Calculate actual operations needed based on replica_type_
         size_t actual_operations;
-#if REPLICA_TYPE == REPLICA_WRITE_PRIMARY_ONLY
-        actual_operations = 2; // Only primary: write + unlock
-#else
-        actual_operations = replicas.size() * 2; // All replicas: write + unlock each
-#endif
+        if (GetReplicaType() == REPLICA_WRITE_PRIMARY_ONLY) {
+            actual_operations = 2; // Only primary: write + unlock
+        } else {
+            actual_operations = replicas.size() * 2; // All replicas: write + unlock each
+        }
 
         // Create SR matrix based on actual operations needed
         std::vector<struct ibv_send_wr> sr(actual_operations);
@@ -6661,57 +6673,57 @@ namespace DSMEngine {
         add = ((uint64_t) next_holder_id / 2 + 100) << 56;
 
         // Prepare write operations for all replicas (all async by default)
-#if REPLICA_TYPE == REPLICA_WRITE_PRIMARY_ONLY
-        // Check async state only for primary node (for atomic operations)
-        uint16_t primary_phys_id = GetPrimaryPhysicalId(page_addr.nodeID);
-        Async_Tasks *primary_tasks =
-                (Async_Tasks *) async_tasks.at(primary_phys_id)->Get();
-        if (UNLIKELY(!primary_tasks)) {
-            primary_tasks = new Async_Tasks();
-            async_tasks[primary_phys_id]->Reset(primary_tasks);
-        }
-        uint32_t *primary_counter = &primary_tasks->counter;
-        bool use_async_for_atomic =
-        (*primary_counter <
-         (ATOMIC_OUTSTANDING_SIZE -
-          2)); // todo maybe < (ATOMIC_OUTSTANDING_SIZE - 1) is enough
-        ibv_mr *cas_buf = nullptr;
-        ibv_mr *data_buf = nullptr;
-        if (use_async_for_atomic) {
-            cas_buf = primary_tasks->mrs[*primary_counter];
-            data_buf = primary_tasks->mrs[*primary_counter + 1];
-            memcpy(data_buf->addr, post_gl_page_local_mr.addr, page_size);
+        if (GetReplicaType() == REPLICA_WRITE_PRIMARY_ONLY) {
+            // Check async state only for primary node (for atomic operations)
+            uint16_t primary_phys_id = GetPrimaryPhysicalId(page_addr.nodeID);
+            Async_Tasks *primary_tasks =
+                    (Async_Tasks *) async_tasks.at(primary_phys_id)->Get();
+            if (UNLIKELY(!primary_tasks)) {
+                primary_tasks = new Async_Tasks();
+                async_tasks[primary_phys_id]->Reset(primary_tasks);
+            }
+            uint32_t *primary_counter = &primary_tasks->counter;
+            bool use_async_for_atomic =
+            (*primary_counter <
+             (ATOMIC_OUTSTANDING_SIZE -
+              2)); // todo maybe < (ATOMIC_OUTSTANDING_SIZE - 1) is enough
+            ibv_mr *cas_buf = nullptr;
+            ibv_mr *data_buf = nullptr;
+            if (use_async_for_atomic) {
+                cas_buf = primary_tasks->mrs[*primary_counter];
+                data_buf = primary_tasks->mrs[*primary_counter + 1];
+                memcpy(data_buf->addr, post_gl_page_local_mr.addr, page_size);
+            } else {
+                cas_buf = Get_local_CAS_mr();
+                data_buf = &post_gl_page_local_mr;
+            }
+            *(uint64_t *) cas_buf->addr = 0;
+            // Write only to primary replica
+            // All writes are async by default (send_flag = 0)
+            Prepare_WR_Write(sr[0], sge[0], post_gl_page_addr, data_buf, page_size, 0,
+                             Regular_Page);
+
+            // Atomic operation checks async state
+            uint32_t atomic_flags = use_async_for_atomic ? 0 : IBV_SEND_SIGNALED;
+            Prepare_WR_FAA(sr[1], sge[1], remote_lock_addr, cas_buf, substract + add,
+                           atomic_flags, Regular_Page);
+            sr[0].next = &sr[1];
+
+            // Submit to primary node
+            int num_wrs = use_async_for_atomic ? 0 : 1; // Async: 0, Sync: 1
+            Batch_Submit_WRs(sr.data(), num_wrs, primary_phys_id);
+
+            // Update async state for primary node
+            if (use_async_for_atomic) {
+                // primary_tasks->work_type[primary_tasks->counter] =
+                //     (Async_Tasks::write_handover_async);
+                primary_tasks->counter += 2;
+                async_succeed = true;
+            } else {
+                primary_tasks->counter = 0;
+            }
+
         } else {
-            cas_buf = Get_local_CAS_mr();
-            data_buf = &post_gl_page_local_mr;
-        }
-        *(uint64_t *) cas_buf->addr = 0;
-        // Write only to primary replica
-        // All writes are async by default (send_flag = 0)
-        Prepare_WR_Write(sr[0], sge[0], post_gl_page_addr, data_buf, page_size, 0,
-                         Regular_Page);
-
-        // Atomic operation checks async state
-        uint32_t atomic_flags = use_async_for_atomic ? 0 : IBV_SEND_SIGNALED;
-        Prepare_WR_FAA(sr[1], sge[1], remote_lock_addr, cas_buf, substract + add,
-                       atomic_flags, Regular_Page);
-        sr[0].next = &sr[1];
-
-        // Submit to primary node
-        int num_wrs = use_async_for_atomic ? 0 : 1; // Async: 0, Sync: 1
-        Batch_Submit_WRs(sr.data(), num_wrs, primary_phys_id);
-
-        // Update async state for primary node
-        if (use_async_for_atomic) {
-            // primary_tasks->work_type[primary_tasks->counter] =
-            //     (Async_Tasks::write_handover_async);
-            primary_tasks->counter += 2;
-            async_succeed = true;
-        } else {
-            primary_tasks->counter = 0;
-        }
-
-#else
         // New replication logic: async replica writes -> poll replica completions ->
         // sync primary + atomic
         assert(replicas.size() >= 1);
@@ -6763,7 +6775,7 @@ namespace DSMEngine {
                          primary_physical_id); // 1 work request for sync operations
 
         async_succeed = false; // All operations are synchronous now
-#endif
+        }
 
         assert(page_addr.nodeID == remote_lock_addr.nodeID);
         //        printf("Release write lock for %lu\n",page_addr);
@@ -7006,13 +7018,13 @@ namespace DSMEngine {
 
         // TODO: If we want to use async unlock, we need to enlarge the max outstand
         // work request that the queue pair support.
-        //  Calculate actual operations needed based on REPLICA_TYPE
+        //  Calculate actual operations needed based on replica_type_
         size_t actual_operations;
-#if REPLICA_TYPE == REPLICA_WRITE_PRIMARY_ONLY
-        actual_operations = 2; // Only primary: write + unlock
-#else
-        actual_operations = replicas.size() * 2; // All replicas: write + unlock each
-#endif
+        if (GetReplicaType() == REPLICA_WRITE_PRIMARY_ONLY) {
+            actual_operations = 2; // Only primary: write + unlock
+        } else {
+            actual_operations = replicas.size() * 2; // All replicas: write + unlock each
+        }
         assert(((DataPage *)page_buffer->addr)->hdr.this_page_g_ptr == page_addr);
 
         // Create SR matrix based on actual operations needed
@@ -7062,55 +7074,55 @@ namespace DSMEngine {
         volatile uint64_t add = this_node_shared + inv_sender_shared;
 
         // Prepare write operations for all replicas (all async by default)
-#if REPLICA_TYPE == REPLICA_WRITE_PRIMARY_ONLY
-        // Check async state only for primary node (for atomic operations)
-        uint16_t primary_phys_id = GetPrimaryPhysicalId(page_addr.nodeID);
-        Async_Tasks *primary_tasks =
-                (Async_Tasks *) async_tasks.at(primary_phys_id)->Get();
-        if (UNLIKELY(!primary_tasks)) {
-            primary_tasks = new Async_Tasks();
-            async_tasks[primary_phys_id]->Reset(primary_tasks);
-        }
-        uint32_t *primary_counter = &primary_tasks->counter;
-        bool use_async_for_atomic =
-                (*primary_counter < (ATOMIC_OUTSTANDING_SIZE - 2));
-        ibv_mr *cas_buf = nullptr;
-        ibv_mr *data_buf = nullptr;
-        if (use_async_for_atomic) {
-            cas_buf = primary_tasks->mrs[*primary_counter];
-            data_buf = primary_tasks->mrs[*primary_counter + 1];
-            memcpy(data_buf->addr, tbFlushed_local_mr.addr, page_size);
+        if (GetReplicaType() == REPLICA_WRITE_PRIMARY_ONLY) {
+            // Check async state only for primary node (for atomic operations)
+            uint16_t primary_phys_id = GetPrimaryPhysicalId(page_addr.nodeID);
+            Async_Tasks *primary_tasks =
+                    (Async_Tasks *) async_tasks.at(primary_phys_id)->Get();
+            if (UNLIKELY(!primary_tasks)) {
+                primary_tasks = new Async_Tasks();
+                async_tasks[primary_phys_id]->Reset(primary_tasks);
+            }
+            uint32_t *primary_counter = &primary_tasks->counter;
+            bool use_async_for_atomic =
+                    (*primary_counter < (ATOMIC_OUTSTANDING_SIZE - 2));
+            ibv_mr *cas_buf = nullptr;
+            ibv_mr *data_buf = nullptr;
+            if (use_async_for_atomic) {
+                cas_buf = primary_tasks->mrs[*primary_counter];
+                data_buf = primary_tasks->mrs[*primary_counter + 1];
+                memcpy(data_buf->addr, tbFlushed_local_mr.addr, page_size);
+            } else {
+                cas_buf = Get_local_CAS_mr();
+                data_buf = &tbFlushed_local_mr;
+            }
+            *(uint64_t *) cas_buf->addr = 0;
+            // Write only to primary replica
+            // All writes are async by default (send_flag = 0)
+            Prepare_WR_Write(sr[0], sge[0], tbFlushed_gaddr, data_buf, page_size,
+                             send_flags, Regular_Page);
+
+            // Atomic operation checks async state
+            uint32_t atomic_flags = use_async_for_atomic ? 0 : IBV_SEND_SIGNALED;
+            Prepare_WR_FAA(sr[1], sge[1], remote_lock_addr, cas_buf, substract + add,
+                           atomic_flags, Regular_Page);
+            sr[0].next = &sr[1];
+
+            // Submit to primary node
+            int num_wrs = use_async_for_atomic ? 0 : 1; // Async: 0, Sync: 1
+            Batch_Submit_WRs(sr.data(), num_wrs, primary_phys_id);
+
+            // Update async state for primary node
+            if (use_async_for_atomic) {
+                // primary_tasks->work_type[primary_tasks->counter] =
+                //     (Async_Tasks::write_downtoR_async);
+                primary_tasks->counter += 2;
+                async_succeed = true;
+            } else {
+                primary_tasks->counter = 0;
+            }
+
         } else {
-            cas_buf = Get_local_CAS_mr();
-            data_buf = &tbFlushed_local_mr;
-        }
-        *(uint64_t *) cas_buf->addr = 0;
-        // Write only to primary replica
-        // All writes are async by default (send_flag = 0)
-        Prepare_WR_Write(sr[0], sge[0], tbFlushed_gaddr, data_buf, page_size,
-                         send_flags, Regular_Page);
-
-        // Atomic operation checks async state
-        uint32_t atomic_flags = use_async_for_atomic ? 0 : IBV_SEND_SIGNALED;
-        Prepare_WR_FAA(sr[1], sge[1], remote_lock_addr, cas_buf, substract + add,
-                       atomic_flags, Regular_Page);
-        sr[0].next = &sr[1];
-
-        // Submit to primary node
-        int num_wrs = use_async_for_atomic ? 0 : 1; // Async: 0, Sync: 1
-        Batch_Submit_WRs(sr.data(), num_wrs, primary_phys_id);
-
-        // Update async state for primary node
-        if (use_async_for_atomic) {
-            // primary_tasks->work_type[primary_tasks->counter] =
-            //     (Async_Tasks::write_downtoR_async);
-            primary_tasks->counter += 2;
-            async_succeed = true;
-        } else {
-            primary_tasks->counter = 0;
-        }
-
-#else
         // New replication logic: async replica writes -> poll replica completions ->
         // sync primary + atomic
         assert(replicas.size() >= 1);
@@ -7162,7 +7174,7 @@ namespace DSMEngine {
                          primary_physical_id); // 1 work request for sync operations
 
         async_succeed = false; // All operations are synchronous now
-#endif
+        }
 
         assert(page_addr.nodeID == remote_lock_addr.nodeID);
         return async_succeed;
@@ -8041,9 +8053,31 @@ namespace DSMEngine {
                 new In_Use_Array(placeholder_num, chunk_size, temp_pointer);
         Bitmap_map->at(target_region_id)->insert({temp_pointer->addr, in_use_array});
 
-        // printf("Successfully registered memory for logical region %u (primary from
-        // physical node %u)\n",
-        //        target_region_id, GetPrimaryPhysicalId(target_region_id));
+        // Track allocation per region and pool type (on compute nodes)
+        {
+            compute_region_pool_allocated[target_region_id][pool_name] += size;
+            
+            // Print compact allocation information
+            const char* pool_name_str = (pool_name == Chunk_type::Regular_Page) ? "Regular_Page" : 
+                                        (pool_name == Chunk_type::DeltaChunk) ? "DeltaChunk" : "Unknown";
+            size_t total_for_region_pool = compute_region_pool_allocated[target_region_id][pool_name];
+            
+            // Calculate region total across all pools
+            size_t region_total = 0;
+            auto region_it = compute_region_pool_allocated.find(target_region_id);
+            if (region_it != compute_region_pool_allocated.end()) {
+                for (const auto &[pool_type, pool_size] : region_it->second) {
+                    region_total += pool_size;
+                }
+            }
+            
+            printf("[Compute Node %u] Region %u, Pool %s: +%.2f GB (pool total: %.2f GB, region total: %.2f GB)\n",
+                   node_id, target_region_id, pool_name_str,
+                   size / (1024.0 * 1024.0 * 1024.0),
+                   total_for_region_pool / (1024.0 * 1024.0 * 1024.0),
+                   region_total / (1024.0 * 1024.0 * 1024.0));
+            fflush(stdout);
+        }
 
         Deallocate_Local_RDMA_Slot(send_mr.addr, Message);
         // Deallocate individual receive buffers
@@ -8572,6 +8606,94 @@ namespace DSMEngine {
         asm volatile("lfence\n" : :);
         asm volatile("mfence\n" : :);
         return true;
+    }
+
+    void RDMA_Manager::PrintMemoryAllocationStats() {
+        if (node_id % 2 == 1) {
+            // Memory node statistics
+            std::shared_lock<std::shared_mutex> lck(local_mem_mutex);
+            
+            printf("\n========== Memory Allocation Statistics (Memory Node) ==========\n");
+            printf("Physical Memory Node ID: %u\n", node_id);
+            
+            // Calculate actual total registered memory from all MRs
+            size_t actual_total_registered = 0;
+            for (const auto &mr : local_mem_regions) {
+                actual_total_registered += mr->length;
+            }
+            // Also include preregistered region if it exists
+            if (preregistered_region) {
+                // Check if it's already in local_mem_regions
+                bool found = false;
+                for (const auto &mr : local_mem_regions) {
+                    if (mr == preregistered_region) {
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    actual_total_registered += preregistered_region->length;
+                }
+            }
+            
+            printf("Total Registered Memory (from MRs): %.2f GB (%.2f MB, %zu bytes)\n",
+                   actual_total_registered / (1024.0 * 1024.0 * 1024.0),
+                   actual_total_registered / (1024.0 * 1024.0),
+                   actual_total_registered);
+            printf("Total Registered Memory (tracked): %.2f GB (%.2f MB, %zu bytes)\n",
+                   total_registered_size / (1024.0 * 1024.0 * 1024.0),
+                   total_registered_size / (1024.0 * 1024.0),
+                   total_registered_size);
+            printf("\nAllocated Memory by Compute Node:\n");
+            
+            if (compute_node_allocated_size.empty()) {
+                printf("  No allocations yet from any compute node.\n");
+            } else {
+                for (const auto &[compute_node_id, allocated_size] : compute_node_allocated_size) {
+                    printf("  Compute Node %u: %.2f GB (%.2f MB, %zu bytes)\n",
+                           compute_node_id,
+                           allocated_size / (1024.0 * 1024.0 * 1024.0),
+                           allocated_size / (1024.0 * 1024.0),
+                           allocated_size);
+                }
+            }
+            
+            printf("==================================================\n\n");
+        } else {
+            // Compute node statistics
+            std::shared_lock<std::shared_mutex> lck(remote_mem_mutex);
+            
+            printf("\n========== Memory Allocation Statistics (Compute Node %u) ==========\n", node_id);
+            
+            if (compute_region_pool_allocated.empty()) {
+                printf("No remote memory allocations yet.\n");
+            } else {
+                size_t total_allocated = 0;
+                for (const auto &[region_id, pool_map] : compute_region_pool_allocated) {
+                    size_t region_total = 0;
+                    bool first_pool = true;
+                    for (const auto &[pool_type, pool_size] : pool_map) {
+                        const char* pool_name_str = (pool_type == Chunk_type::Regular_Page) ? "Regular_Page" : 
+                                                    (pool_type == Chunk_type::DeltaChunk) ? "DeltaChunk" : "Unknown";
+                        if (first_pool) {
+                            printf("Region %u, Pool %s: %.2f GB", region_id, pool_name_str,
+                                   pool_size / (1024.0 * 1024.0 * 1024.0));
+                            first_pool = false;
+                        } else {
+                            printf(" | Pool %s: %.2f GB", pool_name_str,
+                                   pool_size / (1024.0 * 1024.0 * 1024.0));
+                        }
+                        region_total += pool_size;
+                        total_allocated += pool_size;
+                    }
+                    printf(" | Region Total: %.2f GB\n", region_total / (1024.0 * 1024.0 * 1024.0));
+                }
+                printf("Total Across All Regions: %.2f GB\n", total_allocated / (1024.0 * 1024.0 * 1024.0));
+            }
+            
+            printf("==================================================\n\n");
+        }
+        fflush(stdout);
     }
 
     bool RDMA_Manager::Remote_Query_Pair_Connection(std::string &qp_type,

@@ -659,11 +659,7 @@ namespace DSMEngine {
         bool isroot = true;
         bool from_cache = false;
         int level = -1;
-//TODO: What if we ustilize the cache tree height for the root level?
-//TODO: Change it into while style code.
-#ifdef PROCESSANALYSIS
-        auto start = std::chrono::high_resolution_clock::now();
-#endif
+
         int next_times = 0;
         next: // Internal_and_Leaf page search
         if (next_times++ == 1000) {
@@ -705,19 +701,7 @@ namespace DSMEngine {
             }
 
         }
-#ifdef PROCESSANALYSIS
-        if (TimePrintCounter[RDMA_Manager::thread_id]>=TIMEPRINTGAP){
-        auto stop = std::chrono::high_resolution_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(stop - start);
-//#ifndef NDEBUG
-        printf("internal node tranverse uses (%ld) ns, next time is %d\n", duration.count(), next_times);
-//          TimePrintCounter = 0;
-    }
-//#endif
-#endif
-#ifdef PROCESSANALYSIS
-        start = std::chrono::high_resolution_clock::now();
-#endif
+
         leaf_next:// Leaf page search
 
         assert(result.val.data() != nullptr);
@@ -737,18 +721,6 @@ namespace DSMEngine {
             goto next;
         } else {
             if (result.find_value) { // find
-//                value_buff = result.val;
-#ifdef PROCESSANALYSIS
-                if (TimePrintCounter[RDMA_Manager::thread_id]>=TIMEPRINTGAP){
-                auto stop = std::chrono::high_resolution_clock::now();
-                auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(stop - start);
-                printf("leaf page fetch and search the page uses (%ld) ns\n", duration.count());
-                TimePrintCounter[RDMA_Manager::thread_id] = 0;
-            }else{
-                TimePrintCounter[RDMA_Manager::thread_id]++;
-            }
-#endif
-
                 return true;
             }
             if (result.slibing != GlobalAddress::Null()) { // turn right
@@ -756,17 +728,7 @@ namespace DSMEngine {
                 assert(result.val.data() != nullptr);
                 goto leaf_next;
             }
-#ifdef PROCESSANALYSIS
-            if (TimePrintCounter[RDMA_Manager::thread_id]>=TIMEPRINTGAP){
-            auto stop = std::chrono::high_resolution_clock::now();
-            auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(stop - start);
-            printf("leaf page fetch and search the page uses (%ld) ns\n", duration.count());
-            TimePrintCounter[RDMA_Manager::thread_id] = 0;
-        }else{
-            TimePrintCounter[RDMA_Manager::thread_id]++;
-        }
-#endif
-//            assert(false);
+
             return false; // not found
         }
     }
@@ -1279,9 +1241,6 @@ namespace DSMEngine {
 
     bool Btr::leaf_page_search(GlobalAddress page_addr, const DynamicCompoundKey &k, SearchResult &result, int level) {
         assert(result.val.data() != nullptr);
-#ifdef PROCESSANALYSIS
-        auto start = std::chrono::high_resolution_clock::now();
-#endif
         auto rdma_mg = RDMA_Manager::Get_Instance(nullptr);
         int counter = 0;
         ibv_mr *cas_mr = rdma_mg->Get_local_CAS_mr();
@@ -1296,16 +1255,6 @@ namespace DSMEngine {
 
 //        ibv_mr* mr = nullptr;
         ddms_->SELCC_Shared_Lock(page_buffer, page_addr, handle);
-#ifdef PROCESSANALYSIS
-        if (TimePrintCounter[RDMA_Manager::thread_id]>=TIMEPRINTGAP){
-            auto stop = std::chrono::high_resolution_clock::now();
-            auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(stop - start);
-//#ifndef NDEBUG
-            printf("cache look up for level %d is (%ld) ns, \n", level, duration.count());
-//          TimePrintCounter = 0;
-        }
-//#endif
-#endif
         header = (Header_Index *) ((char *) page_buffer + (STRUCT_OFFSET(InternalPage, hdr)));
         page = (LeafPage *) page_buffer;
         result.Reset();
@@ -1911,9 +1860,18 @@ namespace DSMEngine {
 //  if yes, update the header.
         int cnt = 0;
         uint64_t tuple_length = index_scheme_ptr->GetRecordTotalSize();
+        
+        // Store the last_index before insertion to check if a new record was inserted
+        int last_index_before = page->hdr.last_index;
 
         bool need_split = page->leaf_page_store(k, v, cnt, index_scheme_ptr, redo_logger, page_addr);
-        num_of_record++;
+        
+        // Only increment num_of_record if a new record was inserted (last_index increased)
+        // Updates don't change last_index, so they won't increment the counter
+        if (page->hdr.last_index > last_index_before) {
+            num_of_record++;
+        }
+        
         if (!need_split) {
             ddms_->SELCC_Exclusive_UnLock(page_addr, handle);
             return true;

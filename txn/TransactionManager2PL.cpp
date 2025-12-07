@@ -280,7 +280,7 @@ namespace DSMEngine {
             WriteCommitLog();
         }
         //      assert(locked_handles_.size() == access_list_.access_count_);
-        assert(locked_handles_.size() > 0);
+        // assert(locked_handles_.size() > 0);
         for (auto iter : locked_handles_) {
             assert(iter.second.second == READ_ONLY || iter.second.second == DELETE_ONLY
                    || iter.second.second == INSERT_ONLY || iter.second.second == READ_WRITE);

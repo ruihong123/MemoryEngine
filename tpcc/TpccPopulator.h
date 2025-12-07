@@ -147,6 +147,7 @@ namespace DSMEngine {
                     std::cout << "  Warehouse " << w_id << " complete" << std::endl;
                 }
                 std::cout << "All warehouses populated successfully!" << std::endl;
+                ReportDatabaseSize();
                 delete item_record;
                 item_record = NULL;
                 delete warehouse_record;
@@ -192,6 +193,42 @@ namespace DSMEngine {
                 for (size_t i = 0; i < kTableCount; ++i) {
                     storage_manager_->tables_[i]->ReportTableSize();
                 }
+            }
+
+            void ReportDatabaseSize() {
+                uint64_t total_data_size = 0;
+                uint64_t total_index_size = 0;
+                uint64_t total_records = 0;
+                const double INDEX_FILL_FACTOR = 0.5; // B-tree typically ~50% full
+
+                std::cout << "\n=== TPC-C Database Size Estimation ===" << std::endl;
+                for (size_t i = 0; i < storage_manager_->GetTableCount(); ++i) {
+                    Table* table = storage_manager_->tables_[i];
+                    if (table == nullptr) continue;
+
+                    uint64_t record_count = table->GetRecordCount();
+                    uint64_t record_size = table->GetSchema()->GetRecordTotalSize();
+                    uint64_t index_entry_size = table->GetPrimaryIndexSchema()->GetRecordTotalSize();
+                    
+                    uint64_t data_size = record_count * record_size;
+                    // Account for B-tree fill factor (~50%): actual space = theoretical space / fill_factor
+                    uint64_t index_size = (uint64_t)((record_count * index_entry_size) / INDEX_FILL_FACTOR);
+
+                    total_data_size += data_size;
+                    total_index_size += index_size;
+                    total_records += record_count;
+
+                    std::cout << "Table " << i << " (" << table->GetTableName() << "): "
+                              << record_count << " records, "
+                              << "Data: " << data_size * 1.0 / 1024 / 1024 << " MB, "
+                              << "Index: " << index_size * 1.0 / 1024 / 1024 << " MB" << std::endl;
+                }
+
+                std::cout << "Total: " << total_records << " records, "
+                          << "Data: " << total_data_size * 1.0 / 1024 / 1024 << " MB, "
+                          << "Index: " << total_index_size * 1.0 / 1024 / 1024 << " MB, "
+                          << "Total: " << (total_data_size + total_index_size) * 1.0 / 1024 / 1024 << " MB" << std::endl;
+                std::cout << "=====================================\n" << std::endl;
             }
 
         private:

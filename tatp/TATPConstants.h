@@ -28,7 +28,7 @@ namespace DSMEngine {
         };
 
         /******************** constants *************************/
-        const int DEFAULT_NUM_SUBSCRIBERS = 100000;
+        const int DEFAULT_NUM_SUBSCRIBERS = 2000000;
 
         // Subscriber table
         const int SUB_NBR_PADDING_SIZE    = 15;
@@ -67,6 +67,10 @@ namespace DSMEngine {
         // BIT types for subscriber
         const int VLR_LOCATION_MIN = 1;
         const int VLR_LOCATION_MAX = (1 << 31) - 1;
+
+        // Hot table scanner configuration
+        // Percentage of users to scan per transaction (10% = 0.1)
+        const double HOT_SCAN_USER_PERCENTAGE = 0.001;
 
     } // namespace TATPBenchmark
 } // namespace DSMEngine
