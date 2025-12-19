@@ -49,8 +49,10 @@ namespace DSMEngine {
         ibv_mr *seg_local_mr_;
         size_t seg_real_size_; // not include the header size of inner delta section.
         RDMA_Manager *rdma_mg_;
-        RWSpinMutex shadow_mtx_; // todo: change it into spinlatch.
+        RWSpinMutex shadow_mtx_;
         RWSpinMutex main_mtx_; // Reader-prioritized RW latch for delta section updates
+        // std::shared_mutex shadow_mtx_; // todo: change it into spinlatch.
+        // std::shared_mutex main_mtx_; // Reader-prioritized RW latch for delta section updates
         std::condition_variable_any cv;
         #ifndef NDEBUG
         std::atomic<uint64_t> last_tail_;
@@ -86,7 +88,9 @@ namespace DSMEngine {
             delete seg_local_mr_;
         }
 #ifdef SINGLE_DELTA_PER_NODE
+        // uint64_t AllocateDelta(size_t delta_size, size_t &prev_offset, size_t &next_offset, std::unique_lock<std::shared_mutex>& lck) {
         uint64_t AllocateDelta(size_t delta_size, size_t &prev_offset, size_t &next_offset) {
+
             std::unique_lock<RWSpinMutex> lck(main_mtx_);
             uint64_t old_head = inner_section->head_;
             uint64_t return_offset = 0;
@@ -131,6 +135,7 @@ namespace DSMEngine {
         void fill_in_delta_record_single(Record *new_record, Record *old_record, GlobalAddress &delta_gadd,
                                          size_t &delta_size,
                                          uint64_t commit_ts) {
+            // std::unique_lock<std::shared_mutex> lck(main_mtx_);
             // std::unique_lock<RWSpinMutex> lck(main_mtx_);
             delta_size = new_record->estimate_delta_size(); // delta size include both delta header and delta content.
             assert(delta_size <10000);
@@ -197,6 +202,7 @@ namespace DSMEngine {
             delta_size = new_record->estimate_delta_size(); // delta size include both delta header and delta content.
             //            size_t delta_size_padding = delta_size;
             std::unique_lock<RWSpinMutex> lck(main_mtx_);
+            // std::unique_lock<std::shared_mutex> lck(main_mtx_);
             uint64_t old_head = inner_section->head_;
             // we append new delta record to the tail.
             while (!inner_section->is_empty_ && (old_head + seg_real_size_ - inner_section->tail_) % seg_real_size_ <=
@@ -258,6 +264,7 @@ namespace DSMEngine {
 
             // todo: this garbage collection logic is not correct. We need to fix it.
             std::unique_lock<RWSpinMutex> lck(main_mtx_);
+            // std::unique_lock<std::shared_mutex> lck(main_mtx_);
 
             while (1) {
                 //todo: think about the single delta case, when should we mark empty?

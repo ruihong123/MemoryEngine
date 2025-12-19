@@ -1,6 +1,7 @@
 #ifndef __DATABASE_TATP_RANDOM_GENERATOR_H__
 #define __DATABASE_TATP_RANDOM_GENERATOR_H__
 
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <random>
@@ -16,6 +17,12 @@ namespace DSMEngine {
             // Generate random integer in [min, max]
             int GenerateInteger(int min, int max) {
                 std::uniform_int_distribution<> dis(min, max);
+                return dis(gen_);
+            }
+
+            // Generate random int64_t in [min, max]
+            int64_t GenerateInteger64(int64_t min, int64_t max) {
+                std::uniform_int_distribution<int64_t> dis(min, max);
                 return dis(gen_);
             }
 
@@ -55,9 +62,35 @@ namespace DSMEngine {
                 str[length] = '\0';
             }
 
-            // Generate random subscriber ID
-            int64_t GenerateSubscriberId(int num_subscribers) {
-                return GenerateInteger(0, num_subscribers - 1);
+            // Generate random subscriber ID using non-uniform distribution (NURand)
+            // According to TATP specification: NURand(A, x, y) = (((get_random(0, A) | get_random(x, y)) % (y-x+1)) + x
+            // Reference: https://tatpbenchmark.sourceforge.net/TATP_Description.pdf
+            int64_t GenerateSubscriberId(int64_t num_subscribers) {
+                if (num_subscribers <= 0) {
+                    return 0;
+                }
+                
+                // Determine constant A based on subscriber table size (per TATP spec)
+                int64_t A;
+                if (num_subscribers <= 1000000) {
+                    A = 65535;
+                } else if (num_subscribers <= 10000000) {
+                    A = 1048575;
+                } else {
+                    A = 2097151;
+                }
+                
+                // Subscriber IDs range from 0 to num_subscribers - 1 (0-based indexing)
+                int64_t x = 0;
+                int64_t y = num_subscribers - 1;
+                
+                // Generate two random numbers using bitwise OR as per spec
+                int64_t r1 = GenerateInteger64(0, A);
+                int64_t r2 = GenerateInteger64(x, y);
+                
+                // Apply NURand formula: ((r1 | r2) % (y-x+1)) + x
+                int64_t result = ((r1 | r2) % (y - x + 1)) + x;
+                return result;
             }
 
         private:

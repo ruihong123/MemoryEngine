@@ -63,7 +63,8 @@ namespace DSMEngine {
             }
 
             int64_t GetRandomAccountId() {
-                return random_gen_.GenerateInteger(0, scale_params_->num_accounts_ - 1);
+                // Use skewed distribution: 90% of accesses within first 4% of accounts
+                return random_gen_.GenerateAccountId(scale_params_->num_accounts_);
             }
 
             AmalgamateParam* GenerateAmalgamateParam() {

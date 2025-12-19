@@ -76,7 +76,7 @@ DSMEngine::Memory_Node_Keeper::Memory_Node_Keeper(bool use_sub_compaction,
     i++;
   }
   rdma_mg->compute_nodes.insert({2 * i, connection_conf});
-  assert((rdma_mg->node_id - 1) / 2 < rdma_mg->GetComputeNodeNum());
+  // assert((rdma_mg->node_id - 1) / 2 < rdma_mg->GetComputeNodeNum());
   
   // Parse memory nodes (next non-comment, non-empty line)
   i = 0;
@@ -392,10 +392,15 @@ void Memory_Node_Keeper::server_communication_thread(std::string client_ip,
       // Extract transferred_size from upper 24 bits
       uint32_t transferred_size = (imm_data >> 8) & 0xFFFFFF;
       
+      // Print RDMA write with immediate data reception
+      printf("[Memory Node %u] Received RDMA write with IMM from Compute Node %u, logical_region_id=%u, transferred_size=%u bytes\n",
+             rdma_mg->node_id, compute_node_id, logical_region_id, transferred_size);
+      fflush(stdout);
+      
       // Notify log replayer manager about received data
       log_replayer_mgr_->HandleWriteWithImm(compute_node_id, logical_region_id, transferred_size);
       
-      cv_temp.notify_all();
+      // cv_temp.notify_all();
       rdma_mg->post_receive<RDMA_Request>(&recv_mr[buffer_position],
                                           compute_node_id, "main");
 
@@ -405,6 +410,8 @@ void Memory_Node_Keeper::server_communication_thread(std::string client_ip,
       } else {
         buffer_position++;
       }
+      //clear the wc
+      wc[0] = {};
       continue;
     }
     RDMA_Request *receive_msg_buf = new RDMA_Request();
@@ -435,10 +442,10 @@ void Memory_Node_Keeper::server_communication_thread(std::string client_ip,
       //        rdma_mg_->post_send<registered_qp_config>(send_mr, client_ip);
       //        rdma_mg_->poll_completion(wc, 1, client_ip, true);
 
-    } else if (receive_msg_buf->command == sync_option) {
-      rdma_mg->post_receive<RDMA_Request>(&recv_mr[buffer_position],
-                                          compute_node_id, client_ip);
-      sync_option_handler(receive_msg_buf, client_ip, compute_node_id);
+    // } else if (receive_msg_buf->command == sync_option) {
+    //   rdma_mg->post_receive<RDMA_Request>(&recv_mr[buffer_position],
+    //                                       compute_node_id, client_ip);
+    //   sync_option_handler(receive_msg_buf, client_ip, compute_node_id);
 #ifdef USE_SNAPSHOT_MANAGER
     } else if (receive_msg_buf->command == snapshot_range_request) {
       rdma_mg->post_receive<RDMA_Request>(&recv_mr[buffer_position],
@@ -645,8 +652,9 @@ void Memory_Node_Keeper::create_mr_1GB_handler(RDMA_Request *request,
            define::Alloc_Granu); // Preallocation requrie memory is in chunk of
                                  // 128MB
 
-    // Extract logical region ID from the request
+    // Extract logical region ID and pool_name from the request
     uint16_t logical_region_id = request->content.mr_request.target_region_id;
+    Chunk_type pool_name = request->content.mr_request.pool_name;
     // printf("Memory node %u: Processing MR request for logical region %u\n",
     //        rdma_mg->node_id, logical_region_id);
 
@@ -696,12 +704,19 @@ void Memory_Node_Keeper::create_mr_1GB_handler(RDMA_Request *request,
   {
     std::unique_lock<std::shared_mutex> lck(rdma_mg->local_mem_mutex);
     rdma_mg->compute_node_allocated_size[target_node_id] += mr->length;
-    printf("[Memory Node %u] Allocated %.2f MB (%.2f GB) to Compute Node %u. "
+    Chunk_type pool_name = request->content.mr_request.pool_name;
+    const char* pool_name_str = (pool_name == Regular_Page) ? "Regular_Page" :
+                                (pool_name == LockTable) ? "LockTable" :
+                                (pool_name == Message) ? "Message" :
+                                (pool_name == BigPage) ? "BigPage" :
+                                (pool_name == DeltaChunk) ? "DeltaChunk" : "Unknown";
+    printf("[Memory Node %u] Allocated %.2f MB (%.2f GB) to Compute Node %u (pool_name=%s). "
            "Total for Compute Node %u: %.2f GB\n",
            rdma_mg->node_id,
            mr->length / (1024.0 * 1024.0),
            mr->length / (1024.0 * 1024.0 * 1024.0),
            target_node_id,
+           pool_name_str,
            target_node_id,
            rdma_mg->compute_node_allocated_size[target_node_id] / (1024.0 * 1024.0 * 1024.0));
     fflush(stdout);
@@ -838,53 +853,53 @@ void Memory_Node_Keeper::qp_reset_handler(RDMA_Request *request,
   delete request;
   //    rdma_mg->Deallocate_Local_RDMA_Slot(send_mr.addr, "message");
 }
-void Memory_Node_Keeper::sync_option_handler(RDMA_Request *request,
-                                             std::string &client_ip,
-                                             uint8_t target_node_id) {
-  DEBUG_PRINT("SYNC option \n");
-  ibv_mr send_mr;
-  rdma_mg->Allocate_Local_RDMA_Slot(send_mr, Message);
-  RDMA_Reply *send_pointer = (RDMA_Reply *)send_mr.addr;
-  send_pointer->content.ive = {};
-  ibv_mr edit_recv_mr;
-  rdma_mg->Allocate_Local_RDMA_Slot(edit_recv_mr, BigPage);
-  send_pointer->buffer = edit_recv_mr.addr;
-  send_pointer->rkey = edit_recv_mr.rkey;
-  assert(request->content.ive.buffer_size < edit_recv_mr.length);
-  send_pointer->received = true;
-  // TODO: how to check whether the version edit message is ready, we need to
-  // know the size of the
-  // version edit in the first REQUEST from compute node.
+// void Memory_Node_Keeper::sync_option_handler(RDMA_Request *request,
+//                                              std::string &client_ip,
+//                                              uint8_t target_node_id) {
+//   DEBUG_PRINT("SYNC option \n");
+//   ibv_mr send_mr;
+//   rdma_mg->Allocate_Local_RDMA_Slot(send_mr, Message);
+//   RDMA_Reply *send_pointer = (RDMA_Reply *)send_mr.addr;
+//   send_pointer->content.ive = {};
+//   ibv_mr edit_recv_mr;
+//   rdma_mg->Allocate_Local_RDMA_Slot(edit_recv_mr, BigPage);
+//   send_pointer->buffer = edit_recv_mr.addr;
+//   send_pointer->rkey = edit_recv_mr.rkey;
+//   assert(request->content.ive.buffer_size < edit_recv_mr.length);
+//   send_pointer->received = true;
+//   // TODO: how to check whether the version edit message is ready, we need to
+//   // know the size of the
+//   // version edit in the first REQUEST from compute node.
 
-  // we need buffer_size - 1 to poll the last byte of the buffer.
-  volatile char *polling_byte =
-      (char *)edit_recv_mr.addr + request->content.ive.buffer_size - 1;
-  memset((void *)polling_byte, 0, 1);
-  asm volatile("sfence\n" : :);
-  asm volatile("lfence\n" : :);
-  asm volatile("mfence\n" : :);
-  rdma_mg->RDMA_Write(request->buffer, request->rkey, &send_mr,
-                      sizeof(RDMA_Reply), client_ip, IBV_SEND_SIGNALED, 1,
-                      target_node_id);
+//   // we need buffer_size - 1 to poll the last byte of the buffer.
+//   volatile char *polling_byte =
+//       (char *)edit_recv_mr.addr + request->content.ive.buffer_size - 1;
+//   memset((void *)polling_byte, 0, 1);
+//   asm volatile("sfence\n" : :);
+//   asm volatile("lfence\n" : :);
+//   asm volatile("mfence\n" : :);
+//   rdma_mg->RDMA_Write(request->buffer, request->rkey, &send_mr,
+//                       sizeof(RDMA_Reply), client_ip, IBV_SEND_SIGNALED, 1,
+//                       target_node_id);
 
-  while (*(unsigned char *)polling_byte == 0) {
-    _mm_clflush(polling_byte);
-    asm volatile("sfence\n" : :);
-    asm volatile("lfence\n" : :);
-    asm volatile("mfence\n" : :);
-    std::fprintf(stderr, "Polling sync option handler\n");
-    std::fflush(stderr);
-  }
-  *opts = *static_cast<Options *>(edit_recv_mr.addr);
-  opts->ShardInfo = nullptr;
-  opts->env = nullptr;
-  //    opts->filter_policy = new
-  //    InternalFilterPolicy(NewBloomFilterPolicy(opts->bloom_bits));
-  //    opts->comparator = &internal_comparator_;
-  Compactor_pool_.SetBackgroundThreads(opts->max_background_compactions);
-  printf("Option sync finished\n");
-  delete request;
-}
+//   while (*(unsigned char *)polling_byte == 0) {
+//     _mm_clflush(polling_byte);
+//     asm volatile("sfence\n" : :);
+//     asm volatile("lfence\n" : :);
+//     asm volatile("mfence\n" : :);
+//     std::fprintf(stderr, "Polling sync option handler\n");
+//     std::fflush(stderr);
+//   }
+//   *opts = *static_cast<Options *>(edit_recv_mr.addr);
+//   opts->ShardInfo = nullptr;
+//   opts->env = nullptr;
+//   //    opts->filter_policy = new
+//   //    InternalFilterPolicy(NewBloomFilterPolicy(opts->bloom_bits));
+//   //    opts->comparator = &internal_comparator_;
+//   Compactor_pool_.SetBackgroundThreads(opts->max_background_compactions);
+//   printf("Option sync finished\n");
+//   delete request;
+// }
 
 #ifdef USE_SNAPSHOT_MANAGER
 void Memory_Node_Keeper::snapshot_range_request_handler(RDMA_Request *request,

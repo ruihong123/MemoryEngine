@@ -69,7 +69,8 @@ namespace DSMEngine {
             }
 
             int64_t GetRandomSubscriberId() {
-                return random_gen_.GenerateInteger(0, scale_params_->num_subscribers_ - 1);
+                // Use non-uniform distribution (NURand) per TATP specification
+                return random_gen_.GenerateSubscriberId(scale_params_->num_subscribers_);
             }
 
             GetSubscriberDataParam* GenerateGetSubscriberDataParam() {

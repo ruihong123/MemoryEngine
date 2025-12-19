@@ -79,8 +79,9 @@ namespace DSMEngine {
                     DB_QUERY(SearchRecord(CALL_FORWARDING_TABLE_ID, cf_key, cf_record, READ_ONLY));
 
                     if (cf_record) {
-                        ret.Memcpy(ret.size_, cf_record->data_ptr_, cf_record->GetRecordSize());
-                        ret.size_ += cf_record->GetRecordSize();
+                        // the memcopy below can result in buffer overflow problem as our ret buffer is not large enough
+                        // ret.Memcpy(ret.size_, cf_record->data_ptr_, cf_record->GetRecordSize());
+                        // ret.size_ += cf_record->GetRecordSize();
 #if defined(TO)
                         Cache::Handle* handle = (Cache::Handle*) cf_record->Get_Handle();
                         if (handle) {

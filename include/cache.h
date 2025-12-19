@@ -307,7 +307,7 @@ class DSMEngine_EXPORT Cache {
   // Hard removal: Remove all cache handles whose gptr's nodeID matches the given logical_id.
   // This is a "hard" operation that does not manage GCL ownership before removal.
   // Use with caution - this forcefully removes entries without proper cleanup.
-  virtual void HardRemoveByLogicalId(uint16_t logical_id) = 0;
+  virtual void HardInvalidateByLogicalId(uint16_t logical_id) = 0;
 
  private:
   void LRU_Remove(Handle* e);
@@ -522,8 +522,9 @@ public:
     // Soft flush: Flush all dirty pages (write-locked entries) to disaggregated memory.
     void SoftFlushAllDirtyPages();
 
-    // Hard removal: Remove all cache handles whose gptr's nodeID matches the given logical_id.
-    void HardRemoveByLogicalId(uint16_t logical_id);
+    // Hard invalidate: Invalidate all cache handles whose gptr's nodeID matches the given logical_id
+    // by setting remote_lock_status to 0. Handles remain in cache (not evicted or moved to free list).
+    void HardInvalidateByLogicalId(uint16_t logical_id);
 
 private:
     void List_Remove(LRUHandle* e);
@@ -531,9 +532,11 @@ private:
     void Ref(LRUHandle* e);
 //    void Ref_in_LookUp(LRUHandle* e);
         void Unref(LRUHandle *e);
+    void Unref_hard(LRUHandle *e);
     void Unref_Inv(LRUHandle *e);
 //    void Unref_WithoutLock(LRUHandle* e);
     bool FinishErase(LRUHandle *e) EXCLUSIVE_LOCKS_REQUIRED(table_mutex_);
+    bool FinishErase_hard(LRUHandle *e) EXCLUSIVE_LOCKS_REQUIRED(table_mutex_);
     // todo: make the table_mutex_ a shared mutex. and hence reduce the bottle neck in the cache table.
 //    mutable SpinMutex table_mutex_;
     // Initialized before use.

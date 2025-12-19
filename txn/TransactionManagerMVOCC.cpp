@@ -53,6 +53,8 @@ namespace DSMEngine{
             }else{
                 gcl_addr = new GlobalAddress();
                 *gcl_addr = gallocator->Allocate_Remote(Regular_Page);
+                // printf("AllocateNewRecord(run-time): g_addr=[nodeID=%u, offset=%lu, val=0x%lx]\n", gcl_addr->nodeID, gcl_addr->offset, gcl_addr->val);
+                // fflush(stdout);
                 table->SetOpenedBlock(gcl_addr);
                 gallocator->SELCC_Exclusive_Lock(page_buffer, *gcl_addr, handle);
 
@@ -61,31 +63,20 @@ namespace DSMEngine{
                 new_created = true;
                 
                 // Log DataPage initialization
+                uint64_t new_page_version = 1;  // New page starts at version 1
+                page->hdr.p_version = new_page_version;
                 if (log_enabled_) {
                     RedoLogger* redo_logger = gallocator->GetRedoLogger(log_enabled_);
                     if (redo_logger) {
                         uint16_t logical_region_id = gcl_addr->nodeID;
-                    uint64_t new_page_version = 1;  // New page starts at version 1
-                    page->hdr.p_version = new_page_version;
+                    
                     
                     LogCodec::Encoder encoder;
                     size_t header_offset = STRUCT_OFFSET(DataPage, hdr);
                     
-                    // Log header initialization (essential fields only)
-                    size_t p_type_offset = header_offset + offsetof(Header, p_type);
-                    encoder.AddUpdateBytes(p_type_offset, &page->hdr.p_type, sizeof(page->hdr.p_type));
-                    
-                    size_t this_page_g_ptr_offset = header_offset + offsetof(Header, this_page_g_ptr);
-                    encoder.AddUpdateBytes(this_page_g_ptr_offset, &page->hdr.this_page_g_ptr, sizeof(page->hdr.this_page_g_ptr));
-                    
-                    size_t kDataCardinality_offset = header_offset + offsetof(Header, kDataCardinality);
-                    encoder.AddUpdateBytes(kDataCardinality_offset, &page->hdr.kDataCardinality, sizeof(page->hdr.kDataCardinality));
-                    
-                    size_t table_id_offset = header_offset + offsetof(Header, table_id);
-                    encoder.AddUpdateBytes(table_id_offset, &page->hdr.table_id, sizeof(page->hdr.table_id));
-                    
-                    size_t number_of_records_offset = header_offset + offsetof(Header, number_of_records);
-                    encoder.AddUpdateBytes(number_of_records_offset, &page->hdr.number_of_records, sizeof(page->hdr.number_of_records));
+                    // Log entire header initialization
+                    size_t header_size = sizeof(Header);
+                    encoder.AddUpdateBytes(header_offset, reinterpret_cast<const char*>(&page->hdr), header_size);
                     
                     // Log bitmap initialization (all zeros)
                     size_t data_offset = STRUCT_OFFSET(DataPage, data_);
@@ -111,13 +102,15 @@ namespace DSMEngine{
             assert(ret);
             
             // Log bitmap update after record allocation (bitmap was updated during AllocateRecord)
+            uint64_t current_page_version = page->hdr.p_version;
+            uint64_t new_page_version = current_page_version + 1;
+            page->hdr.p_version = new_page_version;
+            assert(new_page_version >= 2);
             if (log_enabled_) {
                 RedoLogger* redo_logger = gallocator->GetRedoLogger(log_enabled_);
                 if (redo_logger) {
                     uint16_t logical_region_id = gcl_addr->nodeID;
-                uint64_t current_page_version = page->hdr.p_version;
-                uint64_t new_page_version = current_page_version + 1;
-                page->hdr.p_version = new_page_version;
+                
                 
                 LogCodec::Encoder encoder;
                 size_t data_offset = STRUCT_OFFSET(DataPage, data_);
@@ -302,18 +295,29 @@ namespace DSMEngine{
                 // TODO: ROll back old version of the data.
                 MetaColumn meta = record->GetMeta();
                 GlobalAddress prev_delta = meta.prev_version_;
-                // todo: if this record is new inserted by an ongoing tranaction, the prev_delta is null, we can simply abort this transaction.
-                // actually, this should never happen in TPC-C benchmark.
+                // If prev_delta is null, it means the tuple does not exist in the database at the given snapshot_ts.
+                // This is a valid case (tuple was inserted after snapshot_ts), so we should clean up and return true.
                 if (prev_delta == GlobalAddress::Null()) {
-                    assert(false);
+                    // Delete the records from the access entry
+                    delete access->access_global_record_;
+                    access->access_global_record_ = nullptr;
+                    delete access->txn_local_tuple_;
+                    access->txn_local_tuple_ = nullptr;
+                    
+                    // Remove the access from the access list by decrementing the counter
+                    access_list_.access_count_--;
+                    
+                    // Set record to nullptr since it no longer exists
+                    record = nullptr;
+                    
+                    // Release the latch
                     if (effective_access_type == READ_ONLY) {
                         default_gallocator->SELCC_Shared_UnLock(page_gaddr, handle);
                     } else  {
                         //Read_Write, Delete_Only, Insert_Only
                         default_gallocator->SELCC_Exclusive_UnLock(page_gaddr, handle);
                     }
-                    AbortTransaction();
-                    return false;
+                    return true;
                 }
                 assert(prev_delta != GlobalAddress::Null());
 
@@ -366,6 +370,7 @@ namespace DSMEngine{
                         !delta_section->isOffsetValid(offset, meta.prev_delta_epoch_)) {
                         // slck.unlock();
                         std::unique_lock<RWSpinMutex> lck(delta_section->shadow_mtx_);
+                        // std::unique_lock<std::shared_mutex> lck(delta_section->shadow_mtx_);
                         if (delta_section->inner_section->is_empty_ ||
                             !delta_section->isOffsetValid(offset, meta.prev_delta_epoch_)) {
                             // Pull updates from remote node
@@ -433,15 +438,9 @@ namespace DSMEngine{
 
 
     void TransactionManager::LogDataUpdateOperation(Access* access, uint64_t commit_ts) {
-        // Use LogCodec to encode only modified columns (similar to serialize_to_delta)
-        LogCodec::Encoder encoder;
-        
         uint16_t logical_region_id = access->access_addr_.nodeID;
         
-        // Get current page version and increment it for this log record
-        GlobalAddress target_page = TOPAGE(access->access_addr_);
-        
-        // Get the page buffer from the already acquired lock
+        // Get the page address and buffer from the already acquired lock
         GlobalAddress page_gaddr = TOPAGE(access->access_addr_);
         assert(locked_handles_.find(page_gaddr) != locked_handles_.end());
         Cache::Handle* handle = locked_handles_.at(page_gaddr).first;
@@ -452,47 +451,50 @@ namespace DSMEngine{
         void* page_buffer = handle->value;
 #endif
         
-        // Note: For INSERT_ONLY operations on newly created pages, bitmap update is already logged
-        // in AllocateNewRecord right after AllocateRecord. For existing pages, we still need to log bitmap updates here.
-        // Note: For INSERT_ONLY operations, bitmap and number_of_records updates are already logged
-        // in AllocateNewRecord right after AllocateRecord is called, so we don't need to log them here.
-        
-        // Only log modified columns (using dirty_col_ids like delta records)
-        if (!access->txn_local_tuple_->dirty_col_ids.empty()) {
-            for (auto col_id : access->txn_local_tuple_->dirty_col_ids) {
-                size_t column_size = access->txn_local_tuple_->schema_ptr_->GetColumnSize(col_id);
-                size_t column_offset = access->txn_local_tuple_->schema_ptr_->GetColumnOffset(col_id);
-                
-                // Log UPDATE_BYTES for this specific column
-                encoder.AddUpdateBytes(column_offset, 
-                                     access->txn_local_tuple_->data_ptr_ + column_offset, 
-                                     column_size);
-            }
-            
-            // For dirty column updates, also log timestamp update separately
-            size_t meta_col_id = access->txn_local_tuple_->schema_ptr_->GetMetaColumnId();
-            size_t meta_offset = access->txn_local_tuple_->schema_ptr_->GetColumnOffset(meta_col_id);
-            size_t wts_offset = meta_offset + offsetof(MetaColumn, Wts_);
-            encoder.AddSetU64LE(wts_offset, commit_ts);
-        } else {
-            // Fallback: log entire record if no dirty tracking (includes MetaColumn with timestamp)
-            size_t record_size = access->txn_local_tuple_->GetRecordSize();
-            encoder.AddUpdateBytes(0, access->txn_local_tuple_->data_ptr_, record_size);
-            // No separate timestamp log needed - it's already included in the full record
-        }
-        
+        // Update page version - always update regardless of logging (similar to btree)
         uint64_t current_page_version = GetCurrentPageVersion(page_buffer);
+        assert(current_page_version >= 1);
         uint64_t new_page_version = current_page_version + 1;
-        
-        // Update the page version on the compute node (primary copy)
         SetCurrentPageVersion(page_buffer, new_page_version);
         
-        // Append to redo log with the new page version
-        // Get shared RedoLogger from DDSM (singleton shared across all threads)
+        // Append to redo log only when logging is enabled
         if (log_enabled_) {
+            // Use LogCodec to encode only modified columns (similar to serialize_to_delta)
+            LogCodec::Encoder encoder;
+            
+            // Note: For INSERT_ONLY operations on newly created pages, bitmap update is already logged
+            // in AllocateNewRecord right after AllocateRecord. For existing pages, we still need to log bitmap updates here.
+            // Note: For INSERT_ONLY operations, bitmap and number_of_records updates are already logged
+            // in AllocateNewRecord right after AllocateRecord is called, so we don't need to log them here.
+            
+            // Only log modified columns (using dirty_col_ids like delta records)
+            if (!access->txn_local_tuple_->dirty_col_ids.empty()) {
+                for (auto col_id : access->txn_local_tuple_->dirty_col_ids) {
+                    size_t column_size = access->txn_local_tuple_->schema_ptr_->GetColumnSize(col_id);
+                    size_t column_offset = access->txn_local_tuple_->schema_ptr_->GetColumnOffset(col_id);
+                    
+                    // Log UPDATE_BYTES for this specific column
+                    encoder.AddUpdateBytes(column_offset, 
+                                         access->txn_local_tuple_->data_ptr_ + column_offset, 
+                                         column_size);
+                }
+                
+                // For dirty column updates, also log timestamp update separately
+                size_t meta_col_id = access->txn_local_tuple_->schema_ptr_->GetMetaColumnId();
+                size_t meta_offset = access->txn_local_tuple_->schema_ptr_->GetColumnOffset(meta_col_id);
+                size_t wts_offset = meta_offset + offsetof(MetaColumn, Wts_);
+                encoder.AddSetU64LE(wts_offset, commit_ts);
+            } else {
+                // Fallback: log entire record if no dirty tracking (includes MetaColumn with timestamp)
+                size_t record_size = access->txn_local_tuple_->GetRecordSize();
+                encoder.AddUpdateBytes(0, access->txn_local_tuple_->data_ptr_, record_size);
+                // No separate timestamp log needed - it's already included in the full record
+            }
+            
+            // Get shared RedoLogger from DDSM (singleton shared across all threads)
             RedoLogger* redo_logger = default_gallocator->GetRedoLogger(log_enabled_);
             if (redo_logger) {
-                redo_logger->Append(logical_region_id, target_page, new_page_version, encoder.Buffer().data(), encoder.Buffer().size()
+                redo_logger->Append(logical_region_id, page_gaddr, new_page_version, encoder.Buffer().data(), encoder.Buffer().size()
 #ifndef NDEBUG
                                     , RedoLogger::LOG_DATA_PAGE_UPDATE
 #endif
@@ -690,9 +692,7 @@ namespace DSMEngine{
                 access->txn_local_tuple_->PutMeta(meta);
                 
                 // Log data update operation before performing it
-                if (log_enabled_) {
-                    LogDataUpdateOperation(access, commit_ts);
-                }
+                LogDataUpdateOperation(access, commit_ts);
                 
                 // todo: delete the asertion below.
                 access->access_global_record_->CopyFrom(access->txn_local_tuple_);
@@ -704,9 +704,8 @@ namespace DSMEngine{
                 assert(commit_ts < 0x100d2c00cbe9);
                 
                 // Log data update operation before performing it
-                if (log_enabled_) {
-                    LogDataUpdateOperation(access, commit_ts);
-                }
+
+                LogDataUpdateOperation(access, commit_ts);
                 
                 access->access_global_record_->CopyFrom(access->txn_local_tuple_);
                 
@@ -913,6 +912,7 @@ namespace DSMEngine{
 
             ds_w = it->second;
             std::shared_lock<RWSpinMutex> delta_lck(ds_w->main_mtx_);
+            // std::shared_lock<std::shared_mutex> delta_lck(ds_w->main_mtx_);
             while (ds_w->inner_section->tail_ != ds_w->inner_section->tail_allocated) {
                 _mm_pause();
             }

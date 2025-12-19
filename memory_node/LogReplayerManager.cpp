@@ -6,6 +6,30 @@
 
 namespace DSMEngine {
 
+#ifndef NDEBUG
+// Helper function to get log type string (only in debug mode)
+static const char* GetLogTypeString(RedoLogger::LogRecordType log_type) {
+    switch (log_type) {
+        case RedoLogger::LOG_UNKNOWN: return "LOG_UNKNOWN";
+        case RedoLogger::LOG_DATA_PAGE_INIT: return "LOG_DATA_PAGE_INIT";
+        case RedoLogger::LOG_DATA_PAGE_BITMAP_UPDATE: return "LOG_DATA_PAGE_BITMAP_UPDATE";
+        case RedoLogger::LOG_DATA_PAGE_UPDATE: return "LOG_DATA_PAGE_UPDATE";
+        case RedoLogger::LOG_INTERNAL_PAGE_STORE: return "LOG_INTERNAL_PAGE_STORE";
+        case RedoLogger::LOG_LEAF_PAGE_STORE: return "LOG_LEAF_PAGE_STORE";
+        case RedoLogger::LOG_LEAF_PAGE_DELETE: return "LOG_LEAF_PAGE_DELETE";
+        case RedoLogger::LOG_INTERNAL_PAGE_SPLIT_OLD: return "LOG_INTERNAL_PAGE_SPLIT_OLD";
+        case RedoLogger::LOG_INTERNAL_PAGE_SPLIT_NEW: return "LOG_INTERNAL_PAGE_SPLIT_NEW";
+        case RedoLogger::LOG_LEAF_PAGE_SPLIT_OLD: return "LOG_LEAF_PAGE_SPLIT_OLD";
+        case RedoLogger::LOG_LEAF_PAGE_SPLIT_NEW: return "LOG_LEAF_PAGE_SPLIT_NEW";
+        case RedoLogger::LOG_NEW_ROOT_PAGE: return "LOG_NEW_ROOT_PAGE";
+        case RedoLogger::LOG_INDEX_PAGE_CHANGE: return "LOG_INDEX_PAGE_CHANGE";
+        case RedoLogger::LOG_INDEX_PAGE_HEADER_CHANGE: return "LOG_INDEX_PAGE_HEADER_CHANGE";
+        case RedoLogger::LOG_INDEX_PAGE_CONTENT_CHANGE: return "LOG_INDEX_PAGE_CONTENT_CHANGE";
+        default: return "LOG_UNKNOWN";
+    }
+}
+#endif
+
 void LogReplayerManager::HandleLogSegmentRequest(const LogSegmentRequest& request) {
     uint16_t compute_node_id = request.compute_node_id;
     uint16_t logical_region_id = request.logical_region_id;
@@ -84,11 +108,16 @@ void LogReplayerManager::HandleWriteWithImm(uint16_t compute_node_id, uint16_t l
     
     size_t stream_idx = MakeStreamIndex(compute_node_id, logical_region_id);
     if (stream_idx >= MAX_STREAMS) {
-        fprintf(stderr, "LogReplayerManager: Invalid stream index %zu for compute_node=%u, logical_region=%u\n",
+        fprintf(stdout, "LogReplayerManager: Invalid stream index %zu for compute_node=%u, logical_region=%u\n",
                stream_idx, compute_node_id, logical_region_id);
                assert(false);
         return;
     }
+    
+    // Print RDMA write reception information
+    printf("LogReplayerManager: Received RDMA write - memory_node_id=%u, logical_region_id=%u, compute_node_id=%u, received_size=%u bytes\n",
+           rdma_mg_->node_id, logical_region_id, compute_node_id, transferred_size);
+    fflush(stdout);
     
     if (stream_initialized_[stream_idx].load(std::memory_order_acquire)) {
         LogStreamState* stream_state = reinterpret_cast<LogStreamState*>(&stream_states_[stream_idx]);
@@ -265,6 +294,11 @@ void LogReplayerManager::ReplayerThreadFunc(LogicalRegionReplayer* region_replay
         
         lk.unlock();
         
+        // Track progress to detect if we're bouncing between streams without making progress
+        std::lock_guard<std::mutex> progress_lk(region_replayer->progress_mtx);
+        bool has_streams_with_available_logs = false;
+        bool any_stream_made_progress = false;
+        
         // Process all streams in this logical region
         uint16_t region_id = region_replayer->logical_region_id;
         for (uint16_t compute_id = 0; compute_id < manager->MAX_COMPUTE_NODES; ++compute_id) {
@@ -274,15 +308,82 @@ void LogReplayerManager::ReplayerThreadFunc(LogicalRegionReplayer* region_replay
                 
                 // Check if there's new data to replay for this stream
                 uint64_t received = stream_state->received_log_length.load();
-                uint64_t replayed = stream_state->replayed_log_length.load();
+                uint64_t replayed_before = stream_state->replayed_log_length.load();
                 
-                if (received > replayed) {
+                // Check if there are available logs for this stream
+                bool has_available_logs = (received > replayed_before);
+                
+                if (has_available_logs) {
+                    has_streams_with_available_logs = true;
+                    
                     // There's new data to replay using page-version-aware logic
                     // ReplayLogData now handles segment tracking and recycling internally
-                    manager->ReplayLogData(stream_state, received - replayed);
+                    manager->ReplayLogData(stream_state, received - replayed_before);
+                    
+                    // Check if we made progress after replay
+                    uint64_t replayed_after = stream_state->replayed_log_length.load();
+                    
+                    // Track if this stream made progress
+                    if (replayed_after > replayed_before) {
+                        any_stream_made_progress = true;
+                    }
                 }
             }
         }
+        
+#ifndef NDEBUG
+        // Only abort if there are streams with available logs but NONE of them made progress
+        bool should_abort = has_streams_with_available_logs && !any_stream_made_progress;
+        
+        if (should_abort) {
+            region_replayer->iterations_without_progress++;
+            
+            // Check if we've exceeded the threshold
+            if (region_replayer->iterations_without_progress >= LogicalRegionReplayer::MAX_ITERATIONS_WITHOUT_PROGRESS) {
+                fprintf(stdout, "\n[LOG_REPLAY_DEADLOCK] Region %u: Detected log replay bouncing between streams without progress!\n", 
+                       region_replayer->logical_region_id);
+                fprintf(stdout, "[LOG_REPLAY_DEADLOCK] Iterations without progress: %u (threshold: %u)\n",
+                       region_replayer->iterations_without_progress,
+                       LogicalRegionReplayer::MAX_ITERATIONS_WITHOUT_PROGRESS);
+                fprintf(stdout, "[LOG_REPLAY_DEADLOCK] Stream states for region %u:\n", region_replayer->logical_region_id);
+                
+                // Print detailed state for debugging
+                for (uint16_t compute_id = 0; compute_id < manager->MAX_COMPUTE_NODES; ++compute_id) {
+                    size_t stream_idx = manager->MakeStreamIndex(compute_id, region_id);
+                    if (manager->stream_initialized_[stream_idx].load(std::memory_order_acquire)) {
+                        LogStreamState* stream_state = reinterpret_cast<LogStreamState*>(&manager->stream_states_[stream_idx]);
+                        uint64_t received = stream_state->received_log_length.load();
+                        uint64_t replayed = stream_state->replayed_log_length.load();
+                        fprintf(stdout, "  Stream (compute=%u, region=%u): received=%lu, replayed=%lu, pending=%lu",
+                               compute_id, region_id, received, replayed, (received > replayed ? received - replayed : 0));
+                        
+                        // Print stuck record header if available
+                        {
+                            std::lock_guard<std::mutex> lk(stream_state->stuck_record_mtx);
+                            if (stream_state->has_stuck_record) {
+                                fprintf(stdout, " [STUCK at: page=0x%lx, page_version=%lu, payload_len=%u",
+                                       stream_state->stuck_record_header.page_gaddr.val,
+                                       stream_state->stuck_record_header.page_version,
+                                       stream_state->stuck_record_header.payload_len);
+#ifndef NDEBUG
+                                fprintf(stdout, ", log_type=%u", static_cast<uint32_t>(stream_state->stuck_record_header.log_type));
+#endif
+                                fprintf(stdout, "]");
+                            }
+                        }
+                        fprintf(stdout, "\n");
+                    }
+                }
+                fflush(stdout);
+                
+                // Abort for debugging
+                assert(false && "Log replay deadlock detected: bouncing between streams without progress");
+            }
+        } else {
+            // Progress was made or no available logs, reset counter
+            region_replayer->iterations_without_progress = 0;
+        }
+#endif
     }
     
     printf("LogReplayer: Region thread exiting for logical_region=%u\n", region_replayer->logical_region_id);
@@ -344,19 +445,21 @@ void LogReplayerManager::SendSegmentRecycleRPC(LogStreamState* stream_state,
 void LogReplayerManager::ReplayLogData(LogStreamState* stream_state, uint64_t available_bytes) {
     uint64_t total_processed_bytes = 0;
     uint32_t total_records_processed = 0;
-    uint32_t total_records_skipped = 0;
     uint64_t replayed_bytes = stream_state->replayed_log_length.load(std::memory_order_relaxed);
-    
+    // todo: the log replay implementation below is not efficient, we need to parse the physical address for next log
+    // in every loop. We can simply remember the physical pointer can move to next next time, if it did not go out of
+    // bound of current segment.
+
     // (2) Replay log until we meet a future page version or use all available_bytes
     while (total_processed_bytes < available_bytes) {
         // (1) Find the current segment based on replayed_log_length
         std::unique_lock<RWSpinMutex> segments_lk(stream_state->segments_mtx);
-        uint64_t bytes_into_stream = replayed_bytes - stream_state->recycled_prefix_bytes;
+        uint64_t offset_in_existing_segs = replayed_bytes - stream_state->recycled_prefix_bytes;
         
         auto seg_it = stream_state->segments.begin();
         uint64_t accumulated_bytes = 0;
         while (seg_it != stream_state->segments.end()) {
-            if (bytes_into_stream < accumulated_bytes + seg_it->received_length) {
+            if (offset_in_existing_segs < accumulated_bytes + seg_it->received_length) {
                 break; // Found the current segment
             }
             accumulated_bytes += seg_it->received_length;
@@ -369,7 +472,7 @@ void LogReplayerManager::ReplayLogData(LogStreamState* stream_state, uint64_t av
         }
         
         // Calculate position within current segment
-        uint64_t offset_in_segment = bytes_into_stream - accumulated_bytes;
+        uint64_t offset_in_segment = offset_in_existing_segs - accumulated_bytes;
         const LogSegment* current_seg = &(*seg_it);
         uint64_t remaining_in_segment = current_seg->received_length - offset_in_segment;
         
@@ -431,11 +534,20 @@ void LogReplayerManager::ReplayLogData(LogStreamState* stream_state, uint64_t av
             const uint8_t* payload = reinterpret_cast<const uint8_t*>(log_buffer + processed_bytes + sizeof(RedoLogger::RecordHeader));
             
             // Check page version ordering
-            uint64_t current_version = GetCurrentPageVersion(header->page_gaddr);
+            DSMEngine::DataPage* page_ptr = nullptr;
+            uint64_t current_version = GetCurrentPageVersion(header->page_gaddr, page_ptr);
             
             if (header->page_version <= current_version) {
+                // Records should never be skipped - this indicates a serious ordering bug
                 assert(false && "Received stale log record - this indicates a serious ordering bug");
-                total_records_skipped++;
+                // Store stuck record header for debugging
+                {
+                    std::lock_guard<std::mutex> lk(stream_state->stuck_record_mtx);
+                    stream_state->has_stuck_record = true;
+                    stream_state->stuck_record_header = *header;  // Copy the header
+                }
+                // Don't skip - abort to catch the bug
+                return;
             } else if (header->page_version == current_version + 1) {
                 // Apply the record
                 if (ProcessLogRecord(*header, payload, payload_size)) {
@@ -444,12 +556,28 @@ void LogReplayerManager::ReplayLogData(LogStreamState* stream_state, uint64_t av
                            header->page_version, header->page_gaddr.val);
                     total_records_processed++;
                 } else {
-                    total_records_skipped++;
+                    // ProcessLogRecord failed - this should not happen
+                    assert(false && "ProcessLogRecord failed");
+                    // Store stuck record header for debugging
+                    {
+                        std::lock_guard<std::mutex> lk(stream_state->stuck_record_mtx);
+                        stream_state->has_stuck_record = true;
+                        stream_state->stuck_record_header = *header;  // Copy the header
+                    }
+                    return;
                 }
             } else {
                 // Future record - move to another stream
-                printf("LogReplayer: Future record (page_version=%lu > current+1=%lu) for page=0x%lx - moving to next stream\n",
-                       header->page_version, current_version + 1, header->page_gaddr.val);
+                // printf("LogReplayer: Future record (page_version=%lu > current+1=%lu) for page=0x%lx - moving to next stream\n",
+                //        header->page_version, current_version + 1, header->page_gaddr.val);
+                // assert(false && "Future record");
+                // Store stuck record header for debugging (this is where the stream stopped)
+                {
+                    std::lock_guard<std::mutex> lk(stream_state->stuck_record_mtx);
+                    stream_state->has_stuck_record = true;
+                    stream_state->stuck_record_header = *header;  // Copy the header
+                }
+                
                 // Update state with what we've processed so far
                 total_processed_bytes += processed_bytes;
                 replayed_bytes += processed_bytes;
@@ -461,13 +589,15 @@ void LogReplayerManager::ReplayLogData(LogStreamState* stream_state, uint64_t av
                     all_logs_replayed_cv_.notify_all();
                 }
                 
-                // Recycle segments and return
-                RecycleSegments(stream_state);
-                if (total_records_processed > 0 || total_records_skipped > 0) {
-                    printf("LogReplayer: Processed %u records (%u applied, %u skipped) (%lu bytes) for compute_node=%u, logical_region=%u before moving to next stream\n",
-                           total_records_processed + total_records_skipped, total_records_processed, total_records_skipped, total_processed_bytes,
-                           stream_state->compute_node_id, stream_state->logical_region_id);
-                    fflush(stdout);
+                // Recycle segments only if we've replayed some logs
+                if (total_records_processed > 0) {
+                    RecycleSegments(stream_state);
+                }
+                if (total_records_processed > 0) {
+                    // printf("LogReplayer: Processed %u records (%u applied) (%lu bytes) for compute_node=%u, logical_region=%u before moving to next stream\n",
+                    //        total_records_processed, total_records_processed, total_processed_bytes,
+                    //        stream_state->compute_node_id, stream_state->logical_region_id);
+                    // fflush(stdout);
                 }
                 return;
             }
@@ -488,8 +618,10 @@ void LogReplayerManager::ReplayLogData(LogStreamState* stream_state, uint64_t av
         }
     }
     
-    // (3) Recycle replayed log segments
-    RecycleSegments(stream_state);
+    // (3) Recycle replayed log segments (only if we've replayed some logs)
+    if (total_records_processed > 0) {
+        RecycleSegments(stream_state);
+    }
     
     // Final check: if this stream is caught up, notify waiters
     uint64_t final_replayed = stream_state->replayed_log_length.load(std::memory_order_acquire);
@@ -498,9 +630,9 @@ void LogReplayerManager::ReplayLogData(LogStreamState* stream_state, uint64_t av
         all_logs_replayed_cv_.notify_all();
     }
     
-    if (total_records_processed > 0 || total_records_skipped > 0) {
-        printf("LogReplayer: Processed %u records (%u applied, %u skipped) (%lu bytes) for compute_node=%u, logical_region=%u\n",
-               total_records_processed + total_records_skipped, total_records_processed, total_records_skipped, total_processed_bytes,
+    if (total_records_processed > 0) {
+        printf("LogReplayer: Processed %u records (%u applied) (%lu bytes) for compute_node=%u, logical_region=%u\n",
+               total_records_processed, total_records_processed, total_processed_bytes,
                stream_state->compute_node_id, stream_state->logical_region_id);
         fflush(stdout);
     }
@@ -525,9 +657,11 @@ bool LogReplayerManager::ProcessLogRecord(const RedoLogger::RecordHeader& header
     // Get the actual physical page buffer
     void* page_buffer = reinterpret_cast<void*>(physical_addr);
     
-    printf("    LogReplayer: Processing record for page=0x%lx, version=%lu, payload_size=%zu\n",
-           header.page_gaddr.val, header.page_version, payload_size);
+#ifndef NDEBUG
+    printf("    LogReplayer: Processing record for page=0x%lx, version=%lu, payload_size=%zu, log_type=%s\n",
+           header.page_gaddr.val, header.page_version, payload_size, GetLogTypeString(header.log_type));
     fflush(stdout);
+#endif
     // Use LogCodec to decode and apply operations to the actual page
     LogCodec::Decoder decoder(payload, payload_size);
     LogCodec::DecodedOp op;
@@ -538,36 +672,46 @@ bool LogReplayerManager::ProcessLogRecord(const RedoLogger::RecordHeader& header
                 // Apply UPDATE_BYTES operation to the physical page
                 char* target_addr = static_cast<char*>(page_buffer) + op.u.update.offset;
                 memcpy(target_addr, op.u.update.bytes, op.u.update.len);
+#ifndef NDEBUG
                 printf("      Applied UPDATE_BYTES: offset=%u, len=%u\n", 
                        op.u.update.offset, op.u.update.len);
+#endif
                 break;
             }
             case LogCodec::OpCode::SET_U64_LE: {
                 // Apply SET_U64_LE operation to the physical page
                 char* target_addr = static_cast<char*>(page_buffer) + op.u.set64.offset;
                 *reinterpret_cast<uint64_t*>(target_addr) = op.u.set64.value;
+#ifndef NDEBUG
                 printf("      Applied SET_U64_LE: offset=%u, value=%lu\n", 
                        op.u.set64.offset, op.u.set64.value);
+#endif
                 break;
             }
             case LogCodec::OpCode::FILL_BYTES: {
                 // Apply FILL_BYTES operation to the physical page
                 char* target_addr = static_cast<char*>(page_buffer) + op.u.fill.offset;
                 memset(target_addr, op.u.fill.value, op.u.fill.len);
+#ifndef NDEBUG
                 printf("      Applied FILL_BYTES: offset=%u, len=%u, value=0x%02x\n", 
                        op.u.fill.offset, op.u.fill.len, op.u.fill.value);
+#endif
                 break;
             }
             case LogCodec::OpCode::MEMMOVE_BYTES: {
                 // Apply MEMMOVE_BYTES operation to the physical page
                 char* page_base = static_cast<char*>(page_buffer);
                 memmove(page_base + op.u.move.dst, page_base + op.u.move.src, op.u.move.len);
+#ifndef NDEBUG
                 printf("      Applied MEMMOVE_BYTES: dst=%u, src=%u, len=%u\n", 
                        op.u.move.dst, op.u.move.src, op.u.move.len);
+#endif
                 break;
             }
             default:
+#ifndef NDEBUG
                 printf("      Unknown opcode: %u\n", static_cast<uint8_t>(op.code));
+#endif
                 return false;
         }
     }
@@ -581,7 +725,7 @@ bool LogReplayerManager::ProcessLogRecord(const RedoLogger::RecordHeader& header
     return true; // Successfully processed all operations
 }
 
-uint64_t LogReplayerManager::GetCurrentPageVersion(GlobalAddress page_addr) {
+uint64_t LogReplayerManager::GetCurrentPageVersion(GlobalAddress page_addr, DSMEngine::DataPage*& page_ptr) {
     // Translate logical address to physical address on this memory node
     uint16_t logical_id = page_addr.nodeID;
     uint16_t this_physical_id = rdma_mg_->node_id;
@@ -593,14 +737,15 @@ uint64_t LogReplayerManager::GetCurrentPageVersion(GlobalAddress page_addr) {
     if (physical_addr == 0) {
         printf("LogReplayer: Warning - Could not translate address for logical_id=%u, page=0x%lx\n", 
                logical_id, page_addr.val);
+        page_ptr = nullptr;
         return 0;
     }
     
     // Get the page header and read version from the physical replica
-    DSMEngine::DataPage* data_page = reinterpret_cast<DSMEngine::DataPage*>(physical_addr);
+    page_ptr = reinterpret_cast<DSMEngine::DataPage*>(physical_addr);
     
-    // TODO: Add version field to DataPage header
-    return data_page->hdr.p_version;
+    // Return version and set page pointer for debugging
+    return page_ptr->hdr.p_version;
 }
 
 void LogReplayerManager::SetCurrentPageVersion(GlobalAddress page_addr, uint64_t version) {

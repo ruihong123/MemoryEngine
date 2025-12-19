@@ -1,12 +1,13 @@
 #!/bin/bash
 # Testing script to run TPCC, TATP, and SmallBank benchmarks with default query ratios
-# Usage: ./run_benchmarks_default.sh [benchmark_name] [--hot] [--no-hot] [--both] [--no-log]
+# Usage: ./run_benchmarks_default.sh [benchmark_name] [--hot] [--no-hot] [--both] [--rec]
 #   If benchmark_name is specified, runs only that benchmark (tpcc|tatp|smallbank)
 #   If not specified, runs all three benchmarks sequentially
 #   --hot: Enable hot table scanner / long-running scan queries (default: disabled)
 #   --no-hot: Disable hot table scanner (explicitly, this is the default)
 #   --both: Run each benchmark both with and without hot scanner (runs twice)
-#   --no-log: Disable file logging (output redirected to /dev/null)
+#   --rec: Enable failure recovery test (uses connection_cloudlab_2replicas.conf and enables file logging, default: disabled)
+#          NOTE: Failure recovery is currently only supported for TPCC benchmark
 
 set -o nounset
 bin=`dirname "$0"`
@@ -14,7 +15,8 @@ bin=`cd "$bin"; pwd`
 SRC_HOME=$bin/..
 
 # Configuration files
-conf_file_all=$bin/../connection_cloudlab_2replicas.conf
+conf_file_2replicas=$bin/../connection_cloudlab_2replicas.conf
+conf_file_noreplica=$bin/../connection_cloudlab_noreplica.conf
 conf_file=$bin/../connection_replication.conf
 memcached_conf_file_all=$bin/../memcached_cloudlab_servers.conf
 memcached_conf_file=$bin/../memcached_ip.conf
@@ -25,34 +27,37 @@ core_dump_dir="/mnt/core_dump"
 
 # Working environment
 proj_dir="/users/Ruihong/MemoryEngine"
-bin_dir="${proj_dir}/release"
+bin_dir="${proj_dir}/debug"
 ssh_opts="-o StrictHostKeyChecking=no"
 
 # Memory and port configuration
 cache_mem_size=8 # 8 GB Local memory size
-remote_mem_size=55 # 55 GB Remote memory size per node
+remote_mem_size=40 # 55 GB Remote memory size per node
 port=$((13000+RANDOM%1000))
 
 # Default benchmark parameters
-default_threads=8
-default_warehouses=256
+default_threads=2 # default 8
+default_warehouses=16 # default 256
 default_dist_ratio=100
 
 # Benchmark-specific transaction counts (based on 8GB cache warmup estimation)
 # See CACHE_WARMUP_ESTIMATION.md for detailed rationale
 # TPC-C: Larger records (~6.5KB/txn), better locality -> fewer txns needed
-tpcc_txns=2000000
+tpcc_txns=200000 #default 2000000
 # TATP: Small records (~120B/txn), high cardinality (40M subscribers) -> more txns needed
-tatp_txns=50000000
+tatp_txns=50000000 #default 50000000
 # SmallBank: Small records (~120B/txn), very high cardinality (200M accounts) -> more txns needed
-smallbank_txns=35000000
+smallbank_txns=35000000 #default 35000000
 
 # Hot table scanner configuration (can be overridden via command line)
 enable_hot_table_scanner=false
 run_both_modes=false
 
-# File logging configuration (can be overridden via command line)
+# File logging configuration (automatically enabled when --rec is used)
 enable_file_logging=false
+
+# Failure recovery test configuration (can be overridden via command line)
+enable_failure_recovery=false
 
 # Default TPC-C query ratios (standard TPC-C mix)
 # Frequency weights: Delivery=1, Payment=10, NewOrder=10, OrderStatus=1, StockLevel=1
@@ -80,16 +85,25 @@ setup_config() {
     mkdir -p "$output_dir"
   fi
 
+  # Select config file based on failure recovery mode
+  if [ "$enable_failure_recovery" = true ]; then
+    conf_file_source="$conf_file_2replicas"
+    echo "Using 2-replica configuration (connection_cloudlab_2replicas.conf) for failure recovery test"
+  else
+    conf_file_source="$conf_file_noreplica"
+    echo "Using no-replica configuration (connection_cloudlab_noreplica.conf)"
+  fi
+
   # Create the working config file from the source config file
-  compute_line_all=$(grep -v '^#' "$conf_file_all" | grep -v '^$' | sed -n '1p')
-  memory_line_all=$(grep -v '^#' "$conf_file_all" | grep -v '^$' | sed -n '2p')
+  compute_line_all=$(grep -v '^#' "$conf_file_source" | grep -v '^$' | sed -n '1p')
+  memory_line_all=$(grep -v '^#' "$conf_file_source" | grep -v '^$' | sed -n '2p')
   
   # Create the working config file
   echo "$compute_line_all" > "$conf_file"
   echo "$memory_line_all" >> "$conf_file"
   
-  # Copy all replication configuration lines (lines 3+) from conf_file_all
-  grep -v '^#' "$conf_file_all" | grep -v '^$' | tail -n +3 >> "$conf_file"
+  # Copy all replication configuration lines (lines 3+) from conf_file_source
+  grep -v '^#' "$conf_file_source" | grep -v '^$' | tail -n +3 >> "$conf_file"
 
   # Copy memcached configuration
   cp "$memcached_conf_file_all" "$memcached_conf_file"
@@ -164,6 +178,12 @@ run_tpcc() {
   echo "Query Ratios (Standard TPC-C mix): NewOrder=${TPCC_NEW_ORDER}%, Payment=${TPCC_PAYMENT}%, OrderStatus=${TPCC_ORDER_STATUS}%, Delivery=${TPCC_DELIVERY}%, StockLevel=${TPCC_STOCK_LEVEL}%"
   echo "Transaction count: ${tpcc_txns} (optimized for 8GB cache warmup)"
   
+  # Failure recovery always enables file logging
+  if [ "$enable_failure_recovery" = true ]; then
+    enable_file_logging=true
+    suffix="${suffix}_fail"
+  fi
+  
   if [ "$enable_file_logging" = true ]; then
     output_file="${output_dir}/tpcc_default${suffix}.log"
   else
@@ -182,6 +202,14 @@ run_tpcc() {
     echo "Hot table scanner: ENABLED"
   else
     echo "Hot table scanner: DISABLED"
+  fi
+  
+  # Add failure recovery flag if enabled
+  if [ "$enable_failure_recovery" = true ]; then
+    benchmark_args="${benchmark_args} -rec"
+    echo "Failure recovery test: ENABLED"
+  else
+    echo "Failure recovery test: DISABLED"
   fi
   
   # Restart memcached before starting benchmark
@@ -236,6 +264,18 @@ run_tpcc() {
 # Function to run TATP benchmark
 run_tatp() {
   local hot_scanner_enabled=$1
+  
+  # Check if failure recovery is enabled (not supported for TATP)
+  if [ "$enable_failure_recovery" = true ]; then
+    echo ""
+    echo "========================================="
+    echo "ERROR: Failure recovery test is not ready for TATP benchmark"
+    echo "========================================="
+    echo "Failure recovery is currently only supported for TPCC benchmark."
+    echo "Please run TATP without the --rec flag."
+    exit 1
+  fi
+  
   local suffix=""
   if [ "$hot_scanner_enabled" = true ]; then
     suffix="_hot"
@@ -272,7 +312,6 @@ run_tatp() {
   else
     echo "Hot table scanner: DISABLED"
   fi
-  
   
   # Restart memcached before starting benchmark
   read -r -a memcached_node <<< $(head -n 1 $memcached_conf_file)
@@ -324,6 +363,18 @@ run_tatp() {
 # Function to run SmallBank benchmark
 run_smallbank() {
   local hot_scanner_enabled=$1
+  
+  # Check if failure recovery is enabled (not supported for SmallBank)
+  if [ "$enable_failure_recovery" = true ]; then
+    echo ""
+    echo "========================================="
+    echo "ERROR: Failure recovery test is not ready for SmallBank benchmark"
+    echo "========================================="
+    echo "Failure recovery is currently only supported for TPCC benchmark."
+    echo "Please run SmallBank without the --rec flag."
+    exit 1
+  fi
+  
   local suffix=""
   if [ "$hot_scanner_enabled" = true ]; then
     suffix="_hot"
@@ -360,7 +411,7 @@ run_smallbank() {
   else
     echo "Hot table scanner: DISABLED"
   fi
-  
+
   # Restart memcached before starting benchmark
   read -r -a memcached_node <<< $(head -n 1 $memcached_conf_file)
   echo "Restarting memcached on ${memcached_node[0]} before benchmark run"
@@ -425,8 +476,9 @@ main() {
         run_both_modes=true
         shift
         ;;
-      --no-log)
-        enable_file_logging=false
+      --rec)
+        enable_failure_recovery=true
+        enable_file_logging=true  # Failure recovery always enables logging
         shift
         ;;
       tpcc|tatp|smallbank)
@@ -440,12 +492,13 @@ main() {
         ;;
       *)
         echo "Unknown option: $1"
-        echo "Usage: $0 [benchmark_name] [--hot] [--no-hot] [--both] [--no-log]"
+        echo "Usage: $0 [benchmark_name] [--hot] [--no-hot] [--both] [--rec]"
         echo "  benchmark_name: tpcc, tatp, or smallbank (optional, runs all if not specified)"
         echo "  --hot: Enable hot table scanner (long-running scan queries)"
         echo "  --no-hot: Disable hot table scanner (default)"
         echo "  --both: Run each benchmark both with and without hot scanner (runs twice)"
-        echo "  --no-log: Disable file logging (output to /dev/null)"
+        echo "  --rec: Enable failure recovery test (uses connection_cloudlab_2replicas.conf and enables file logging)"
+        echo "         NOTE: Failure recovery is currently only supported for TPCC benchmark"
         exit 1
         ;;
     esac
@@ -509,6 +562,35 @@ main() {
     cleanup
   else
     # Run all benchmarks sequentially
+    # Check if failure recovery is enabled with all benchmarks (not supported for TATP/SmallBank)
+    if [ "$enable_failure_recovery" = true ]; then
+      echo ""
+      echo "========================================="
+      echo "WARNING: Failure recovery test is not ready for TATP and SmallBank benchmarks"
+      echo "========================================="
+      echo "Failure recovery is currently only supported for TPCC benchmark."
+      echo "TATP and SmallBank will be skipped when --rec is enabled."
+      echo ""
+      # Only run TPCC when failure recovery is enabled
+      run_tpcc $enable_hot_table_scanner
+      cleanup
+      echo ""
+      echo "========================================="
+      echo "Benchmark completed (TPCC only with failure recovery)!"
+      if [ "$enable_file_logging" = true ]; then
+        echo "Results are in: $output_dir"
+        local suffix=""
+        if [ "$enable_hot_table_scanner" = true ]; then
+          suffix="_hot_fail"
+        else
+          suffix="_nohot_fail"
+        fi
+        echo "  - TPCC: ${output_dir}/tpcc_default${suffix}.log"
+      fi
+      echo "========================================="
+      return
+    fi
+    
     setup_config
     
     echo "Running all benchmarks sequentially..."
@@ -519,10 +601,10 @@ main() {
     else
       echo "Hot table scanner: DISABLED for all benchmarks"
     fi
-    if [ "$enable_file_logging" = true ]; then
-      echo "File logging: ENABLED (output to ${output_dir})"
+    if [ "$enable_failure_recovery" = true ]; then
+      echo "Failure recovery test: ENABLED (using connection_cloudlab_2replicas.conf, file logging enabled)"
     else
-      echo "File logging: DISABLED (output to /dev/null)"
+      echo "Failure recovery test: DISABLED (using connection_cloudlab_noreplica.conf, file logging disabled)"
     fi
     echo ""
     
@@ -558,14 +640,23 @@ main() {
       echo "All benchmarks completed (both modes)!"
       if [ "$enable_file_logging" = true ]; then
         echo "Results are in: $output_dir"
-        echo "  - TPCC (no hot): ${output_dir}/tpcc_default_nohot.log"
-        echo "  - TPCC (hot): ${output_dir}/tpcc_default_hot.log"
-        echo "  - TATP (no hot): ${output_dir}/tatp_default_nohot.log"
-        echo "  - TATP (hot): ${output_dir}/tatp_default_hot.log"
-        echo "  - SmallBank (no hot): ${output_dir}/smallbank_default_nohot.log"
-        echo "  - SmallBank (hot): ${output_dir}/smallbank_default_hot.log"
+        local suffix_nohot=""
+        local suffix_hot=""
+        if [ "$enable_failure_recovery" = true ]; then
+          suffix_nohot="_nohot_fail"
+          suffix_hot="_hot_fail"
+        else
+          suffix_nohot="_nohot"
+          suffix_hot="_hot"
+        fi
+        echo "  - TPCC (no hot): ${output_dir}/tpcc_default${suffix_nohot}.log"
+        echo "  - TPCC (hot): ${output_dir}/tpcc_default${suffix_hot}.log"
+        echo "  - TATP (no hot): ${output_dir}/tatp_default${suffix_nohot}.log"
+        echo "  - TATP (hot): ${output_dir}/tatp_default${suffix_hot}.log"
+        echo "  - SmallBank (no hot): ${output_dir}/smallbank_default${suffix_nohot}.log"
+        echo "  - SmallBank (hot): ${output_dir}/smallbank_default${suffix_hot}.log"
       else
-        echo "File logging was disabled (--no-log flag used)"
+        echo "File logging was disabled (output to /dev/null)"
       fi
       echo "========================================="
     else
@@ -596,11 +687,14 @@ main() {
         else
           suffix="_nohot"
         fi
+        if [ "$enable_failure_recovery" = true ]; then
+          suffix="${suffix}_fail"
+        fi
         echo "  - TPCC: ${output_dir}/tpcc_default${suffix}.log"
         echo "  - TATP: ${output_dir}/tatp_default${suffix}.log"
         echo "  - SmallBank: ${output_dir}/smallbank_default${suffix}.log"
       else
-        echo "File logging was disabled (--no-log flag used)"
+        echo "File logging was disabled (output to /dev/null)"
       fi
       echo "========================================="
     fi

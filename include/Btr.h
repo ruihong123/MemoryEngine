@@ -210,6 +210,9 @@ class Btr {
             // if is root, then we should always bypass the cache.
             return header->last_index + 1;
         }
+        
+        void release_cached_root_handle();
+        
 //    static RDMA_Manager * rdma_mg;
         // TODO: potential bug, if mulitple btrees shared the same retry counter, will it be a problem?
         //  used for the retry counter for nested function call such as sibling pointer access.
@@ -255,7 +258,7 @@ class Btr {
         GlobalAddress get_root_ptr(Cache::Handle *&root_hint_handle);
 
         void refetch_rootnode();
-
+        
         bool update_new_root(GlobalAddress left, const DynamicCompoundKey &k, GlobalAddress right, int level, GlobalAddress old_root, RedoLogger* redo_logger = nullptr);
         
         // Helper functions for logging index page changes

@@ -37,8 +37,10 @@ public:
         hot_scan_thread_started_(false), enable_hot_scan_(false) {
     is_begin_ = false;
     is_finish_ = false;
+    is_paused_ = false;
     total_count_ = 0;
     total_abort_count_ = 0;
+    realtime_finished_count_ = 0;  // Real-time counter for failure recovery test
     hot_scan_count_ = 0;
     hot_scan_abort_count_ = 0;
     hot_scan_total_latency_ns_ = 0;
@@ -96,6 +98,18 @@ public:
   } // Default TPC-C warehouse bits
 
   PerfStatistics &GetPerfStatistics() { return perf_statistics_; }
+  
+  // Get current transaction count (real-time, updated during execution)
+  size_t GetTotalCount() const { return total_count_.load(std::memory_order_relaxed); }
+  
+  // Get real-time finished transaction count (for failure recovery test)
+  // This counter is updated immediately when transactions finish, unlike total_count_
+  size_t GetRealtimeFinishedCount() const { return realtime_finished_count_.load(std::memory_order_relaxed); }
+
+  // Pause/resume executor for failure recovery
+  void Pause() { is_paused_.store(true, std::memory_order_release); }
+  void Resume() { is_paused_.store(false, std::memory_order_release); }
+  bool IsPaused() const { return is_paused_.load(std::memory_order_acquire); }
 
   void EnableHotTableScanner(bool enabled);
 
@@ -376,6 +390,11 @@ private:
     ret.char_ptr_ = new char[1024];
     for (auto &tuples : execution_batches) {
       for (size_t idx = 0; idx < tuples->size(); ++idx) {
+        // Check if executor is paused (for failure recovery)
+        while (is_paused_.load(std::memory_order_acquire) && !is_finish_) {
+          std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        
         TxnParam *tuple = tuples->get(idx);
         // begin txn
         PROFILE_TIME_START(thread_id, TXN_EXECUTE);
@@ -437,6 +456,8 @@ private:
 #endif
         }
         ++count;
+        // Update real-time finished transaction counter (for failure recovery test)
+        realtime_finished_count_.fetch_add(1, std::memory_order_relaxed);
 
         // Record latency for this transaction (only if enabled)
         if (enable_latency_recording_) {
@@ -515,9 +536,11 @@ private:
   volatile bool *is_ready_;
   volatile bool is_begin_;
   volatile bool is_finish_;
+  std::atomic<bool> is_paused_;  // Pause flag for failure recovery
   // profile count
   std::atomic<size_t> total_count_;
   std::atomic<size_t> total_abort_count_;
+  std::atomic<size_t> realtime_finished_count_;  // Real-time counter for failure recovery test
   std::atomic<size_t> hot_scan_count_;
   std::atomic<size_t> hot_scan_abort_count_;
   std::atomic<uint64_t> hot_scan_total_latency_ns_; // Total latency in nanoseconds

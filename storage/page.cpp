@@ -164,6 +164,8 @@ namespace DSMEngine {
         bool need_logging = (redo_logger != nullptr);
         uint64_t old_page_version = hdr.p_version;
         uint64_t new_page_version = old_page_version + 1;
+        
+        assert(new_page_version > 1);
         uint16_t logical_region_id = page_addr.nodeID;
         
         // Calculate offsets for logging
@@ -210,15 +212,24 @@ namespace DSMEngine {
         assert(GetRecordValueByIndex(hdr.last_index) != GlobalAddress::Null());
         assert(GetRecordKeyByIndex(hdr.last_index, schema_ptr)  != DynamicCompoundKey::MinValue(schema_ptr));
         
+        // Update page version in memory (for next operation) - always update regardless of logging
+        hdr.p_version = new_page_version;
+        
         // Log header update (last_index changed)
         if (need_logging) {
-            // Update page version in memory (for next operation)
-            hdr.p_version = new_page_version;
-            
             size_t last_index_offset = header_offset + offsetof(Header_Index, last_index);
             encoder.AddUpdateBytes(last_index_offset, &hdr.last_index, sizeof(hdr.last_index));
             
-            // Append to redo log (page_version is already in RecordHeader, no need to log it in payload)
+            // // Append to redo log (page_version is already in RecordHeader, no need to log it in payload)
+            // printf("[REDO_LOG_APPEND] InternalPage::internal_page_store - "
+            //        "logical_region_id=%u, page_addr=(nodeID=%u, offset=%lu), "
+            //        "old_page_version=%lu, new_page_version=%lu, "
+            //        "last_index=%d, log_size=%zu bytes, "
+            //        "key_size=%u, record_size=%u, insert_index=%d\n",
+            //        logical_region_id, page_addr.nodeID, page_addr.offset,
+            //        old_page_version, new_page_version,
+            //        hdr.last_index, encoder.Buffer().size(),
+            //        key_size, record_size, insert_index);
             redo_logger->Append(logical_region_id, page_addr, new_page_version,
                                encoder.Buffer().data(), encoder.Buffer().size()
 #ifndef NDEBUG
@@ -503,11 +514,11 @@ namespace DSMEngine {
         hdr.last_index++;
         assert(hdr.last_index < hdr.kCardinality);
         
+        // Update page version in memory (for next operation) - always update regardless of logging
+        hdr.p_version = new_page_version;
+        
         // Log header update (last_index changed)
         if (need_logging) {
-            // Update page version in memory (for next operation)
-            hdr.p_version = new_page_version;
-            
             size_t header_offset = STRUCT_OFFSET(LeafPage, hdr);
             size_t last_index_offset = header_offset + offsetof(Header_Index, last_index);
             encoder.AddUpdateBytes(last_index_offset, &hdr.last_index, sizeof(hdr.last_index));
@@ -630,11 +641,11 @@ namespace DSMEngine {
         hdr.last_index--;
         assert(hdr.last_index <= hdr.kCardinality-1);
         
+        // Update page version in memory (for next operation) - always update regardless of logging
+        hdr.p_version = new_page_version;
+        
         // Log header update (last_index changed)
         if (need_logging) {
-            // Update page version in memory (for next operation)
-            hdr.p_version = new_page_version;
-            
             size_t header_offset = STRUCT_OFFSET(LeafPage, hdr);
             size_t last_index_offset = header_offset + offsetof(Header_Index, last_index);
             encoder.AddUpdateBytes(last_index_offset, &hdr.last_index, sizeof(hdr.last_index));

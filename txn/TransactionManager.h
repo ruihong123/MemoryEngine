@@ -206,7 +206,7 @@ namespace DSMEngine {
             PROFILE_TIME_END(thread_id_, INDEX_READ);
             if (data_addr != GlobalAddress::Null()) {
                 bool ret = SelectRecordCC(table_id, record, data_addr, access_type);
-                if (ret) {
+                if (ret && record != nullptr) {
                     assert(buffer_is_not_all_zero(record->data_ptr_, record->GetRecordSize()));
                 }
                 return ret;

@@ -60,11 +60,11 @@ class Memory_Node_Keeper {
  private:
   int pr_size;
   bool exit_all_threads_ = false;
-  std::unordered_map<unsigned int, std::pair<std::mutex, std::condition_variable>> imm_notifier_pool;
-  unsigned int imm_temp = 1;
-  std::mutex mtx_temp;
-  std::condition_variable cv_temp;
-  std::shared_ptr<Options> opts;
+  // std::unordered_map<unsigned int, std::pair<std::mutex, std::condition_variable>> imm_notifier_pool;
+  // unsigned int imm_temp = 1;
+  // std::mutex mtx_temp;
+  // std::condition_variable cv_temp;
+  // std::shared_ptr<Options> opts;
 
   uint64_t manifest_file_number_ = 1;
   bool usesubcompaction;
@@ -106,8 +106,8 @@ class Memory_Node_Keeper {
 
   void qp_reset_handler(RDMA_Request* request, std::string& client_ip,
                         int socket_fd, uint8_t target_node_id);
-  void sync_option_handler(RDMA_Request* request, std::string& client_ip,
-                           uint8_t target_node_id);
+  // void sync_option_handler(RDMA_Request* request, std::string& client_ip,
+  //                          uint8_t target_node_id);
 #ifdef USE_SNAPSHOT_MANAGER
   void snapshot_range_request_handler(RDMA_Request* request, std::string& client_ip,
                                       uint8_t target_node_id);

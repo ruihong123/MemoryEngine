@@ -40,6 +40,7 @@ extern unsigned int conn_port;
 extern std::string config_filename;
 extern bool
     enable_latency_recording; // Enable/disable per-transaction latency tracking
+extern bool enable_failure_recovery;  // Enable failure recovery test mode
 // To modify tpcc workload
 extern size_t gReadRatio;
 extern size_t gTimeLocality;
@@ -69,6 +70,8 @@ static void PrintUsage() {
   std::cout << "\t-log: ENABLE_REDO_LOGGING (optional, default=false)"
             << std::endl;
   std::cout << "\t-hot: ENABLE_HOT_TABLE_SCANNER (optional, default=false)"
+            << std::endl;
+  std::cout << "\t-rec: ENABLE_FAILURE_RECOVERY_TEST (optional, default=false)"
             << std::endl;
   std::cout << "===========================" << std::endl;
   std::cout << "==========[EXAMPLES]==========" << std::endl;
@@ -137,6 +140,8 @@ static void ArgumentsParser(int argc, char *argv[]) {
     } else if (argv[i][1] == 'c') {
       num_core = atoi(&argv[i][2]);
       gThreadCount = num_core;
+    } else if (argv[i][1] == 'r' && argv[i][2] == 'e' && argv[i][3] == 'c') {
+      enable_failure_recovery = true;
     } else if (argv[i][1] == 'f') {
       config_filename = std::string(&argv[i][2]);
     } else if (argv[i][1] == 'z') {

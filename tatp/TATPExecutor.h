@@ -120,6 +120,11 @@ protected:
                                    *in_scan = false;
                                    return false; // Transaction aborted
                                  }
+#if defined(TO)
+                                 Cache::Handle* held_handle = ((Cache::Handle*)record->Get_Handle());
+                                 assert(held_handle->gptr != GlobalAddress::Null());
+                                 mgr.ReleaseLatchForGCL(held_handle->gptr, held_handle);
+#endif
                                  
                                  // Advance to next access_info type
                                  ++ai_type;
@@ -153,6 +158,11 @@ protected:
                                    *in_scan = false;
                                    return false; // Transaction aborted
                                  }
+#if defined(TO)
+                                 Cache::Handle* held_handle = ((Cache::Handle*)record->Get_Handle());
+                                 assert(held_handle->gptr != GlobalAddress::Null());
+                                 mgr.ReleaseLatchForGCL(held_handle->gptr, held_handle);
+#endif
                                  
                                  // Advance to next special_facility type
                                  ++sf_type;

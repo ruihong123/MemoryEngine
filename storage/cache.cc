@@ -6,6 +6,7 @@
 #include <cassert>
 #include <cstdio>
 #include <cstdlib>
+#include <unordered_set>
 //#include <infiniband/verbs.h>
 
 #include "port/port.h"
@@ -158,6 +159,18 @@ void LRUCache::Unref(LRUHandle *e, SpinLock *spin_l) {
             lru_size_++;
 
         }
+    }
+
+    void LRUCache::Unref_hard(LRUHandle *e) {
+        // Hard unreference: decrement refs and add to free list without calling deleter
+        // Must be called when refs == 1 to guarantee correctness
+        assert(e->refs == 1);
+        unsigned int ticket = e->refs.fetch_sub(1);
+        assert(ticket == 1);  // Verify we started with refs == 1
+        
+        // Ref count reached 0, but don't call deleter - just push to free list
+        assert(!e->in_cache);
+        push_free_list(e);
     }
 #endif
 
@@ -603,6 +616,21 @@ Cache::Handle* LRUCache::Insert(const Slice& key, uint32_t hash, void* value,
   return e != nullptr;
 }
 
+bool LRUCache::FinishErase_hard(LRUHandle *e) {
+  // Hard remove: remove from cache structures and add to free list without triggering deleter
+  if (e != nullptr) {
+    assert(e->in_cache);
+    List_Remove(e);
+    e->in_cache = false;
+    usage_ -= e->charge;
+    // Call Unref_hard which will decrement refs and add to free list without calling deleter
+    // Must ensure refs == 1 before calling
+    assert(e->refs == 1);
+    Unref_hard(e);
+  }
+  return e != nullptr;
+}
+
 void LRUCache::Erase(const Slice& key, uint32_t hash) {
 //  MutexLock l(&table_mutex_);
 //  WriteLock l(&table_mutex_);
@@ -717,103 +745,193 @@ void LRUCache::bulk_insert_free_list(std::pair<LRUHandle *, LRUHandle *> start_e
 void LRUCache::SoftFlushAllDirtyPages() {
     std::unique_lock<RWSpinMutex> l(table_mutex_);
     
-    // Ensure in_use_ list is empty before flushing - entries in in_use_ are actively
-    // being used by clients (refs >= 2) and should not be flushed
-    if (in_use_.next != &in_use_) {
-        // in_use_ list is not empty, skip flushing to avoid interfering with active clients
-        return;
-    }
-    
-    std::vector<LRUHandle*> dirty_handles;
-    
-    // Only collect dirty handles from lru_ list (entries with refs == 1, not actively in use)
-    for (LRUHandle* e = lru_.next; e != &lru_;) {
-        LRUHandle* next = e->next;
-        // Only flush entries that are in cache, have write lock, and are in lru_ list (not in use)
-        if (e->in_cache && e->remote_lock_status.load() == 2 && e->refs.load() == 1) {
-            // This is a dirty page with write lock, need to flush
-            dirty_handles.push_back(e);
+    // Count elements in in_use_ list - allow flushing if count is less than 16
+    // Entries in in_use_ are actively being used by clients (refs >= 2) and should not be flushed
+    // Helper function to get page type string (defined early for use in both in_use_ loop and main loop)
+    auto GetPageTypeString = [](Page_Type p_type) -> const char* {
+        switch (p_type) {
+            case P_Plain: return "P_Plain";
+            case P_Internal_P: return "P_Internal_P";
+            case P_Internal_S: return "P_Internal_S";
+            case P_Leaf_P: return "P_Leaf_P";
+            case P_Leaf_S: return "P_Leaf_S";
+            case P_Data: return "P_Data";
+            default: return "UNKNOWN";
         }
-        e = next;
-    }
+    };
     
-    // Also check entries in the hash table that might be in lru_ but not yet in the list
-    // Only collect those that are not in in_use_ (refs == 1)
-    for (uint32_t i = 0; i < table_.length_; i++) {
-        LRUHandle* h = table_.list_[i];
-        while (h != nullptr) {
-            // Only collect if: in cache, has write lock, refs == 1 (not in use), and not already collected
-            if (h->in_cache && h->remote_lock_status.load() == 2 && h->refs.load() == 1) {
-                // Check if already collected
-                bool found = false;
-                for (auto* collected : dirty_handles) {
-                    if (collected == h) {
-                        found = true;
-                        break;
-                    }
-                }
-                if (!found) {
-                    dirty_handles.push_back(h);
-                }
+    // Also ensure none of them are in exclusive state (write lock)
+    size_t in_use_count = 0;
+    for (LRUHandle* e = in_use_.next; e != &in_use_; e = e->next) {
+        in_use_count++;
+        //print the information of this page.
+        ibv_mr* mr = (ibv_mr*)e->value;
+        Page_Type page_type = P_Plain;
+        uint64_t page_version = 0;
+        uint32_t table_id = 0;
+        int remote_lock_status = e->remote_lock_status.load();
+        size_t refs = e->refs.load();
+        
+        // Leaf page header fields (since we confirmed all in_use_ pages are leaf nodes)
+        GlobalAddress leftmost_ptr = GlobalAddress::Null();
+        GlobalAddress sibling_ptr = GlobalAddress::Null();
+        int16_t last_index = -1;
+        uint32_t key_size = 0;
+        uint32_t record_size = 0;
+        uint8_t level = 0;
+        uint16_t kCardinality = 0;
+        uint16_t dirty_upper_bound = 0;
+        uint16_t dirty_lower_bound = 0;
+        
+        if (mr != nullptr && mr->addr != nullptr) {
+            // Get page type - all pages have p_type at offset 8 (after global_lock)
+            page_type = static_cast<Page_Type>(*reinterpret_cast<uint8_t*>(
+                reinterpret_cast<char*>(mr->addr) + sizeof(uint64_t)));
+            
+            // Get page version and other fields based on page type
+            if (page_type == P_Data) {
+                DataPage* data_page = reinterpret_cast<DataPage*>(mr->addr);
+                page_version = data_page->hdr.p_version;
+                table_id = data_page->hdr.table_id;
+            } else if (page_type == P_Leaf_P || page_type == P_Leaf_S) {
+                LeafPage* leaf_page = reinterpret_cast<LeafPage*>(mr->addr);
+                page_version = leaf_page->hdr.p_version;
+                // Extract leaf page header fields
+                leftmost_ptr = leaf_page->hdr.leftmost_ptr;
+                sibling_ptr = leaf_page->hdr.sibling_ptr;
+                last_index = leaf_page->hdr.last_index;
+                key_size = leaf_page->hdr.key_size;
+                record_size = leaf_page->hdr.record_size;
+                level = leaf_page->hdr.level;
+                kCardinality = leaf_page->hdr.kCardinality;
+                dirty_upper_bound = leaf_page->hdr.dirty_upper_bound;
+                dirty_lower_bound = leaf_page->hdr.dirty_lower_bound;
+            } else if (page_type == P_Internal_P || page_type == P_Internal_S) {
+                InternalPage* internal_page = reinterpret_cast<InternalPage*>(mr->addr);
+                page_version = internal_page->hdr.p_version;
             }
-            h = h->next_hash;
         }
+        
+        printf("SoftFlushAllDirtyPages: in_use_ handle=%p, gptr=[nodeID=%u, offset=%lu, val=0x%lx], charge=%zu, page_type=%s, page_version=%lu, table_id=%u, remote_lock_status=%d, refs=%zu", 
+               e, e->gptr.nodeID, e->gptr.offset, e->gptr.val, e->charge, 
+               GetPageTypeString(page_type), page_version, table_id, remote_lock_status, refs);
+        
+        // Print leaf page header details if it's a leaf page
+        if (page_type == P_Leaf_P || page_type == P_Leaf_S) {
+            printf(", leaf_hdr: leftmost=[nodeID=%u, offset=%lu, val=0x%lx], sibling=[nodeID=%u, offset=%lu, val=0x%lx], last_index=%d, key_size=%u, record_size=%u, level=%u, kCardinality=%u, dirty_bounds=[%u,%u]",
+                   leftmost_ptr.nodeID, leftmost_ptr.offset, leftmost_ptr.val,
+                   sibling_ptr.nodeID, sibling_ptr.offset, sibling_ptr.val,
+                   last_index, key_size, record_size, level, kCardinality, dirty_lower_bound, dirty_upper_bound);
+        }
+        printf("\n");
+        fflush(stdout);
+        assert(false);
     }
     
-    l.unlock();
+    // if (in_use_count > 0) {
+    //     assert(false);
+    // }
+    // if (in_use_count >= 16) {
+    //     // Too many entries in use, skip flushing to avoid interfering with active clients
+    //     assert(false);
+    //     return;
+    // }
     
-    // Now flush all dirty pages with proper ownership management
     auto rdma_mg = RDMA_Manager::Get_Instance();
-    for (LRUHandle* handle : dirty_handles) {
-        // Acquire write lock on the handle to ensure exclusive access during flush
-        std::unique_lock<RWSpinMutex> handle_lock(handle->rw_mtx);
-        
-        // Double-check the conditions after acquiring the handle lock
-        // Ensure it's still not in use (refs == 1) and still has write lock
-        if (handle->refs.load() != 1 || handle->remote_lock_status.load() != 2) {
-            // State changed - either now in use or lock released, skip this handle
-            continue;
-        }
-        
-        ibv_mr* mr = (ibv_mr*)handle->value;
-        if (mr == nullptr || mr->addr == nullptr) {
-            continue;
-        }
-        
-        // Calculate lock address
-        GlobalAddress lock_gptr = handle->gptr;
-        lock_gptr.offset = lock_gptr.offset + STRUCT_OFFSET(LeafPage, global_lock);
-        
-        // Flush the dirty page with proper ownership management
-        // This will properly release the write lock and flush the page
-        rdma_mg->global_write_page_and_Wunlock_Async(mr, handle->gptr, kLeafPageSize, lock_gptr, handle, false);
-        
-        // Update lock status after flush
-        handle->remote_lock_status.store(0);
-        handle->clear_pending_inv_states();
-    }
-}
-
-void LRUCache::HardRemoveByLogicalId(uint16_t logical_id) {
-    std::unique_lock<RWSpinMutex> l(table_mutex_);
-    std::vector<LRUHandle*> handles_to_remove;
     
-    // Collect all handles matching the logical_id from the hash table
+    // Scan hash table to ensure we check all handles, not just the LRU list
+    // Do not change the global lock state - just write the page content after the header
+    // GetPageTypeString helper function is already defined above
+    
+    // Calculate total charge to verify all cache handles are accounted for
+    uint64_t total_charge = 0;
+    
     for (uint32_t i = 0; i < table_.length_; i++) {
         LRUHandle* h = table_.list_[i];
         while (h != nullptr) {
             LRUHandle* next = h->next_hash;
-            if (h->in_cache && h->gptr.nodeID == logical_id) {
-                handles_to_remove.push_back(h);
+            
+            // Print debug info for all entries in cache (before checking if they should be flushed)
+            // Accumulate charge for handles in cache
+            if (h->in_cache) {
+                total_charge += h->charge;
+            }
+
+                ibv_mr* mr = (ibv_mr*)h->value;
+                if (mr != nullptr && mr->addr != nullptr) {
+                    // Get page type and version - check from appropriate header type
+                    // All pages have p_type at offset 8 (after global_lock)
+                    Page_Type page_type = static_cast<Page_Type>(*reinterpret_cast<uint8_t*>(
+                        reinterpret_cast<char*>(mr->addr) + sizeof(uint64_t)));
+                    
+                    uint64_t page_version = 0;
+                    if (page_type == P_Data) {
+                        DataPage* data_page = reinterpret_cast<DataPage*>(mr->addr);
+                        page_version = data_page->hdr.p_version;
+                        assert(data_page->hdr.this_page_g_ptr == h->gptr);
+                        assert(page_version >= 1);
+                    } else if (page_type == P_Leaf_P || page_type == P_Leaf_S) {
+                        LeafPage* leaf_page = reinterpret_cast<LeafPage*>(mr->addr);
+                        page_version = leaf_page->hdr.p_version;
+                    } else if (page_type == P_Internal_P || page_type == P_Internal_S) {
+                        InternalPage* internal_page = reinterpret_cast<InternalPage*>(mr->addr);
+                        page_version = internal_page->hdr.p_version;
+                    }
+                    
+                    
+                    int remote_lock_status = h->remote_lock_status.load();
+                    size_t refs = h->refs.load();
+                    printf("SoftFlushAllDirtyPages: Checking page type=%s at gptr=[nodeID=%u, offset=%lu, val=0x%lx], page_version=%lu, remote_lock_status=%d, refs=%zu\n",
+                           GetPageTypeString(page_type), h->gptr.nodeID, h->gptr.offset, h->gptr.val, page_version, remote_lock_status, refs);
+                    fflush(stdout);
+                }else {
+                    assert(false);
+                }
+            
+            // Only flush entries that are in cache, have write lock, and are not in use (refs == 1)
+            if (h->in_cache && h->remote_lock_status.load() == 2 && h->refs.load() == 1) {
+                ibv_mr* mr = (ibv_mr*)h->value;
+                if (mr != nullptr && mr->addr != nullptr) {
+                    // Release table lock before flushing to avoid blocking other operations
+                    l.unlock();
+                    
+                    // Use global_blind_write to flush page content without touching the lock
+                    // This function handles post-global-lock address calculation and replication internally
+                    rdma_mg->global_blind_write(mr, h->gptr, kLeafPageSize);
+                    
+                    // Re-acquire table lock for next iteration
+                    l.lock();
+                }
             }
             h = next;
         }
     }
     
-    // Remove all matching handles
-    for (LRUHandle* handle : handles_to_remove) {
-        // Remove from hash table
-        FinishErase(table_.Remove(handle->key(), handle->hash));
+    // Print total charge against capacity to verify all handles are accounted for
+    printf("SoftFlushAllDirtyPages: Total charge sum=%lu, capacity=%zu, usage_=%zu\n", 
+           total_charge, capacity_, usage_);
+    fflush(stdout);
+}
+
+void LRUCache::HardInvalidateByLogicalId(uint16_t logical_id) {
+    std::unique_lock<RWSpinMutex> l(table_mutex_);
+    
+    // Find all handles matching the logical_id and invalidate them by setting remote_lock_status to 0
+    // This keeps the handles in the cache (not evicted or moved to free list)
+    for (uint32_t i = 0; i < table_.length_; i++) {
+        LRUHandle* h = table_.list_[i];
+        while (h != nullptr) {
+            LRUHandle* next = h->next_hash;
+            if (h->in_cache && h->gptr.nodeID == logical_id) {
+                // Hard invalidate: change remote_lock_status from 1 (read) or 2 (write) to 0 (unlocked)
+                // This marks the handle as invalid without removing it from the cache
+                int current_status = h->remote_lock_status.load();
+                if (current_status == 1 || current_status == 2) {
+                    h->remote_lock_status.store(0);
+                }
+            }
+            h = next;
+        }
     }
 }
 
@@ -957,9 +1075,10 @@ class ShardedLRUCache : public Cache {
       shard_[s].SoftFlushAllDirtyPages();
     }
   }
-  void HardRemoveByLogicalId(uint16_t logical_id) override {
+  void HardInvalidateByLogicalId(uint16_t logical_id) override {
+    //todo: maybe we can finish it by multiple threads.
     for (int s = 0; s < kNumShards; s++) {
-      shard_[s].HardRemoveByLogicalId(logical_id);
+      shard_[s].HardInvalidateByLogicalId(logical_id);
     }
   }
 };

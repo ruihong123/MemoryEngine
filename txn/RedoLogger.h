@@ -147,8 +147,33 @@ namespace DSMEngine {
             hdr.payload_len = payload_len;
 #ifndef NDEBUG
             hdr.log_type = log_type;
-#endif
+            // // Helper function to get log type string (only in debug mode)
+            // auto GetLogTypeString = [](LogRecordType lt) -> const char* {
+            //     switch (lt) {
+            //         case LOG_UNKNOWN: return "LOG_UNKNOWN";
+            //         case LOG_DATA_PAGE_INIT: return "LOG_DATA_PAGE_INIT";
+            //         case LOG_DATA_PAGE_BITMAP_UPDATE: return "LOG_DATA_PAGE_BITMAP_UPDATE";
+            //         case LOG_DATA_PAGE_UPDATE: return "LOG_DATA_PAGE_UPDATE";
+            //         case LOG_INTERNAL_PAGE_STORE: return "LOG_INTERNAL_PAGE_STORE";
+            //         case LOG_LEAF_PAGE_STORE: return "LOG_LEAF_PAGE_STORE";
+            //         case LOG_LEAF_PAGE_DELETE: return "LOG_LEAF_PAGE_DELETE";
+            //         case LOG_INTERNAL_PAGE_SPLIT_OLD: return "LOG_INTERNAL_PAGE_SPLIT_OLD";
+            //         case LOG_INTERNAL_PAGE_SPLIT_NEW: return "LOG_INTERNAL_PAGE_SPLIT_NEW";
+            //         case LOG_LEAF_PAGE_SPLIT_OLD: return "LOG_LEAF_PAGE_SPLIT_OLD";
+            //         case LOG_LEAF_PAGE_SPLIT_NEW: return "LOG_LEAF_PAGE_SPLIT_NEW";
+            //         case LOG_NEW_ROOT_PAGE: return "LOG_NEW_ROOT_PAGE";
+            //         case LOG_INDEX_PAGE_CHANGE: return "LOG_INDEX_PAGE_CHANGE";
+            //         case LOG_INDEX_PAGE_HEADER_CHANGE: return "LOG_INDEX_PAGE_HEADER_CHANGE";
+            //         case LOG_INDEX_PAGE_CONTENT_CHANGE: return "LOG_INDEX_PAGE_CONTENT_CHANGE";
+            //         default: return "LOG_UNKNOWN";
+            //     }
+            // };
+            // printf("RedoLogger: Append record - logical_region_id=%u, page_gaddr=[nodeID=%u, offset=%lu, val=0x%lx], page_version=%lu, payload_len=%u, log_type=%s\n",
+            //     logical_region_id, page_gaddr.nodeID, page_gaddr.offset, page_gaddr.val, page_version, payload_len, GetLogTypeString(log_type));
+            //     fflush(stdout);
 
+#endif
+            
             std::lock_guard<SpinMutex> lk(s.mtx);
 
             // Get current tail and flushed_tail positions
@@ -572,8 +597,9 @@ namespace DSMEngine {
                                                  IBV_SEND_SIGNALED, 1, imm_data,
                                                  replica_phys_id);
                 if (rc) {
-                    fprintf(stderr, "RedoLogger: RDMA_Write_Imme to replica %u failed (rc=%d)\n", 
+                    fprintf(stdout, "RedoLogger: RDMA_Write_Imme to replica %u failed (rc=%d)\n", 
                            replica_phys_id, rc);
+                           assert(false && "RDMA_Write_Imme failed");
                 }
             }
 

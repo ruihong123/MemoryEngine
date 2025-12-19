@@ -8,6 +8,7 @@
 #include <thread>
 #include <type_traits>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 #include "storage/rdma.h"
 #include "storage/page.h"
@@ -38,6 +39,11 @@ struct LogStreamState {
     std::atomic<uint64_t> replayed_log_length{0};   // Total length of logs replayed
     uint64_t recycled_prefix_bytes{0};              // Bytes already recycled from the head
     
+    // Debugging: store the header of the record where this stream is stuck
+    std::mutex stuck_record_mtx;  // Protects stuck_record_header
+    bool has_stuck_record{false};
+    RedoLogger::RecordHeader stuck_record_header{};  // Copy of the header of the stuck record
+    
     LogStreamState(uint16_t compute_id, uint16_t region_id)
         : compute_node_id(compute_id), logical_region_id(region_id) {}
 };
@@ -51,6 +57,11 @@ struct LogicalRegionReplayer {
     // Condition variable for efficient waiting
     std::condition_variable new_data_cv;
     std::mutex cv_mtx;
+    
+    // Progress tracking for deadlock detection
+    std::mutex progress_mtx;  // Protects progress tracking data
+    uint32_t iterations_without_progress{0};
+    static constexpr uint32_t MAX_ITERATIONS_WITHOUT_PROGRESS = 1000;  // Threshold for abort
     
     LogicalRegionReplayer(uint16_t region_id) : logical_region_id(region_id) {}
 };
@@ -176,7 +187,7 @@ private:
     // Page-version-aware log replay logic
     void ReplayLogData(LogStreamState* stream_state, uint64_t available_bytes);
     bool ProcessLogRecord(const RedoLogger::RecordHeader& header, const uint8_t* payload, size_t payload_size);
-    uint64_t GetCurrentPageVersion(GlobalAddress page_addr);
+    uint64_t GetCurrentPageVersion(GlobalAddress page_addr, DSMEngine::DataPage*& page_ptr);
     void SetCurrentPageVersion(GlobalAddress page_addr, uint64_t version);
     
     // Recycle fully replayed segments

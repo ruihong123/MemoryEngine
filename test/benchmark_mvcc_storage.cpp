@@ -164,6 +164,7 @@ void ProcessDeltaPull(void *args) {
 
         ds_w = it->second;
         std::shared_lock<RWSpinMutex> delta_lck(ds_w->main_mtx_);
+        // std::shared_lock<std::shared_mutex> delta_lck(ds_w->main_mtx_);
         while (ds_w->inner_section->tail_ != ds_w->inner_section->tail_allocated) {
             _mm_pause();
         }
@@ -1244,11 +1245,13 @@ private:
             //     }
             // }
             {   
+                // std::shared_lock<RWSpinMutex> slck(delta_section->shadow_mtx_);
                 // std::shared_lock<std::shared_mutex> slck(delta_section->shadow_mtx_);
                 if (delta_section->inner_section->is_empty_ || 
                     !delta_section->isOffsetValid(offset, meta.prev_delta_epoch_)) {
                     // slck.unlock();
                     std::unique_lock<RWSpinMutex> lck(delta_section->shadow_mtx_);
+                    // std::unique_lock<std::shared_mutex> lck(delta_section->shadow_mtx_);
                     if (delta_section->inner_section->is_empty_ ||
                         !delta_section->isOffsetValid(offset, meta.prev_delta_epoch_)) {
                         // Pull updates from remote node

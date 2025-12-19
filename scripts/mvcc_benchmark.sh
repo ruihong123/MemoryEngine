@@ -8,7 +8,7 @@ SRC_HOME=$bin/..
 BIN_HOME=$bin/../release
 home_dir="/users/Ruihong/MemoryEngine"
 
-conf_file_all=$bin/../connection_cloudlab_replica.conf
+conf_file_all=$bin/../connection_cloudlab_noreplica.conf
 conf_file=$bin/../connection_replication.conf
 memcached_conf_file_all=$bin/../memcached_cloudlab_servers.conf
 memcached_conf_file=$bin/../memcached_ip.conf
@@ -191,7 +191,7 @@ run() {
       echo ""
       echo "Starting memory server on $memory (node_id=$((2*$i+1)))"
       echo "$BIN_HOME/memory_server_term $port $(($remote_mem_size+2)) $((2*$i+1)) $mem_region_size"
-      ssh -o StrictHostKeyChecking=no $ip "ulimit -c 50000000 && cd $BIN_HOME && numactl --physcpubind=4 ./memory_server_term $port $(($remote_mem_size+2)) $((2*$i+1)) $mem_region_size | tee -a $log_file.$ip" &
+      ssh -o StrictHostKeyChecking=no $ip "ulimit -c 50000000 && cd $BIN_HOME && numactl ./memory_server_term $port $(($remote_mem_size+2)) $((2*$i+1)) $mem_region_size | tee -a $log_file.$ip" &
       sleep 1
       i=$((i+1))
     done
@@ -325,19 +325,19 @@ run_mvcc_benchmark() {
   fi
   
   : ${node_range:="8"}
-  : ${threads_range:="16"}
+  : ${threads_range:="8 16"}
   
   # Workload mode configuration
   : ${mixed_workload:=1}           # 1=mixed read/write, 0=separate writers/readers
-  : ${read_ratio_range:="50 95 0"}      # For mixed_workload=1: read percentage
+  : ${read_ratio_range:="0"}      # For mixed_workload=1: read percentage
   : ${writers:=1}                  # For mixed_workload=0: number of writer threads
   : ${readers:=1}                  # For mixed_workload=0: number of reader threads
   
   : ${storage_type_range:="1 2"}
-  : ${workload_type_range:="0 1"}
+  : ${workload_type_range:="1"}
   : ${zipfian_theta_range:="0.99"}
-  : ${num_tuples:=0}
-  : ${tuple_size_range:="64 256 512 1024"}
+  : ${num_tuples:=10000000}
+  : ${tuple_size_range:="64 128 256 512 1024"}
   : ${snapshot_lag_range:="100"} # 100000 (uniform) OR 100 (zipfian)
   : ${warmup_duration:=10}
   : ${duration:=10}

@@ -200,7 +200,7 @@ namespace DSMEngine
         near_data_compaction,
         install_version_edit,
         version_unpin_,
-        sync_option,
+        // sync_option,
         qp_reset_,
         broadcast_root,
         page_invalidation,
@@ -291,6 +291,7 @@ namespace DSMEngine
     {
         size_t mem_size;
         uint8_t target_region_id;
+        Chunk_type pool_name;
     };
 
     // Unified request for creating a new log stream or allocating a new segment
@@ -982,6 +983,9 @@ namespace DSMEngine
         int RDMA_Write_xcompute_localcopy(ibv_mr* local_mr, void* addr, uint32_t rkey, size_t msg_size, uint16_t target_node_id,
                                 int num_of_qp, bool async, std::shared_lock<RWSpinMutex>* out_side_lock = nullptr);
 
+        // int RDMA_Write_xcompute_localcopy(ibv_mr* local_mr, void* addr, uint32_t rkey, size_t msg_size, uint16_t target_node_id,
+        //                         int num_of_qp, bool async, std::shared_lock<std::shared_mutex>* out_side_lock = nullptr);
+
         int
         RDMA_Write_xcompute_imm(ibv_mr* local_mr, void* addr, uint32_t rkey, size_t msg_size, uint16_t target_node_id,
                                 int num_of_qp, bool async);
@@ -1088,7 +1092,7 @@ namespace DSMEngine
                                                                     uint8_t next_holder_id,
                                                                     GlobalAddress remote_lock_addr,
                                                                     Cache_Handle* handle = nullptr);
-
+        bool global_blind_write(ibv_mr* page_buffer, GlobalAddress page_addr, size_t page_size);
         bool global_WHandover(ibv_mr* page_buffer, GlobalAddress page_addr, size_t page_size, uint8_t next_holder_id,
                               GlobalAddress remote_lock_addr, bool async);
 
@@ -1230,6 +1234,14 @@ namespace DSMEngine
         uint64_t TranslateLogicalToPhysicalAddress(uint16_t logical_id, uint64_t logical_offset,
                                                    uint16_t physical_id) const;
         uint32_t GetPhysicalRkey(uint16_t logical_id, uint16_t physical_id) const;
+
+        // Failure recovery methods
+        // Get the last (highest ID) memory node
+        uint16_t GetLastMemoryNodeId() const;
+        // Remove failed memory node from logical groups and promote replica to primary
+        void RemoveFailedMemoryNodeFromLogicalGroups(uint16_t failed_node);
+        // Get all logical regions that have primary on the specified node
+        std::vector<uint16_t> GetLogicalRegionsWithPrimaryOnNode(uint16_t node_id) const;
 
         // Memcached support methods
         bool connectMemcached();

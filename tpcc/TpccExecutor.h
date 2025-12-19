@@ -130,7 +130,7 @@ protected:
     auto current_item = std::make_shared<int>(1); // Current item
     auto scan_phase = std::make_shared<int>(0); // 0=district, 1=stock, 2=warehouse, 3=customer
     auto in_scan = std::make_shared<bool>(false); // true if currently scanning
-    
+    //todo: maybe we can use btr iterator to accelerate the table scan.
     tasks.push_back(
         HotTableScanTask("tpcc_multi_warehouse_scan",
                          [current_warehouse_start, current_wh, current_district, current_customer, current_item,
@@ -163,6 +163,11 @@ protected:
                                    *in_scan = false;
                                    return false; // Transaction aborted
                                  }
+#if defined(TO)
+                                 Cache::Handle* held_handle = ((Cache::Handle*)record->Get_Handle());
+                                 assert(held_handle->gptr != GlobalAddress::Null());
+                                 mgr.ReleaseLatchForGCL(held_handle->gptr, held_handle);
+#endif
                                
                                  // Advance to next district
                                  ++d;
@@ -196,6 +201,11 @@ protected:
                                    *in_scan = false;
                                    return false; // Transaction aborted
                                  }
+#if defined(TO)
+                                 Cache::Handle* held_handle = ((Cache::Handle*)record->Get_Handle());
+                                 assert(held_handle->gptr != GlobalAddress::Null());
+                                 mgr.ReleaseLatchForGCL(held_handle->gptr, held_handle);
+#endif
                                  
                                  // Advance to next item
                                  ++item;
@@ -227,6 +237,11 @@ protected:
                                    *in_scan = false;
                                    return false; // Transaction aborted
                                  }
+#if defined(TO)
+                                 Cache::Handle* held_handle = ((Cache::Handle*)record->Get_Handle());
+                                 assert(held_handle->gptr != GlobalAddress::Null());
+                                 mgr.ReleaseLatchForGCL(held_handle->gptr, held_handle);
+#endif
                                  
                                  // Advance to next warehouse
                                  ++wh;
@@ -254,6 +269,11 @@ protected:
                                    *in_scan = false;
                                    return false; // Transaction aborted
                                  }
+#if defined(TO)
+                                 Cache::Handle* held_handle = ((Cache::Handle*)record->Get_Handle());
+                                 assert(held_handle->gptr != GlobalAddress::Null());
+                                 mgr.ReleaseLatchForGCL(held_handle->gptr, held_handle);
+#endif
                                  
                                  // Advance to next customer
                                  ++c;

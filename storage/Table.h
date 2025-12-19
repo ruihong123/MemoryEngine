@@ -167,6 +167,10 @@ namespace DSMEngine {
             return schema_ptr_;
         }
 
+        Btr* GetPrimaryIndex() {
+            return primary_index_;
+        }
+
         size_t GetSchemaSize() const {
             return schema_ptr_->GetRecordTotalSize();
         }
@@ -190,6 +194,7 @@ namespace DSMEngine {
             schema_ptr_->Serialize(cur_addr);
             cur_addr = cur_addr + RecordSchema::GetSerializeSize();
             primary_index_->Serialize(cur_addr);
+            primary_index_->release_cached_root_handle();
         }
 
         void Deserialize(const char*& addr) {
@@ -260,6 +265,8 @@ namespace DSMEngine {
             } else if (locked_handles_ != nullptr && g_addr == nullptr) {
                 g_addr  = new GlobalAddress();
                 *g_addr = gallocator->Allocate_Remote(Regular_Page);
+                // printf("AllocateNewTuple(populator): table_id=%zu, g_addr=[nodeID=%u, offset=%lu, val=0x%lx]\n", table_id_, g_addr->nodeID, g_addr->offset, g_addr->val);
+                // fflush(stdout);
                 SetOpenedBlock(g_addr);
                 if (!gallocator->TrySELCC_Exclusive_Lock(page_buffer, *g_addr, handle)) {
                     return false;
@@ -275,6 +282,8 @@ namespace DSMEngine {
                 assert(locked_handles_ == nullptr && g_addr == nullptr);
                 g_addr  = new GlobalAddress();
                 *g_addr = gallocator->Allocate_Remote(Regular_Page);
+                // printf("AllocateNewTuple(Populator): g_addr=[nodeID=%u, offset=%lu, val=0x%lx]\n", g_addr->nodeID, g_addr->offset, g_addr->val);
+                // fflush(stdout);
                 SetOpenedBlock(g_addr);
                 gallocator->SELCC_Exclusive_Lock(page_buffer, *g_addr, handle);
                 //          if (!gallocator->TrySELCC_Exclusive_Lock(page_buffer, *g_addr, handle)){

@@ -18,6 +18,7 @@
 #include <stdexcept>
 #include <thread>
 #include <vector>
+#include <algorithm>
 #include <cerrno>
 #include <cstring>
 // #include "port/port_posix.h"
@@ -840,7 +841,8 @@ namespace DSMEngine {
                 ibv_mr* recv_mr = new ibv_mr[RECEIVE_OUTSTANDING_SIZE]();
                 for (int i = 0; i < RECEIVE_OUTSTANDING_SIZE; i++) {
                     Allocate_Local_RDMA_Slot(recv_mr[i], Message);
-                    post_receive<RDMA_Request>(&recv_mr[i], target_node_id, q_id);
+                    int rc = post_receive<RDMA_Request>(&recv_mr[i], target_node_id, q_id);
+                    assert(rc == 0 && "failed to post receive");
                 }
                 comm_thread_recv_mrs.insert({target_node_id, recv_mr});
                 comm_thread_buffer.insert({target_node_id, 0});
@@ -3162,7 +3164,7 @@ namespace DSMEngine {
         attr.qp_state = IBV_QPS_RTS;
         attr.timeout = 0xe;
         attr.retry_cnt = 5;
-        attr.rnr_retry = 7;
+        attr.rnr_retry = 6;
         attr.sq_psn = 0;
         attr.max_rd_atomic =
                 ATOMIC_OUTSTANDING_SIZE; // allow RDMA atomic andn RDMA read batched.
@@ -3987,6 +3989,10 @@ namespace DSMEngine {
                                           uint32_t rkey, size_t msg_size,
                                           uint16_t target_node_id, int num_of_qp,
                                           bool async, std::shared_lock<RWSpinMutex>* out_side_lock) {
+    // int RDMA_Manager::RDMA_Write_xcompute_localcopy(ibv_mr *local_mr, void *addr,
+    //                                   uint32_t rkey, size_t msg_size,
+    //                                   uint16_t target_node_id, int num_of_qp,
+    //                                   bool async, std::shared_lock<std::shared_mutex>* out_side_lock) {
         struct ibv_send_wr sr;
         struct ibv_sge sge;
         struct ibv_send_wr *bad_wr = NULL;
@@ -4234,7 +4240,8 @@ namespace DSMEngine {
         assert(rc == 0);
         //  start = std::chrono::high_resolution_clock::now();
         if (rc) {
-            fprintf(stderr, "failed to post SR, return is %d\n", rc);
+            // fprintf(stderr, "failed to post SR, return is %d\n", rc);
+            assert(false && "failed to post SR");
         }
         //  else
         //  {
@@ -4252,6 +4259,7 @@ namespace DSMEngine {
                 std::cout << "RDMA Write Failed" << std::endl;
                 std::cout << "q id is" << qp_type << std::endl;
                 fprintf(stdout, "QP number=0x%x\n", res->qp_map[target_node_id]->qp_num);
+                assert(false && "failed to poll completion");
             } else {
                 // DEBUG_PRINT("RDMA write successfully\n");
             }
@@ -6462,8 +6470,11 @@ namespace DSMEngine {
         // Get replicas for the target logical memory region (replicas cannot be
         // empty)
         const auto &replicas = GetReplicaSet(page_addr.nodeID);
-        assert(!replicas.empty() && "Replicas cannot be empty");
         // uint16_t primary_phys_id = GetPrimaryPhysicalId(page_addr.nodeID);
+        printf("global_write_page_and_Wunlock_Async: page_addr=[nodeID=%u, offset=%lu, val=0x%lx], page_size=%zu, remote_lock_addr=[nodeID=%u, offset=%lu, val=0x%lx], handle=%p, async=%d\n", 
+               page_addr.nodeID, page_addr.offset, page_addr.val, page_size, 
+               remote_lock_addr.nodeID, remote_lock_addr.offset, remote_lock_addr.val, handle, async);
+        fflush(stdout);
 
         // TODO: If we want to use async unlock, we need to enlarge the max outstand
         // work request that the queue pair support.
@@ -6581,11 +6592,11 @@ namespace DSMEngine {
 
             // Use async writes for all replicas
             Prepare_WR_Write_Replication(sr[i], sge[i], tbFlushed_gaddr,
-                                         &tbFlushed_local_mr, page_size, 0,
+                                         &tbFlushed_local_mr, page_size, IBV_SEND_SIGNALED,
                                          Regular_Page, physical_id);
 
             // Submit async write to replica (no completion polling yet)
-            Batch_Submit_WRs(&sr[i], 0, physical_id); // 0 work requests for async write
+            Batch_Submit_WRs(&sr[i], 1, physical_id); // 0 work requests for async write
         }
 
         // Step 2: Poll completion for all replica writes together
@@ -6605,7 +6616,7 @@ namespace DSMEngine {
         // Primary replica: synchronous write
         Prepare_WR_Write_Replication(
             sr[0], sge[0], tbFlushed_gaddr, &tbFlushed_local_mr, page_size,
-            IBV_SEND_SIGNALED, Regular_Page, primary_physical_id);
+            0, Regular_Page, primary_physical_id);
 
         // Atomic unlock operation for primary (synchronous)
         Prepare_WR_FAA(sr[replicas.size()], sge[replicas.size()], remote_lock_addr,
@@ -6624,11 +6635,73 @@ namespace DSMEngine {
         assert(page_addr.nodeID == remote_lock_addr.nodeID);
         return async_succeed;
     }
+    bool RDMA_Manager::global_blind_write(ibv_mr *page_buffer, GlobalAddress page_addr, size_t page_size) {
+
+        // Get replicas for the target logical memory region (replicas cannot be
+        // empty)
+        const auto &replicas = GetReplicaSet(page_addr.nodeID);
+        assert(!replicas.empty() && "Replicas cannot be empty");
+
+        // Calculate number of write operations needed based on replica_type_
+        size_t num_writes;
+        if (GetReplicaType() == REPLICA_WRITE_PRIMARY_ONLY) {
+            num_writes = 1; // Only primary replica
+        } else {
+            num_writes = replicas.size(); // All replicas
+        }
+
+        // Create SR matrix for all write operations
+        std::vector<struct ibv_send_wr> sr(num_writes);
+        std::vector<struct ibv_sge> sge(num_writes);
+
+        GlobalAddress post_gl_page_addr{};
+        post_gl_page_addr.nodeID = page_addr.nodeID;
+        // The header should be the same offset in Leaf or Internal nodes
+        assert(STRUCT_OFFSET(LeafPage, hdr) == STRUCT_OFFSET(LeafPage, hdr));
+        assert(STRUCT_OFFSET(InternalPage, hdr) == STRUCT_OFFSET(LeafPage, hdr));
+        post_gl_page_addr.offset = page_addr.offset + STRUCT_OFFSET(LeafPage, hdr);
+        ibv_mr post_gl_page_local_mr = *page_buffer;
+        // Assert that page_version is at least 1 before flushing
+        assert(((DataPage*)page_buffer->addr)->hdr.p_version >= 1);
+        post_gl_page_local_mr.addr = reinterpret_cast<void *>(
+            (uint64_t) page_buffer->addr + STRUCT_OFFSET(LeafPage, hdr));
+        page_size -= STRUCT_OFFSET(LeafPage, hdr);
+
+        // Prepare all write operations with IBV_SEND_SIGNALED
+        std::vector<uint16_t> target_physical_ids;
+        
+        if (GetReplicaType() == REPLICA_WRITE_PRIMARY_ONLY) {
+            // Write only to primary replica
+            uint16_t primary_phys_id = GetPrimaryPhysicalId(page_addr.nodeID);
+            target_physical_ids.push_back(primary_phys_id);
+            
+            Prepare_WR_Write(sr[0], sge[0], post_gl_page_addr, &post_gl_page_local_mr, 
+                           page_size, IBV_SEND_SIGNALED, Regular_Page);
+        } else {
+            // Write to all replicas
+            for (size_t i = 0; i < replicas.size(); ++i) {
+                uint16_t physical_id = replicas[i].phys_id;
+                target_physical_ids.push_back(physical_id);
+                
+                Prepare_WR_Write_Replication(sr[i], sge[i], post_gl_page_addr,
+                                           &post_gl_page_local_mr, page_size, IBV_SEND_SIGNALED,
+                                           Regular_Page, physical_id);
+            }
+        }
+
+        // Submit all write operations first (without polling)
+        for (size_t i = 0; i < num_writes; ++i) {
+            Batch_Submit_WRs(&sr[i], 1, target_physical_ids[i]);
+        }
+
+        return true;
+    }
 
     bool RDMA_Manager::global_write_page_and_WHandover_Async(
         ibv_mr *page_buffer, GlobalAddress page_addr, size_t page_size,
         uint8_t next_holder_id, GlobalAddress remote_lock_addr,
         Cache_Handle *handle) {
+            assert(false); // deprecated function
         if (next_holder_id > 32) {
             throw std::invalid_argument("received wrong handover target node id");
         }
@@ -6737,11 +6810,11 @@ namespace DSMEngine {
 
             // Use async writes for all replicas
             Prepare_WR_Write_Replication(sr[i], sge[i], post_gl_page_addr,
-                                         &post_gl_page_local_mr, page_size, 0,
+                                         &post_gl_page_local_mr, page_size, IBV_SEND_SIGNALED,
                                          Regular_Page, physical_id);
 
             // Submit async write to replica (no completion polling yet)
-            Batch_Submit_WRs(&sr[i], 0, physical_id); // 0 work requests for async write
+            Batch_Submit_WRs(&sr[i], 1, physical_id); // 0 work requests for async write
         }
 
         // Step 2: Poll completion for all replica writes together
@@ -6761,7 +6834,7 @@ namespace DSMEngine {
         // Primary replica: synchronous write
         Prepare_WR_Write_Replication(
             sr[0], sge[0], post_gl_page_addr, &post_gl_page_local_mr, page_size,
-            IBV_SEND_SIGNALED, Regular_Page, primary_physical_id);
+            0, Regular_Page, primary_physical_id);
 
         // Atomic unlock operation for primary (synchronous)
         Prepare_WR_FAA(sr[replicas.size()], sge[replicas.size()], remote_lock_addr,
@@ -7136,7 +7209,7 @@ namespace DSMEngine {
 
             // Use async writes for all replicas
             Prepare_WR_Write_Replication(sr[i], sge[i], tbFlushed_gaddr,
-                                         &tbFlushed_local_mr, page_size, 0,
+                                         &tbFlushed_local_mr, page_size, IBV_SEND_SIGNALED,
                                          Regular_Page, physical_id);
 
             // Submit async write to replica (no completion polling yet)
@@ -7160,7 +7233,7 @@ namespace DSMEngine {
         // Primary replica: synchronous write
         Prepare_WR_Write_Replication(
             sr[0], sge[0], tbFlushed_gaddr, &tbFlushed_local_mr, page_size,
-            IBV_SEND_SIGNALED, Regular_Page, primary_physical_id);
+            0, Regular_Page, primary_physical_id);
 
         // Atomic unlock operation for primary (synchronous)
         Prepare_WR_FAA(sr[replicas.size()], sge[replicas.size()], remote_lock_addr,
@@ -7952,6 +8025,7 @@ namespace DSMEngine {
         //  memory chunk.
         send_pointer->content.mr_request.mem_size = size;
         send_pointer->content.mr_request.target_region_id = target_region_id;
+        send_pointer->content.mr_request.pool_name = pool_name;
         // Create separate receive buffers for each replica to avoid message mixing
         std::vector<ibv_mr> receive_mrs(replicas.size());
         std::vector<RDMA_Reply *> receive_pointers(replicas.size());
@@ -9123,8 +9197,9 @@ namespace DSMEngine {
                                       : name_to_allocated_size.at(pool_name),
                                   pool_name, 0);
             if (node_id % 2 == 0) {
-                printf("Memory used up, allocate new one, memory pool is %s, total "
+                printf("[Compute node %u]Memory used up, allocate new one, memory pool is %s, total "
                        "memory is %lu\n",
+                       node_id,
                        EnumStrings[pool_name],
                        Calculate_size_of_pool(Regular_Page) +
                        Calculate_size_of_pool(Message));
@@ -10720,6 +10795,66 @@ namespace DSMEngine {
             }
         }
         return 0; // Fallback
+    }
+
+    uint16_t RDMA_Manager::GetLastMemoryNodeId() const {
+        uint16_t last_mem_node = 0;
+        for (const auto& kv : memory_nodes) {
+            if (kv.first > last_mem_node) {
+                last_mem_node = kv.first;
+            }
+        }
+        return last_mem_node;
+    }
+
+    std::vector<uint16_t> RDMA_Manager::GetLogicalRegionsWithPrimaryOnNode(uint16_t node_id) const {
+        std::vector<uint16_t> logical_regions;
+        for (const auto& kv : logical_groups) {
+            if (!kv.second.physical_regions.empty() && 
+                kv.second.physical_regions[0].phys_id == node_id) {
+                logical_regions.push_back(kv.first);
+            }
+        }
+        return logical_regions;
+    }
+
+    void RDMA_Manager::RemoveFailedMemoryNodeFromLogicalGroups(uint16_t failed_node) {
+        std::vector<uint16_t> logical_regions_to_update;
+        
+        // Find all logical regions affected by the failure
+        for (auto& kv : logical_groups) {
+            auto& group = kv.second;
+            bool needs_update = false;
+            
+            // Remove the failed node from physical_regions
+            group.physical_regions.erase(
+                std::remove_if(group.physical_regions.begin(), 
+                               group.physical_regions.end(),
+                               [failed_node, &needs_update](const PhysicalRegion& pr) {
+                                   if (pr.phys_id == failed_node) {
+                                       needs_update = true;
+                                       return true;
+                                   }
+                                   return false;
+                               }),
+                group.physical_regions.end()
+            );
+            
+            // If primary was on failed node and we have replicas, promote first replica
+            // Note: physical_regions[0] is always the primary, so after removing failed node,
+            // the first remaining replica (if any) becomes the new primary automatically
+            if (needs_update && group.physical_regions.empty()) {
+                printf("Warning: Logical region %u has no remaining replicas after failure of node %u!\n",
+                       kv.first, failed_node);
+            }
+            
+            if (needs_update) {
+                logical_regions_to_update.push_back(kv.first);
+            }
+        }
+        
+        printf("Removed failed memory node %u from %zu logical regions\n",
+               failed_node, logical_regions_to_update.size());
     }
 
     bool RDMA_Manager::connectMemcached() {
