@@ -41,6 +41,7 @@ public:
     total_count_ = 0;
     total_abort_count_ = 0;
     realtime_finished_count_ = 0;  // Real-time counter for failure recovery test
+    active_transactions_ = 0;  // Counter for transactions currently executing
     hot_scan_count_ = 0;
     hot_scan_abort_count_ = 0;
     hot_scan_total_latency_ns_ = 0;
@@ -107,7 +108,17 @@ public:
   size_t GetRealtimeFinishedCount() const { return realtime_finished_count_.load(std::memory_order_relaxed); }
 
   // Pause/resume executor for failure recovery
-  void Pause() { is_paused_.store(true, std::memory_order_release); }
+  // Pause() sets the pause flag and waits for all active transactions to finish (commit or abort)
+  void Pause() {
+    // Set pause flag to prevent new transactions from starting
+    is_paused_.store(true, std::memory_order_release);
+    
+    // Wait for all active transactions to finish (either commit or abort)
+    // Poll with small sleep to avoid busy-waiting
+    while (active_transactions_.load(std::memory_order_acquire) > 0) {
+      std::this_thread::sleep_for(std::chrono::microseconds(10));
+    }
+  }
   void Resume() { is_paused_.store(false, std::memory_order_release); }
   bool IsPaused() const { return is_paused_.load(std::memory_order_acquire); }
 
@@ -397,6 +408,8 @@ private:
         
         TxnParam *tuple = tuples->get(idx);
         // begin txn
+        // Increment active transaction counter before starting transaction
+        active_transactions_.fetch_add(1, std::memory_order_relaxed);
         PROFILE_TIME_START(thread_id, TXN_EXECUTE);
         std::chrono::high_resolution_clock::time_point txn_start_time;
         if (enable_latency_recording_) {
@@ -408,6 +421,8 @@ private:
           ret.size_ = 0;
           ++abort_count;
           if (is_finish_ == true) {
+            // Decrement active transaction counter before early return
+            active_transactions_.fetch_sub(1, std::memory_order_relaxed);
             total_count_.fetch_add(count);
             total_abort_count_.fetch_add(abort_count);
             PROFILE_TIME_END(thread_id, TXN_EXECUTE);
@@ -432,6 +447,8 @@ private:
             ret.size_ = 0;
             ++abort_count;
             if (is_finish_ == true) {
+              // Decrement active transaction counter before early return
+              active_transactions_.fetch_sub(1, std::memory_order_relaxed);
               total_count_.fetch_add(count);
               total_abort_count_.fetch_add(abort_count);
               PROFILE_TIME_END(thread_id, TXN_ABORT);
@@ -456,6 +473,8 @@ private:
 #endif
         }
         ++count;
+        // Decrement active transaction counter - transaction finished (committed or aborted)
+        active_transactions_.fetch_sub(1, std::memory_order_relaxed);
         // Update real-time finished transaction counter (for failure recovery test)
         realtime_finished_count_.fetch_add(1, std::memory_order_relaxed);
 
@@ -541,6 +560,7 @@ private:
   std::atomic<size_t> total_count_;
   std::atomic<size_t> total_abort_count_;
   std::atomic<size_t> realtime_finished_count_;  // Real-time counter for failure recovery test
+  std::atomic<size_t> active_transactions_;  // Counter for transactions currently executing
   std::atomic<size_t> hot_scan_count_;
   std::atomic<size_t> hot_scan_abort_count_;
   std::atomic<uint64_t> hot_scan_total_latency_ns_; // Total latency in nanoseconds

@@ -361,7 +361,7 @@ namespace DSMEngine
 
     union RDMA_Reply_Content
     {
-        ibv_mr mr;
+        GlobalAddress gptr;  // Changed from ibv_mr to GlobalAddress for remote memory allocation
         Registered_qp_config qp_config;
         Registered_qp_config_xcompute qp_config_xcompute;
         install_versionedit ive;
@@ -461,7 +461,7 @@ namespace DSMEngine
     {
     public:
         In_Use_Array(size_t size, size_t chunk_size, ibv_mr* mr_ori)
-            : element_size_(size), chunk_size_(chunk_size), mr_ori_(mr_ori)
+            : element_size_(size), chunk_size_(chunk_size), mr_ori_(mr_ori), gptr_ori_()
         {
             for (size_t i = 0; i < element_size_; ++i)
             {
@@ -474,8 +474,19 @@ namespace DSMEngine
             : element_size_(size),
               chunk_size_(chunk_size),
               //        in_use_(in_use),
-              mr_ori_(mr_ori)
+              mr_ori_(mr_ori),
+              gptr_ori_()
         {
+        }
+
+        // New constructor that takes GlobalAddress for remote memory allocation
+        In_Use_Array(size_t size, size_t chunk_size, GlobalAddress gptr_ori)
+            : element_size_(size), chunk_size_(chunk_size), mr_ori_(nullptr), gptr_ori_(gptr_ori)
+        {
+            for (size_t i = 0; i < element_size_; ++i)
+            {
+                free_list.push_back(i);
+            }
         }
 
         int allocate_memory_slot()
@@ -521,7 +532,9 @@ namespace DSMEngine
 
         size_t get_chunk_size() { return chunk_size_; }
 
-        ibv_mr* get_mr_ori() { return mr_ori_; }
+        ibv_mr* get_mr_ori() { return mr_ori_; }  // Still required for local registered memory allocation
+
+        GlobalAddress get_gptr_ori() { return gptr_ori_; }  // Get base GlobalAddress for remote memory allocation
 
         size_t get_element_size() { return element_size_; }
         //  std::atomic<bool>* get_inuse_table() { return in_use_; }
@@ -536,7 +549,8 @@ namespace DSMEngine
         //  std::list<int> free_list[ALLOCATOR_SHARD_NUM];
         std::list<int> free_list;
         SpinMutex mtx;
-        ibv_mr* mr_ori_;
+        ibv_mr* mr_ori_;  // For local registered memory allocation
+        GlobalAddress gptr_ori_;  // Base GlobalAddress for remote memory allocation
         std::atomic<bool> Array_used_up = false;
     };
 
@@ -1311,8 +1325,8 @@ namespace DSMEngine
         static thread_local int qp_inc_ticket;
         //#endif
         resources* res = nullptr;
-        std::map<uint16_t, std::vector<ibv_mr*>*> remote_mem_leaf_pool; /* a vector for all the remote memory regions*/
-        std::map<uint16_t, std::vector<ibv_mr*>*> remote_mem_delta_pool; /* a vector for all the remote memory regions*/
+        std::map<uint16_t, std::vector<GlobalAddress>*> remote_mem_leaf_pool; /* a vector for all the remote memory regions (storing GlobalAddress)*/
+        std::map<uint16_t, std::vector<GlobalAddress>*> remote_mem_delta_pool; /* a vector for all the remote memory regions (storing GlobalAddress)*/
         // TODO: seperate the pool for different shards
         std::vector<ibv_mr*> local_mem_regions; /* a vector for all the local memory regions.*/
         std::map<uint16_t, ibv_mr*> replicaMR_map; /* a map for logical memory region ID to real memory region*/

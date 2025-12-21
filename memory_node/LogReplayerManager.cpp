@@ -57,6 +57,18 @@ void LogReplayerManager::HandleLogSegmentRequest(const LogSegmentRequest& reques
     segment.segment_size = request.segment_size;
     segment.received_length = 0;
     
+    // Calculate and cache the physical pointer to avoid recalculation during replay
+    uint16_t logical_id = request.log_segment_addr.nodeID;
+    uint16_t this_physical_id = rdma_mg_->node_id;
+    segment.physical_ptr = rdma_mg_->TranslateLogicalToPhysicalAddress(
+        logical_id, request.log_segment_addr.offset, this_physical_id);
+    
+    if (segment.physical_ptr == 0) {
+        fprintf(stderr, "LogReplayerManager: Error - Could not translate segment address for logical_id=%u, segment=0x%lx\n",
+               logical_id, request.log_segment_addr.val);
+        return;
+    }
+    
     std::unique_lock<RWSpinMutex> segments_lk(stream_state->segments_mtx);
 #ifndef NDEBUG
     // Before adding a new segment, verify all previous segments are filled to near capacity
@@ -375,9 +387,10 @@ void LogReplayerManager::ReplayerThreadFunc(LogicalRegionReplayer* region_replay
                     }
                 }
                 fflush(stdout);
-                
+                lk.lock();
+                region_replayer->new_data_cv.wait(lk);
                 // Abort for debugging
-                assert(false && "Log replay deadlock detected: bouncing between streams without progress");
+                // assert(false && "Log replay deadlock detected: bouncing between streams without progress");
             }
         } else {
             // Progress was made or no available logs, reset counter
@@ -476,22 +489,16 @@ void LogReplayerManager::ReplayLogData(LogStreamState* stream_state, uint64_t av
         const LogSegment* current_seg = &(*seg_it);
         uint64_t remaining_in_segment = current_seg->received_length - offset_in_segment;
         
-        // Get physical address of the segment
-        uint16_t logical_id = current_seg->segment_addr.nodeID;
-        uint16_t this_physical_id = rdma_mg_->node_id;
-        GlobalAddress seg_addr = current_seg->segment_addr;
-        seg_addr.offset += offset_in_segment;
-        
-        uint64_t physical_seg_addr = rdma_mg_->TranslateLogicalToPhysicalAddress(
-            logical_id, seg_addr.offset, this_physical_id);
-        
-        if (physical_seg_addr == 0) {
-            printf("LogReplayer: Error - Could not translate segment address for logical_id=%u, segment=0x%lx\n",
-                   logical_id, current_seg->segment_addr.val);
+        // Use cached physical pointer instead of recalculating from replication metadata
+        if (current_seg->physical_ptr == 0) {
+            printf("LogReplayer: Error - Invalid physical pointer for segment=0x%lx\n",
+                   current_seg->segment_addr.val);
             segments_lk.unlock();
             break;
         }
         
+        // Calculate current physical address by adding offset to base physical pointer
+        uint64_t physical_seg_addr = current_seg->physical_ptr + offset_in_segment;
         char* log_buffer = reinterpret_cast<char*>(physical_seg_addr);
         uint64_t bytes_to_process = std::min(available_bytes - total_processed_bytes, remaining_in_segment);
         segments_lk.unlock();
@@ -552,8 +559,8 @@ void LogReplayerManager::ReplayLogData(LogStreamState* stream_state, uint64_t av
                 // Apply the record
                 if (ProcessLogRecord(*header, payload, payload_size)) {
                     SetCurrentPageVersion(header->page_gaddr, header->page_version);
-                    printf("LogReplayer: Applied record (page_version=%lu) for page=0x%lx\n",
-                           header->page_version, header->page_gaddr.val);
+                    printf("LogReplayer: Applied record (page_version=%lu) for page=0x%lx from compute_node=%u\n",
+                           header->page_version, header->page_gaddr.val, stream_state->compute_node_id);
                     total_records_processed++;
                 } else {
                     // ProcessLogRecord failed - this should not happen
@@ -806,28 +813,24 @@ void LogReplayerManager::RecycleSegments(LogStreamState* stream_state) {
             } else {
                 // Check if the last byte (at position received_length-1) is SEGMENT_CLOSE_MARKER
                 // received_length INCLUDES the marker, so marker is at position received_length-1
-                // Translate logical address to physical address on this memory node
-                uint16_t logical_id = seg.segment_addr.nodeID;
-                uint16_t this_physical_id = rdma_mg_->node_id;
-                
-                // Calculate the address to check (segment_addr + received_length - 1)
-                GlobalAddress check_addr = seg.segment_addr;
-                check_addr.offset += seg.received_length - 1;
-                
-                // Get the physical address for this replica
-                uint64_t physical_addr = rdma_mg_->TranslateLogicalToPhysicalAddress(
-                    logical_id, check_addr.offset, this_physical_id);
-                
-                if (physical_addr != 0) {
-                    // Directly read the byte from physical memory
-                    char* marker_ptr = reinterpret_cast<char*>(physical_addr);
-                    char marker = *marker_ptr;
-                    
-                    if (marker == RedoLogger::SEGMENT_CLOSE_MARKER) {
-                        can_recycle = true;
-                    }
+                // Use cached physical pointer instead of recalculating from replication metadata
+                if (seg.physical_ptr == 0) {
+                    printf("LogReplayer: Error - Invalid physical pointer for segment=0x%lx in RecycleSegments\n",
+                           seg.segment_addr.val);
+                    continue;
                 }
-                // If translation failed, don't recycle (safer to wait)
+                
+                // Calculate the address to check using cached physical pointer + offset
+                uint64_t check_physical_addr = seg.physical_ptr + seg.received_length - 1;
+                
+                // Use the cached physical pointer (no need to recalculate from replication metadata)
+                // Directly read the byte from physical memory
+                char* marker_ptr = reinterpret_cast<char*>(check_physical_addr);
+                char marker = *marker_ptr;
+                
+                if (marker == RedoLogger::SEGMENT_CLOSE_MARKER) {
+                    can_recycle = true;
+                }
             }
         }
         

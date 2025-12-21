@@ -20,9 +20,10 @@ namespace DSMEngine {
 
 // Structure to track a log segment
 struct LogSegment {
-    GlobalAddress segment_addr;      // Address of the remote log segment
+    GlobalAddress segment_addr;      // Address of the remote log segment (logical)
     size_t segment_size;              // Size of the segment
     uint64_t received_length;         // Total length of logs received in this segment
+    uint64_t physical_ptr;            // Physical pointer to the segment (cached to avoid recalculation)
 };
 
 // Structure to track per-compute-node log stream state for a logical memory region

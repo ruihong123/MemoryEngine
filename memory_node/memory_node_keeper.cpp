@@ -669,7 +669,7 @@ void Memory_Node_Keeper::create_mr_1GB_handler(RDMA_Request *request,
             static_cast<unsigned>(request->content.mr_request.mem_size));
         // Send error reply instead of asserting
         send_pointer->received = false;
-        send_pointer->content.mr = {}; // Empty MR to indicate failure
+        send_pointer->content.gptr = GlobalAddress::Null(); // Empty GlobalAddress to indicate failure
 
         rdma_mg->RDMA_Write(request->buffer, request->rkey, &send_mr,
                             sizeof(RDMA_Reply), client_ip, IBV_SEND_SIGNALED, 1,
@@ -684,8 +684,7 @@ void Memory_Node_Keeper::create_mr_1GB_handler(RDMA_Request *request,
       fprintf(stderr, "Exception in memory registration: %s\n", e.what());
       // Send error reply for exception case
       send_pointer->received = true;
-      send_pointer->content.mr = {};             // Empty MR to indicate failure
-      send_pointer->content.mr.addr = (void *)1; // Set addr to 1 to mark error
+      send_pointer->content.gptr = GlobalAddress::Null(); // Empty GlobalAddress to indicate failure
 
       rdma_mg->RDMA_Write(request->buffer, request->rkey, &send_mr,
                           sizeof(RDMA_Reply), client_ip, IBV_SEND_SIGNALED, 1,
@@ -694,11 +693,33 @@ void Memory_Node_Keeper::create_mr_1GB_handler(RDMA_Request *request,
       delete request;
       return;
     }
+    
+    // Calculate GlobalAddress for the allocated memory region
+    // The memory node knows the logical_region_id and can calculate the offset
+    GlobalAddress base_gptr;
+    base_gptr.nodeID = logical_region_id;
+    
+    // Find the base_ptr for this logical region on this physical node
+    auto it = rdma_mg->logical_groups.find(logical_region_id);
+    if (it != rdma_mg->logical_groups.end()) {
+        // Find this physical node's base_ptr in the replica set
+        for (const auto& phys_reg : it->second.physical_regions) {
+            if (phys_reg.phys_id == rdma_mg->node_id) {
+                // Calculate offset relative to logical region base
+                uint64_t physical_addr = reinterpret_cast<uint64_t>(mr->addr);
+                base_gptr.offset = physical_addr - phys_reg.base_ptr;
+                break;
+            }
+        }
+    } else {
+        // Fallback: use absolute address (should not happen for logical regions)
+        base_gptr.offset = reinterpret_cast<uint64_t>(mr->addr);
+    }
+    
+    send_pointer->content.gptr = base_gptr;  // Changed from mr to gptr
+    assert(mr->length == define::Alloc_Granu);
+    send_pointer->received = true;
   }
-
-  send_pointer->content.mr = *mr;
-  assert(send_pointer->content.mr.length == define::Alloc_Granu);
-  send_pointer->received = true;
   
   // Track allocation per compute node
   {
@@ -960,6 +981,8 @@ void Memory_Node_Keeper::log_replay_status_query_handler(RDMA_Request* request,
   rdma_mg->RDMA_Write(request->buffer, request->rkey, &send_mr,
                       sizeof(RDMA_Reply), client_ip, IBV_SEND_SIGNALED, 1,
                       target_node_id);
+  printf("Sent log replay status reply to compute node %u\n", target_node_id);
+  fflush(stdout);
   rdma_mg->Deallocate_Local_RDMA_Slot(send_mr.addr, Message);
   delete request;
 }

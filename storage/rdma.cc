@@ -272,21 +272,15 @@ namespace DSMEngine {
 
         if (!remote_mem_leaf_pool.empty()) {
             for (auto p: remote_mem_leaf_pool) {
-                for (auto iter: *p.second) {
-                    delete iter;
-                }
-                delete p.second; // remote buffer is not registered on this machine so
-                // just delete the structure
+                // remote_mem_leaf_pool now stores GlobalAddress, not ibv_mr*, so just delete the vector
+                delete p.second;
             }
             remote_mem_leaf_pool.clear();
         }
         if (!remote_mem_delta_pool.empty()) {
             for (auto p: remote_mem_delta_pool) {
-                for (auto iter: *p.second) {
-                    delete iter;
-                }
-                delete p.second; // remote buffer is not registered on this machine so
-                // just delete the structure
+                // remote_mem_delta_pool now stores GlobalAddress, not ibv_mr*, so just delete the vector
+                delete p.second;
             }
             remote_mem_delta_pool.clear();
         }
@@ -1632,8 +1626,8 @@ namespace DSMEngine {
                 {target_node_id, new std::map<void *, In_Use_Array *>()});
             Remote_Delta_Bitmap.insert(
                 {target_node_id, new std::map<void *, In_Use_Array *>()});
-            remote_mem_delta_pool.insert({target_node_id, new std::vector<ibv_mr *>()});
-            remote_mem_leaf_pool.insert({target_node_id, new std::vector<ibv_mr *>()});
+            remote_mem_delta_pool.insert({target_node_id, new std::vector<GlobalAddress>()});
+            remote_mem_leaf_pool.insert({target_node_id, new std::vector<GlobalAddress>()});
             top.insert({target_node_id, 0});
             mtx_imme_map.insert({target_node_id, new std::mutex});
             imm_gen_map.insert({target_node_id, new std::atomic<uint32_t>{0}});
@@ -5364,7 +5358,9 @@ namespace DSMEngine {
         sr[0].next = &sr[1];
         *(uint64_t *) cas_buffer->addr = 0;
         assert(page_addr.nodeID == lock_addr.nodeID);
-        Batch_Submit_WRs(sr, 1, page_addr.nodeID);
+        // For read and atomic operations, always use primary physical ID
+        uint16_t primary_phys_id = GetPrimaryPhysicalId(page_addr.nodeID);
+        Batch_Submit_WRs(sr, 1, primary_phys_id);
         uint64_t return_value = *(uint64_t *) cas_buffer->addr;
         // Note that the read latch can not be global hand-overed, because read latch
         // FAA can overflow the read bitmap.
@@ -5448,10 +5444,12 @@ namespace DSMEngine {
         sr[0].next = &sr[1];
         *(uint64_t *) cas_buffer->addr = 0;
         assert(page_addr.nodeID == lock_addr.nodeID);
+        // For read and atomic operations, always use primary physical ID
+        uint16_t primary_phys_id = GetPrimaryPhysicalId(page_addr.nodeID);
 #ifdef GETANALYSIS
     auto statistic_start = std::chrono::high_resolution_clock::now();
 #endif
-    Batch_Submit_WRs(sr, 1, page_addr.nodeID);
+    Batch_Submit_WRs(sr, 1, primary_phys_id);
 #ifdef GETANALYSIS
     auto stop = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -5540,7 +5538,9 @@ namespace DSMEngine {
     //        &sr[1];
     //        *(uint64_t *)cas_buffer->addr = 0;
     //        assert(page_addr.nodeID == lock_addr.nodeID);
-    Batch_Submit_WRs(sr, 1, lock_addr.nodeID);
+    // For atomic operations, always use primary physical ID
+    uint16_t primary_phys_id = GetPrimaryPhysicalId(lock_addr.nodeID);
+    Batch_Submit_WRs(sr, 1, primary_phys_id);
     uint64_t cas_value = (*(uint64_t *) cas_buffer->addr);
   if ((cas_value)!= compare) {
     //            page_version = ((DataPage*) page_buffer->addr)->hdr.p_version;
@@ -5716,7 +5716,9 @@ namespace DSMEngine {
         //        &sr[1];
         //        *(uint64_t *)cas_buffer->addr = 0;
         //        assert(page_addr.nodeID == lock_addr.nodeID);
-        Batch_Submit_WRs(sr, 1, lock_addr.nodeID);
+        // For atomic operations, always use primary physical ID
+        uint16_t primary_phys_id = GetPrimaryPhysicalId(lock_addr.nodeID);
+        Batch_Submit_WRs(sr, 1, primary_phys_id);
         uint64_t cas_value = (*(uint64_t *) cas_buffer->addr);
         if ((cas_value) != compare) {
             //            page_version = ((DataPage*) page_buffer->addr)->hdr.p_version;
@@ -5842,35 +5844,6 @@ namespace DSMEngine {
                 stop - statistic_start);
             PostreadTotal.fetch_add(duration.count());
             Postreadcounter.fetch_add(1);
-#endif
-
-#ifndef NDEBUG
-            // if ((*(uint64_t *)cas_buffer->addr &
-            //      (1ull << (RDMA_Manager::node_id / 2 + 1))) == 0) {
-            //   size_t count = 0;
-            //
-            // retry_check:
-            //   count++;
-            //   uint64_t old_cas = *(uint64_t *)cas_buffer->addr;
-            //   spin_wait_us(100);
-            //   // RDMA read the latch word again and see if it is the same as the compare
-            //   // value.
-            //   RDMA_Read(lock_addr, cas_buffer, 8, IBV_SEND_SIGNALED, 1, Regular_Page);
-            //   if ((*(uint64_t *)cas_buffer->addr &
-            //        (1ull << (RDMA_Manager::node_id / 2 + 1))) != 0) {
-            //     printf("NodeID %u RDMA write to reader handover over data %p move too "
-            //            "fast, resulting in spurious latch word mismatch, latch word is "
-            //            "%p\n",
-            //            node_id, lock_addr, old_cas);
-            //     //                    fflush(stdout);
-            //     if (count > 100) {
-            //       assert(false);
-            //     }
-            //     goto retry_check;
-            //   }
-            //   printf("Have retry %lu times\n", count);
-            //   //                goto retry;
-            // }
 #endif
             //            assert((*(uint64_t*)cas_buffer->addr & (1ull <<
             //            (RDMA_Manager::node_id/2 + 1))) != 0);
@@ -6035,8 +6008,10 @@ namespace DSMEngine {
         sr[0].next = &sr[1];
         *(uint64_t *) cas_buffer->addr = 0;
         assert(page_addr.nodeID == lock_addr.nodeID);
+        // For read and atomic operations, always use primary physical ID
+        uint16_t primary_phys_id = GetPrimaryPhysicalId(page_addr.nodeID);
         std::string str("default");
-        Batch_Submit_WRs(sr, 1, page_addr.nodeID);
+        Batch_Submit_WRs(sr, 1, primary_phys_id);
         //        printf("READ page %p from remote memory to local mr %p 2 thread_id
         //        is %d\n", page_addr, page_buffer->addr, thread_id);
 
@@ -6045,7 +6020,7 @@ namespace DSMEngine {
         // (this_page_g_ptr) has already  be incosistent
 #ifndef NDEBUG
         auto page = (LeafPage *) (page_buffer->addr);
-        //        assert(page_addr == page->hdr.this_page_g_ptr);
+        // check whether this page type is valid. If it is not valid, we have to print some info for debug.
 #endif
         // Rethink the logic of this part. Can it result in false lock acquire?
         if ((*(uint64_t *) cas_buffer->addr) != compare) {
@@ -6270,8 +6245,10 @@ namespace DSMEngine {
         //        IBV_SEND_SIGNALED, Internal_and_Leaf);
         *(uint64_t *) cas_buffer->addr = 0;
         assert(page_addr.nodeID == lock_addr.nodeID);
+        // For atomic operations, always use primary physical ID
+        uint16_t primary_phys_id = GetPrimaryPhysicalId(page_addr.nodeID);
         std::string str("default");
-        Batch_Submit_WRs(sr, 1, page_addr.nodeID);
+        Batch_Submit_WRs(sr, 1, primary_phys_id);
         invalidation_RPC_type = 0;
         // When the program fail at the code below the remote buffer content
         // (this_page_g_ptr) has already  be incosistent
@@ -6379,8 +6356,10 @@ namespace DSMEngine {
     //        IBV_SEND_SIGNALED, Internal_and_Leaf);
   *(uint64_t *)cas_buffer->addr=0;
     assert (page_addr.nodeID== lock_addr.nodeID);
+    // For atomic operations, always use primary physical ID
+    uint16_t primary_phys_id = GetPrimaryPhysicalId(page_addr.nodeID);
     std::string str("default");
-    Batch_Submit_WRs(sr, 1, page_addr.nodeID);
+    Batch_Submit_WRs(sr, 1, primary_phys_id);
     invalidation_RPC_type=0;
     // When the program fail at the code below the remote buffer content
     // (this_page_g_ptr) has already  be incosistent
@@ -6455,7 +6434,9 @@ namespace DSMEngine {
         sr[0].next = &sr[1];
         *(uint64_t *) cas_buffer->addr = 0;
         assert(page_addr.nodeID == lock_addr.nodeID);
-        Batch_Submit_WRs(sr, 1, page_addr.nodeID);
+        // For read and atomic operations, always use primary physical ID
+        uint16_t primary_phys_id = GetPrimaryPhysicalId(page_addr.nodeID);
+        Batch_Submit_WRs(sr, 1, primary_phys_id);
         if ((*(uint64_t *) cas_buffer->addr) != compare) {
             // clear the invalidation targets
             goto retry;
@@ -6929,7 +6910,8 @@ namespace DSMEngine {
                 //                sr[0].next = &sr[1];
                 *(uint64_t *) async_cas->addr = 0;
                 assert(page_addr.nodeID == remote_lock_addr.nodeID);
-                Batch_Submit_WRs(sr, 0, page_addr.nodeID, qp_type);
+                // For atomic operations (FAA unlock), always use primary physical ID
+                Batch_Submit_WRs(sr, 0, primary_physical_id, qp_type);
 
                 // tasks->work_type[*counter] = (Async_Tasks::handover_async);
                 //   tasks->work_type.push_back(Async_Tasks::handover_async);
@@ -6942,7 +6924,8 @@ namespace DSMEngine {
 
                 *(uint64_t *) local_CAS_mr->addr = 0;
                 assert(page_addr.nodeID == remote_lock_addr.nodeID);
-                Batch_Submit_WRs(sr, 1, page_addr.nodeID, qp_type);
+                // For atomic operations (FAA unlock), always use primary physical ID
+                Batch_Submit_WRs(sr, 1, primary_physical_id, qp_type);
                 //                assert(((*(uint64_t*) local_CAS_mr->addr) >> 56) == (add
                 //                >> 56));
 #ifndef NDEBUG
@@ -7033,7 +7016,9 @@ namespace DSMEngine {
             //            sr[0].next = &sr[1];
 
             assert(page_addr.nodeID == remote_lock_addr.nodeID);
-            Batch_Submit_WRs(sr, 1, page_addr.nodeID);
+            // For atomic operations (FAA unlock), always use primary physical ID
+            uint16_t primary_phys_id = GetPrimaryPhysicalId(page_addr.nodeID);
+            Batch_Submit_WRs(sr, 1, primary_phys_id);
 #ifndef NDEBUG
             uint64_t initial_old_cas = (*(uint64_t *) local_CAS_mr->addr);
             if (((*(uint64_t *) local_CAS_mr->addr) >> 56) != (compare >> 56)) {
@@ -7279,7 +7264,9 @@ namespace DSMEngine {
 
             *(uint64_t *) local_CAS_mr->addr = 0;
             assert(page_addr.nodeID == remote_lock_addr.nodeID);
-            Batch_Submit_WRs(sr, 0, page_addr.nodeID);
+            // For write operations: use primary physical ID (deprecated function, simplified)
+            uint16_t primary_phys_id = GetPrimaryPhysicalId(page_addr.nodeID);
+            Batch_Submit_WRs(sr, 0, primary_phys_id);
             // TODO: it could be spuriously failed because of the FAA.so we can not have
             // async
         } else {
@@ -7310,7 +7297,9 @@ namespace DSMEngine {
             sr[0].next = &sr[1];
 
             assert(page_addr.nodeID == remote_lock_addr.nodeID);
-            Batch_Submit_WRs(sr, 1, page_addr.nodeID);
+            // For write operations: use primary physical ID (deprecated function, simplified)
+            uint16_t primary_phys_id = GetPrimaryPhysicalId(page_addr.nodeID);
+            Batch_Submit_WRs(sr, 1, primary_phys_id);
             if ((*(uint64_t *) local_CAS_mr->addr) != compare) {
                 assert(((*(uint64_t *)local_CAS_mr->addr) >> 56) == (compare >> 56));
                 goto retry;
@@ -8072,7 +8061,7 @@ namespace DSMEngine {
 
         // Now poll all reply buffers (blocking phase)
         // printf("Polling reply buffers from all replicas...\n");
-        ibv_mr primary_mr = {};
+        GlobalAddress base_gptr = GlobalAddress::Null();
 
         for (size_t i = 0; i < replicas.size(); ++i) {
             uint16_t physical_id = replicas[i].phys_id;
@@ -8084,10 +8073,10 @@ namespace DSMEngine {
             poll_reply_buffer(receive_pointers[i]);
             // printf("Received reply from physical node %u\n", physical_id);
 
-            // Store the primary replica's MR info
+            // Store the primary replica's GlobalAddress info
             if (i == 0) {
-                primary_mr = receive_pointers[i]->content.mr;
-                // printf("Stored primary MR info from physical node %u\n", physical_id);
+                base_gptr = receive_pointers[i]->content.gptr;  // Receive GlobalAddress from memory node
+                // printf("Stored primary GlobalAddress info from physical node %u\n", physical_id);
             }
         }
 
@@ -8095,12 +8084,15 @@ namespace DSMEngine {
             fprintf(stderr, "Warning: Some replicas failed to register memory\n");
         }
 
-        // Only add the primary replica's MR to the bitmap (for allocation tracking)
-        auto *temp_pointer = new ibv_mr();
-        *temp_pointer = primary_mr; // Use primary replica's MR for bitmap tracking
+        // Verify we received a valid GlobalAddress
+        if (base_gptr.val == 0) {
+            assert(false);
+            fprintf(stderr, "Error: Received invalid GlobalAddress from primary replica\n");
+            return false;
+        }
 
         std::map<uint16_t, std::map<void *, In_Use_Array *> *> *Bitmap_map;
-        std::map<uint16_t, std::vector<ibv_mr *> *> *remote_mem_pool;
+        std::map<uint16_t, std::vector<GlobalAddress> *> *remote_mem_pool;
         uint64_t chunk_size = 0;
         switch (pool_name) {
             case Chunk_type::Regular_Page:
@@ -8117,15 +8109,15 @@ namespace DSMEngine {
                 assert(false);
         }
 
-        // Add to logical region's bitmap (using logical region ID as key)
-        remote_mem_pool->at(target_region_id)->push_back(temp_pointer);
-        assert(temp_pointer->length == size);
+        // Add base GlobalAddress to logical region's pool
+        remote_mem_pool->at(target_region_id)->push_back(base_gptr);
 
-        // Create bitmap for allocation tracking
-        int placeholder_num = static_cast<int>(temp_pointer->length) / chunk_size;
+        // Create bitmap for allocation tracking using GlobalAddress constructor
+        int placeholder_num = static_cast<int>(size) / chunk_size;
         In_Use_Array *in_use_array =
-                new In_Use_Array(placeholder_num, chunk_size, temp_pointer);
-        Bitmap_map->at(target_region_id)->insert({temp_pointer->addr, in_use_array});
+                new In_Use_Array(placeholder_num, chunk_size, base_gptr);
+        // Use the base GlobalAddress value as the key (convert to void* for map compatibility)
+        Bitmap_map->at(target_region_id)->insert({reinterpret_cast<void*>(base_gptr.val), in_use_array});
 
         // Track allocation per region and pool type (on compute nodes)
         {
@@ -8874,89 +8866,32 @@ namespace DSMEngine {
     void RDMA_Manager::Allocate_Remote_RDMA_Slot(ibv_mr &remote_mr,
                                                  Chunk_type pool_name,
                                                  uint16_t target_region_id) {
-        std::map<uint16_t, std::map<void *, In_Use_Array *> *> *Bitmap_map;
-        std::map<uint16_t, std::vector<ibv_mr *> *> *remote_mem_pool;
-        uint64_t chunk_size = 0;
-        switch (pool_name) {
-            case Chunk_type::Regular_Page:
-                Bitmap_map = &Remote_Leaf_Node_Bitmap;
-                remote_mem_pool = &remote_mem_leaf_pool;
-                chunk_size = name_to_chunksize.at(pool_name);;
-                break;
-            case Chunk_type::DeltaChunk:
-                Bitmap_map = &Remote_Delta_Bitmap;
-                remote_mem_pool = &remote_mem_delta_pool;
-                chunk_size = name_to_chunksize.at(pool_name);
-                break;
-            default:
-                assert(false);
-        }
-        // If the Remote buffer is empty, register one from the remote memory.
-        //  remote_mr = new ibv_mr;
-        if (Bitmap_map->at(target_region_id)->empty()) {
-            // this lock is to prevent the system register too much remote memory at the
-            // begginning.
-            std::unique_lock<std::shared_mutex> mem_write_lock(remote_mem_mutex);
-            if (Bitmap_map->at(target_region_id)->empty()) {
-                Remote_Memory_Register(define::Alloc_Granu, target_region_id, pool_name);
-            }
-            mem_write_lock.unlock();
-        }
-        std::shared_lock<std::shared_mutex> mem_read_lock(remote_mem_mutex);
-        auto ptr = Bitmap_map->at(target_region_id)->begin();
-
-        while (ptr != Bitmap_map->at(target_region_id)->end()) {
-            // iterate among all the remote memory region
-            // find the first empty SSTable Placeholder's iterator, iterator->first is
-            // ibv_mr* second is the bool vector for this ibv_mr*. Each ibv_mr is the
-            // origin block get from the remote memory. The memory was divided into
-            // chunks with size == SSTable size.
-            int sst_index = ptr->second->allocate_memory_slot();
-            if (sst_index >= 0) {
-                remote_mr = *((ptr->second)->get_mr_ori());
-                remote_mr.addr = static_cast<void *>(static_cast<char *>(remote_mr.addr) +
-                                                     sst_index * chunk_size);
-                remote_mr.length = chunk_size;
-
-                //        remote_data_mrs->fname = file_name;
-                //        remote_data_mrs->map_pointer =
-                //          (ptr->second).get_mr_ori();  // it could be confused that the
-                //          map_pointer is for the memtadata deletion
-                // so that we can easily find where to deallocate our RDMA buffer. The key
-                // is a pointer to ibv_mr.
-                //      remote_data_mrs->file_size = 0;
-                //      DEBUG_arg("Allocate Remote pointer %p",  remote_mr.addr);
-                return;
-            } else {
-                ptr++;
-            }
-        }
-        mem_read_lock.unlock();
-        // If not find remote buffers are all used, allocate another remote memory
-        // region.
-        std::unique_lock<std::shared_mutex> mem_write_lock(remote_mem_mutex);
-        Remote_Memory_Register(define::Alloc_Granu, target_region_id, pool_name);
-        //  fs_meta_save();
-        ibv_mr *mr_last;
-        mr_last = remote_mem_pool->at(target_region_id)->back();
-        int sst_index = Bitmap_map->at(target_region_id)
-                ->at(mr_last->addr)
-                ->allocate_memory_slot();
-        assert(sst_index >= 0);
-        mem_write_lock.unlock();
-
-        //  sst_meta->mr = new ibv_mr();
-        remote_mr = *(mr_last);
-        remote_mr.addr = static_cast<void *>(static_cast<char *>(remote_mr.addr) +
-                                             sst_index * chunk_size);
-        remote_mr.length = chunk_size;
+        // This version is deprecated - use the GlobalAddress-returning version instead
+        // For backward compatibility, allocate using GlobalAddress and convert back to ibv_mr
+        GlobalAddress gptr = Allocate_Remote_RDMA_Slot(pool_name, target_region_id);
+        
+        // Convert GlobalAddress back to ibv_mr for backward compatibility
+        // Calculate physical address from GlobalAddress
+        uint16_t primary_phys_id = GetPrimaryPhysicalId(gptr.nodeID);
+        uint64_t physical_addr = TranslateLogicalToPhysicalAddress(
+            gptr.nodeID, gptr.offset, primary_phys_id);
+        uint32_t physical_rkey = GetPhysicalRkey(gptr.nodeID, primary_phys_id);
+        
+        // Fill in remote_mr (note: this is a local structure, not a real registered MR)
+        remote_mr.addr = reinterpret_cast<void*>(physical_addr);
+        remote_mr.length = name_to_chunksize.at(pool_name);
+        remote_mr.rkey = physical_rkey;
+        remote_mr.lkey = 0;  // Not used for remote MR
+        remote_mr.context = nullptr;  // Not used for remote MR
+        remote_mr.pd = nullptr;  // Not used for remote MR
+        remote_mr.handle = 0;  // Not used for remote MR
     }
 
     GlobalAddress
     RDMA_Manager::Allocate_Remote_RDMA_Slot(Chunk_type pool_name,
                                             uint16_t target_region_id) {
         std::map<uint16_t, std::map<void *, In_Use_Array *> *> *Bitmap_map;
-        std::map<uint16_t, std::vector<ibv_mr *> *> *remote_mem_pool;
+        std::map<uint16_t, std::vector<GlobalAddress> *> *remote_mem_pool;
         uint64_t chunk_size = 0;
         switch (pool_name) {
             case Chunk_type::Regular_Page:
@@ -8988,38 +8923,21 @@ namespace DSMEngine {
         std::shared_lock<std::shared_mutex> mem_read_lock(remote_mem_mutex);
         auto ptr = Bitmap_map->at(target_region_id)->begin();
         GlobalAddress ret;
-        ibv_mr remote_mr;
         while (ptr != Bitmap_map->at(target_region_id)->end()) {
             // iterate among all the remote memory region
-            // find the first empty SSTable Placeholder's iterator, iterator->first is
-            // ibv_mr* second is the bool vector for this ibv_mr*. Each ibv_mr is the
-            // origin block get from the remote memory. The memory was divided into
-            // chunks with size == SSTable size.
+            // find the first empty chunk. The bitmap stores In_Use_Array with base GlobalAddress
             int sst_index = ptr->second->allocate_memory_slot();
             assert(ptr->second->get_chunk_size() == chunk_size);
             if (pool_name == Chunk_type::DeltaChunk) {
                 // assert(chunk_size == 10485760);
             }
             if (sst_index >= 0) {
-                remote_mr = *((ptr->second)->get_mr_ori());
-                remote_mr.addr = static_cast<void *>(static_cast<char *>(remote_mr.addr) +
-                                                     sst_index * chunk_size);
-                remote_mr.length = chunk_size;
-                ret.nodeID = target_region_id;
-                // Calculate offset relative to logical region base for replication-aware
-                // system
-                if (IsLogicalMemoryId(target_region_id)) {
-                    // For replicated memory: calculate offset within the logical region
-                    uint16_t primary_phys_id = GetPrimaryPhysicalId(target_region_id);
-                    uint64_t logical_base = TranslateLogicalToPhysicalAddress(
-                        target_region_id, 0, primary_phys_id);
-                    ret.offset = reinterpret_cast<uint64_t>(remote_mr.addr) - logical_base;
-                    assert(ret.offset < 69055800320ull);
-                } else {
-                    // For non-replicated memory: return error (unsupported)
-                    throw std::runtime_error("This memory region id is not configured in "
-                        "the configuration file.");
-                }
+                // Get base GlobalAddress from the bitmap
+                GlobalAddress base_gptr = ptr->second->get_gptr_ori();
+                ret.nodeID = base_gptr.nodeID;
+                // Calculate offset by adding sst_index * chunk_size to base offset
+                ret.offset = base_gptr.offset + (sst_index * chunk_size);
+                assert(ret.offset < 69055800320ull);
                 return ret;
             } else {
                 ptr++;
@@ -9027,79 +8945,43 @@ namespace DSMEngine {
         }
         mem_read_lock.unlock();
         // If not find remote buffers are all used, allocate another remote memory
-        // region.
+        // region. Use double-check locking to avoid multiple registrations.
         std::unique_lock<std::shared_mutex> mem_write_lock(remote_mem_mutex);
-        // Not necessaryly be the last one
-        //  the pulled mr may not belong to this bitmap, need to fix it.
-        ibv_mr *mr_last = remote_mem_pool->at(target_region_id)->back();
-        int sst_index = -1;
-        In_Use_Array *last_element =
-                Bitmap_map->at(target_region_id)->at(mr_last->addr);
-        assert(last_element->get_chunk_size() == chunk_size);
-        if (last_element->get_chunk_size() == chunk_size) {
-            sst_index = last_element->allocate_memory_slot();
-        } else {
-            assert(false);
-        }
-        if (sst_index >= 0) {
-            remote_mr = *(last_element->get_mr_ori());
-            remote_mr.addr = static_cast<void *>(static_cast<char *>(remote_mr.addr) +
-                                                 sst_index * chunk_size);
-            remote_mr.length = chunk_size;
-            ret.nodeID = target_region_id;
-            // Calculate offset relative to logical region base for replication-aware
-            // system
-            if (IsLogicalMemoryId(target_region_id)) {
-                // For replicated memory: calculate offset within the logical region
-                uint16_t primary_phys_id = GetPrimaryPhysicalId(target_region_id);
-                uint64_t logical_base = TranslateLogicalToPhysicalAddress(
-                    target_region_id, 0, primary_phys_id);
-                ret.offset = reinterpret_cast<uint64_t>(remote_mr.addr) - logical_base;
-            } else {
-                // For non-replicated memory: use absolute address (backward
-                // compatibility)
-                throw std::runtime_error(
-                    "This memory region id is not configured in the configuration file.");
-            }
-            assert(ret.offset < 69055800320ull);
-            return ret;
-        } else {
-            Remote_Memory_Register(define::Alloc_Granu, target_region_id, pool_name);
-            //  fs_meta_save();
-            //  ibv_mr* mr_last;
-            mr_last = remote_mem_pool->at(target_region_id)->back();
-            sst_index = Bitmap_map->at(target_region_id)
-                    ->at(mr_last->addr)
-                    ->allocate_memory_slot();
-            assert(sst_index >= 0);
-            mem_write_lock.unlock();
-
-            //  sst_meta->mr = new ibv_mr();
-            remote_mr = *(mr_last);
-            remote_mr.addr = static_cast<void *>(static_cast<char *>(remote_mr.addr) +
-                                                 sst_index * chunk_size);
-            remote_mr.length = chunk_size;
-            ret.nodeID = target_region_id;
-            // Calculate offset relative to logical region base for replication-aware
-            // system
-            if (IsLogicalMemoryId(target_region_id)) {
-                // For replicated memory: calculate offset within the logical region
-                uint16_t primary_phys_id = GetPrimaryPhysicalId(target_region_id);
-                uint64_t logical_base = TranslateLogicalToPhysicalAddress(
-                    target_region_id, 0, primary_phys_id);
-                ret.offset = reinterpret_cast<uint64_t>(remote_mr.addr) - logical_base;
+        
+        // Double-check: another thread might have registered memory while we waited for the lock
+        // Check only the latest bitmap entry to see if it has available slots
+        if (!remote_mem_pool->at(target_region_id)->empty()) {
+            GlobalAddress base_gptr_last = remote_mem_pool->at(target_region_id)->back();
+            In_Use_Array *last_element =
+                    Bitmap_map->at(target_region_id)->at(reinterpret_cast<void*>(base_gptr_last.val));
+            int sst_index_check = last_element->allocate_memory_slot();
+            if (sst_index_check >= 0) {
+                // Found available slot in the latest memory region
+                ret.nodeID = base_gptr_last.nodeID;
+                ret.offset = base_gptr_last.offset + (sst_index_check * chunk_size);
                 assert(ret.offset < 69055800320ull);
-            } else {
-                assert(false);
-                // For non-replicated memory: use absolute address (backward
-                // compatibility)
-                ret.offset = reinterpret_cast<uint64_t>(remote_mr.addr);
+                mem_write_lock.unlock();
+                return ret;
             }
-            //    remote_data_mrs->fname = file_name;
-            //    remote_data_mrs->map_pointer = mr_last;
-            //  DEBUG_arg("Allocate Remote pointer %p",  remote_mr.addr);
-            return ret;
         }
+        
+        // Latest memory region is full (or doesn't exist), need to register new memory
+        Remote_Memory_Register(define::Alloc_Granu, target_region_id, pool_name);
+        // Get the last GlobalAddress from the pool (the newly registered one)
+        GlobalAddress base_gptr_last = remote_mem_pool->at(target_region_id)->back();
+        // Use the GlobalAddress value as the key to find the In_Use_Array
+        In_Use_Array *last_element =
+                Bitmap_map->at(target_region_id)->at(reinterpret_cast<void*>(base_gptr_last.val));
+        assert(last_element->get_chunk_size() == chunk_size);
+        int sst_index = last_element->allocate_memory_slot();
+        assert(sst_index >= 0);  // Newly registered memory should have available slots
+        
+        // Calculate GlobalAddress from base GlobalAddress
+        ret.nodeID = base_gptr_last.nodeID;
+        ret.offset = base_gptr_last.offset + (sst_index * chunk_size);
+        assert(ret.offset < 69055800320ull);
+        mem_write_lock.unlock();
+        return ret;
     }
 
     // A function try to allocate RDMA registered local memory

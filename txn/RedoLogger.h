@@ -268,63 +268,68 @@ namespace DSMEngine {
                 return; // No streams, nothing to wait for
             }
             
-            // For each logical region, query all replica memory nodes
+            // Collect all unique physical memory nodes across all logical regions
+            // Use a set to automatically deduplicate physical node IDs
+            std::set<uint16_t> unique_physical_nodes;
             for (uint16_t logical_region_id : logical_region_ids) {
                 const auto& replicas = rdma_->GetReplicaSet(logical_region_id);
                 if (replicas.empty()) {
                     continue;
                 }
                 
-                // Query all replica nodes (skip primary at index 0)
+                // Add all replica nodes (skip primary at index 0) to the set
                 for (size_t i = 1; i < replicas.size(); ++i) {
-                    uint16_t physical_node_id = replicas[i].phys_id;
-                    
-                    // Allocate receive buffer for reply BEFORE sending request
-                    ibv_mr recv_mr;
-                    rdma_->Allocate_Local_RDMA_Slot(recv_mr, Message);
-                    RDMA_Reply* recv_pointer = reinterpret_cast<RDMA_Reply*>(recv_mr.addr);
-                    *recv_pointer = {};
-                    recv_pointer->received = false;
-                    
-                    // Send RPC query
-                    RDMA_Request* send_pointer;
-                    ibv_mr* send_mr = rdma_->Get_local_send_message_mr();
-                    send_pointer = (RDMA_Request*)send_mr->addr;
-                    
-                    send_pointer->command = log_replay_status_query;
-                    send_pointer->content.log_replay_status_query.compute_node_id = compute_node_id_;
-                    
-                    // Set the receive buffer address and rkey in the request
-                    send_pointer->buffer = recv_mr.addr;
-                    send_pointer->rkey = recv_mr.rkey;
-                    
-                    std::string qp_type_main("main");
-                    int rc = rdma_->post_send<RDMA_Request>(send_mr, physical_node_id, qp_type_main);
-                    if (rc) {
-                        fprintf(stderr, "RedoLogger: failed to send log_replay_status_query RPC to physical_node_id=%u (rc=%d)\n", 
-                               physical_node_id, rc);
-                        rdma_->Deallocate_Local_RDMA_Slot(recv_mr.addr, Message);
-                        continue;
-                    }
-                    
-                    // Poll for send completion
-                    ibv_wc wc[2] = {};
-                    if (rdma_->poll_completion(wc, 1, qp_type_main, true, physical_node_id)) {
-                        fprintf(stderr, "RedoLogger: failed to poll send completion for log_replay_status_query RPC\n");
-                        rdma_->Deallocate_Local_RDMA_Slot(recv_mr.addr, Message);
-                        continue;
-                    }
-                    
-                    // Poll for reply using poll_reply_buffer (same pattern as Remote_Memory_Register)
-                    rdma_->poll_reply_buffer(recv_pointer);
-                    
-                    // Check if reply indicates all logs are replayed
-                    if (!recv_pointer->received || !recv_pointer->content.log_replay_status_reply.all_logs_replayed) {
-                        fprintf(stderr, "RedoLogger: Unexpected reply from physical_node_id=%u\n", physical_node_id);
-                    }
-                    
-                    rdma_->Deallocate_Local_RDMA_Slot(recv_mr.addr, Message);
+                    unique_physical_nodes.insert(replicas[i].phys_id);
                 }
+            }
+            
+            // Send one RPC per unique physical memory node
+            for (uint16_t physical_node_id : unique_physical_nodes) {
+                // Allocate receive buffer for reply BEFORE sending request
+                ibv_mr recv_mr;
+                rdma_->Allocate_Local_RDMA_Slot(recv_mr, Message);
+                RDMA_Reply* recv_pointer = reinterpret_cast<RDMA_Reply*>(recv_mr.addr);
+                *recv_pointer = {};
+                recv_pointer->received = false;
+                
+                // Send RPC query
+                RDMA_Request* send_pointer;
+                ibv_mr* send_mr = rdma_->Get_local_send_message_mr();
+                send_pointer = (RDMA_Request*)send_mr->addr;
+                
+                send_pointer->command = log_replay_status_query;
+                send_pointer->content.log_replay_status_query.compute_node_id = compute_node_id_;
+                
+                // Set the receive buffer address and rkey in the request
+                send_pointer->buffer = recv_mr.addr;
+                send_pointer->rkey = recv_mr.rkey;
+                
+                std::string qp_type_main("main");
+                int rc = rdma_->post_send<RDMA_Request>(send_mr, physical_node_id, qp_type_main);
+                if (rc) {
+                    fprintf(stderr, "RedoLogger: failed to send log_replay_status_query RPC to physical_node_id=%u (rc=%d)\n", 
+                           physical_node_id, rc);
+                    rdma_->Deallocate_Local_RDMA_Slot(recv_mr.addr, Message);
+                    continue;
+                }
+                
+                // Poll for send completion
+                ibv_wc wc[2] = {};
+                if (rdma_->poll_completion(wc, 1, qp_type_main, true, physical_node_id)) {
+                    fprintf(stderr, "RedoLogger: failed to poll send completion for log_replay_status_query RPC\n");
+                    rdma_->Deallocate_Local_RDMA_Slot(recv_mr.addr, Message);
+                    continue;
+                }
+                
+                // Poll for reply using poll_reply_buffer (same pattern as Remote_Memory_Register)
+                rdma_->poll_reply_buffer(recv_pointer);
+                
+                // Check if reply indicates all logs are replayed
+                if (!recv_pointer->received || !recv_pointer->content.log_replay_status_reply.all_logs_replayed) {
+                    fprintf(stderr, "RedoLogger: Unexpected reply from physical_node_id=%u\n", physical_node_id);
+                }
+                
+                rdma_->Deallocate_Local_RDMA_Slot(recv_mr.addr, Message);
             }
         }
 
@@ -567,6 +572,17 @@ namespace DSMEngine {
                 end_idx = start_idx + 1;
             }
             // else: WRITE_ALL_REPLICAS - write to all replicas (end_idx = replicas.size())
+            
+            // Check if there are any replicas to write to (beyond the primary)
+            // If there's only a primary (replicas.size() == 1), then start_idx (1) >= replicas.size() (1),
+            // so no writes will be performed. Also ensure end_idx doesn't exceed replicas.size().
+            if (start_idx >= replicas.size() || end_idx > replicas.size()) {
+                // Only primary exists, no replicas to write to - return early
+                // Update flushed_tail even though no remote write occurred
+                std::atomic_thread_fence(std::memory_order_seq_cst);
+                s.metadata.flushed_tail_.store(current_tail, std::memory_order_release);
+                return;
+            }
             
             // Get logical region ID from remote address
             uint16_t logical_region_id = remote_data_addr.nodeID;

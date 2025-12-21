@@ -2355,18 +2355,8 @@ namespace DSMEngine {
         uint32_t record_size = root_page->hdr.record_size;
         size_t record_data_offset = data_offset + 2 * key_size;  // Skip lowest/highest keys
         
-        // Log header initialization (key fields only)
-        size_t last_index_offset = header_offset + offsetof(Header_Index, last_index);
-        encoder.AddUpdateBytes(last_index_offset, &root_page->hdr.last_index, sizeof(root_page->hdr.last_index));
-        
-        size_t leftmost_ptr_offset = header_offset + offsetof(Header_Index, leftmost_ptr);
-        encoder.AddUpdateBytes(leftmost_ptr_offset, &root_page->hdr.leftmost_ptr, sizeof(root_page->hdr.leftmost_ptr));
-        
-        size_t level_offset = header_offset + offsetof(Header_Index, level);
-        encoder.AddUpdateBytes(level_offset, &root_page->hdr.level, sizeof(root_page->hdr.level));
-        
-        size_t this_page_g_ptr_offset = header_offset + offsetof(Header_Index, this_page_g_ptr);
-        encoder.AddUpdateBytes(this_page_g_ptr_offset, &root_page->hdr.this_page_g_ptr, sizeof(root_page->hdr.this_page_g_ptr));
+        // Log header initialization (entire header structure)
+        encoder.AddUpdateBytes(header_offset, &root_page->hdr, sizeof(Header_Index));
         
         // Log min/max values
         size_t lowest_offset = data_offset + key_size;  // lowest is at data_[key_size]

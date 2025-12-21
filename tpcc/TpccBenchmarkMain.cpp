@@ -22,7 +22,7 @@ void ExchPerfStatistics(ClusterConfig *config, ClusterSync *synchronizer,
 
 
 // Helper function to evict all pages for logical regions whose primary is on failed node
-void EvictPagesForFailedNode(uint16_t failed_node) {
+void HardInvalidatePagesForFailedNode(uint16_t failed_node) {
   auto rdma_mg = default_gallocator->rdma_mg;
   auto logical_regions = rdma_mg->GetLogicalRegionsWithPrimaryOnNode(failed_node);
   auto cache = rdma_mg->page_cache_;
@@ -239,7 +239,7 @@ int main(int argc, char *argv[]) {
     std::this_thread::sleep_for(std::chrono::seconds(test_duration_sec));
     
     // Failure detection and notification: compute node 0 detects failure and broadcasts it
-    uint16_t failed_node = 3;
+    uint16_t failed_node = 0; // not a real value, it will be replaced later.
     if (config.IsMaster()) {
       // Compute node 0 detects failure: find last memory node and mark it as failed
       failed_node = default_gallocator->rdma_mg->GetLastMemoryNodeId();
@@ -279,14 +279,14 @@ int main(int argc, char *argv[]) {
     // }
     
     // Step 2: All compute nodes evict pages for failed node
-    std::cout << "[FAILURE_RECOVERY] Step 2: Evicting pages for failed node..." << std::endl;
-    EvictPagesForFailedNode(failed_node);
+    std::cout << "[FAILURE_RECOVERY] Step 2: Invalidate the cached GCLs for failed node..." << std::endl;
+    HardInvalidatePagesForFailedNode(failed_node);
     // synchronizer.FenceXComputes();
     
     // Step 3: Adjust logical groups to remove failed node and promote replica
     std::cout << "[FAILURE_RECOVERY] Step 3: Adjusting logical groups..." << std::endl;
     default_gallocator->rdma_mg->RemoveFailedMemoryNodeFromLogicalGroups(failed_node);
-    // synchronizer.FenceXComputes();
+    synchronizer.FenceXComputes();
     
     // Step 4: Wait for all memory nodes to finish replaying logs
     std::cout << "[FAILURE_RECOVERY] Step 4: Waiting for all memory nodes to finish replaying logs..." << std::endl;
