@@ -64,13 +64,25 @@ int main(int argc,char* argv[])
   DSMEngine::DDSM ddsm(nullptr, mn_keeper->rdma_mg.get());
     uint64_t temp = SYNC_KEY +  mn_keeper->rdma_mg->node_id;
     ddsm.memSet((char*)&temp, sizeof(temp), (char*)&mn_keeper->rdma_mg->node_id, sizeof(mn_keeper->rdma_mg->node_id));
+    
+    // Get all actual compute and memory node IDs from RDMA_Manager
+    std::vector<uint16_t> compute_node_ids = mn_keeper->rdma_mg->GetAllComputeNodeIds();
+    std::vector<uint16_t> memory_node_ids = mn_keeper->rdma_mg->GetAllMemoryNodeIds();
+    
+    // Collect all node IDs
+    std::vector<uint16_t> all_node_ids;
+    all_node_ids.reserve(compute_node_ids.size() + memory_node_ids.size());
+    all_node_ids.insert(all_node_ids.end(), compute_node_ids.begin(), compute_node_ids.end());
+    all_node_ids.insert(all_node_ids.end(), memory_node_ids.begin(), memory_node_ids.end());
+    
+    // Wait for all actual nodes (not assuming equal counts or contiguous IDs)
     char* ret;
-    for (int i = 0; i < mn_keeper->rdma_mg->GetComputeNodeNum() + mn_keeper->rdma_mg->GetPhysicalMemNodeNum(); i++) {
-        temp = SYNC_KEY + i;
+    for (uint16_t target_node_id : all_node_ids) {
+        temp = SYNC_KEY + target_node_id;
         size_t len;
         ret = ddsm.memGet((char*)&temp, sizeof(temp), &len);
     }
-    SYNC_KEY += mn_keeper->rdma_mg->GetComputeNodeNum() + mn_keeper->rdma_mg->GetPhysicalMemNodeNum();
+    SYNC_KEY += all_node_ids.size();
     mn_keeper->ExitAllThreads();
   delete mn_keeper;
   delete TPC_connection_handler;

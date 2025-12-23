@@ -76,7 +76,7 @@ void LogReplayerManager::HandleLogSegmentRequest(const LogSegmentRequest& reques
     if (!stream_state->segments.empty()) {
         for (const auto& seg : stream_state->segments) {
             // Assert that all previous segments are filled to near capacity before adding a new segment
-            assert(seg.received_length >= seg.segment_size - 1000 && 
+            assert(seg.received_length >= seg.segment_size - kLeafPageSize && 
                    "Previous segment must be filled to near capacity (within 1000 bytes) before adding new segment");
         }
     }
@@ -127,9 +127,9 @@ void LogReplayerManager::HandleWriteWithImm(uint16_t compute_node_id, uint16_t l
     }
     
     // Print RDMA write reception information
-    printf("LogReplayerManager: Received RDMA write - memory_node_id=%u, logical_region_id=%u, compute_node_id=%u, received_size=%u bytes\n",
-           rdma_mg_->node_id, logical_region_id, compute_node_id, transferred_size);
-    fflush(stdout);
+    // printf("LogReplayerManager: Received RDMA write - memory_node_id=%u, logical_region_id=%u, compute_node_id=%u, received_size=%u bytes\n",
+    //        rdma_mg_->node_id, logical_region_id, compute_node_id, transferred_size);
+    // fflush(stdout);
     
     if (stream_initialized_[stream_idx].load(std::memory_order_acquire)) {
         LogStreamState* stream_state = reinterpret_cast<LogStreamState*>(&stream_states_[stream_idx]);
@@ -373,13 +373,65 @@ void LogReplayerManager::ReplayerThreadFunc(LogicalRegionReplayer* region_replay
                         {
                             std::lock_guard<std::mutex> lk(stream_state->stuck_record_mtx);
                             if (stream_state->has_stuck_record) {
-                                fprintf(stdout, " [STUCK at: page=0x%lx, page_version=%lu, payload_len=%u",
-                                       stream_state->stuck_record_header.page_gaddr.val,
-                                       stream_state->stuck_record_header.page_version,
-                                       stream_state->stuck_record_header.payload_len);
+                                const auto& stuck_header = stream_state->stuck_record_header;
+                                fprintf(stdout, " [STUCK at: page=0x%lx, log_page_version=%lu, payload_len=%u",
+                                       stuck_header.page_gaddr.val,
+                                       stuck_header.page_version,
+                                       stuck_header.payload_len);
 #ifndef NDEBUG
-                                fprintf(stdout, ", log_type=%u", static_cast<uint32_t>(stream_state->stuck_record_header.log_type));
+                                fprintf(stdout, ", log_type=%u", static_cast<uint32_t>(stuck_header.log_type));
 #endif
+                                
+                                // Get current page version and page header info
+                                DSMEngine::DataPage* page_ptr = nullptr;
+                                uint64_t current_page_version = manager->GetCurrentPageVersion(stuck_header.page_gaddr, page_ptr);
+                                uint64_t expected_page_version = current_page_version + 1;
+                                
+                                // Get physical address of the target page on this memory node
+                                uint64_t physical_ptr = 0;
+                                if (page_ptr != nullptr) {
+                                    physical_ptr = reinterpret_cast<uint64_t>(page_ptr);
+                                }
+                                
+                                fprintf(stdout, ", current_page_version=%lu, expected_page_version=%lu, physical_ptr=0x%lx",
+                                       current_page_version, expected_page_version, physical_ptr);
+                                
+                                if (page_ptr != nullptr) {
+                                    // Read p_type from the header (both Header and Header_Index start with p_type)
+                                    Page_Type p_type = page_ptr->hdr.p_type;
+                                    fprintf(stdout, ", page_hdr: p_type=%u", static_cast<uint32_t>(p_type));
+                                    
+                                    // Parse header based on page type
+                                    if (p_type == P_Data) {
+                                        // DataPage uses Header structure
+                                        DataPage* data_page = reinterpret_cast<DataPage*>(page_ptr);
+                                        fprintf(stdout, ", table_id=%u, num_records=%d, kDataCardinality=%u, this_page_g_ptr=0x%lx",
+                                               data_page->hdr.table_id,
+                                               data_page->hdr.number_of_records,
+                                               data_page->hdr.kDataCardinality,
+                                               data_page->hdr.this_page_g_ptr.val);
+                                    } else if (p_type == P_Leaf_P || p_type == P_Leaf_S || 
+                                               p_type == P_Internal_P || p_type == P_Internal_S) {
+                                        // LeafPage and InternalPage use Header_Index structure
+                                        InternalPage* index_page = reinterpret_cast<InternalPage*>(page_ptr);
+                                        fprintf(stdout, ", level=%u, last_index=%d, key_size=%u, record_size=%u, kCardinality=%u",
+                                               static_cast<uint32_t>(index_page->hdr.level),
+                                               static_cast<int>(index_page->hdr.last_index),
+                                               index_page->hdr.key_size,
+                                               index_page->hdr.record_size,
+                                               index_page->hdr.kCardinality);
+                                        fprintf(stdout, ", this_page_g_ptr=0x%lx, leftmost_ptr=0x%lx, sibling_ptr=0x%lx",
+                                               index_page->hdr.this_page_g_ptr.val,
+                                               index_page->hdr.leftmost_ptr.val,
+                                               index_page->hdr.sibling_ptr.val);
+                                    } else {
+                                        // Plain or unknown type
+                                        fprintf(stdout, ", this_page_g_ptr=0x%lx", page_ptr->hdr.this_page_g_ptr.val);
+                                    }
+                                } else {
+                                    fprintf(stdout, ", page_hdr: <null>");
+                                }
+                                
                                 fprintf(stdout, "]");
                             }
                         }
@@ -559,8 +611,10 @@ void LogReplayerManager::ReplayLogData(LogStreamState* stream_state, uint64_t av
                 // Apply the record
                 if (ProcessLogRecord(*header, payload, payload_size)) {
                     SetCurrentPageVersion(header->page_gaddr, header->page_version);
-                    printf("LogReplayer: Applied record (page_version=%lu) for page=0x%lx from compute_node=%u\n",
-                           header->page_version, header->page_gaddr.val, stream_state->compute_node_id);
+                    uint64_t record_offset_in_segment = offset_in_segment + processed_bytes;
+                    printf("LogReplayer: Applied record (page_version=%lu) for page=0x%lx from compute_node=%u at segment_offset=%lu\n",
+                           header->page_version, header->page_gaddr.val, stream_state->compute_node_id, record_offset_in_segment);
+                           fflush(stdout);
                     total_records_processed++;
                 } else {
                     // ProcessLogRecord failed - this should not happen
@@ -583,6 +637,7 @@ void LogReplayerManager::ReplayLogData(LogStreamState* stream_state, uint64_t av
                     std::lock_guard<std::mutex> lk(stream_state->stuck_record_mtx);
                     stream_state->has_stuck_record = true;
                     stream_state->stuck_record_header = *header;  // Copy the header
+                    assert(header->page_version > current_version +1);
                 }
                 
                 // Update state with what we've processed so far
@@ -792,7 +847,9 @@ void LogReplayerManager::RecycleSegments(LogStreamState* stream_state) {
     uint64_t recyclable_bytes = replayed_bytes - stream_state->recycled_prefix_bytes;
     std::vector<LogSegment> recycled_segments;
     
-    while (!stream_state->segments.empty()) {
+    // Never recycle the last segment - it might still be receiving data
+    // Only recycle finished segments that are not the last one
+    while (stream_state->segments.size() > 1) {  // Stop when only one segment remains
         const LogSegment& seg = stream_state->segments.front();
         
         // Skip if segment has no data or not enough bytes replayed
@@ -800,11 +857,15 @@ void LogReplayerManager::RecycleSegments(LogStreamState* stream_state) {
             break;
         }
         
-        // Only check if recyclable_bytes equals received_length (all received bytes are replayed)
-        // received_length INCLUDES the marker if it was written and flushed
-        // So if recyclable_bytes == received_length, we've replayed all bytes including the marker
+        // Check if we've replayed enough bytes to recycle this segment
+        // recyclable_bytes tracks how many bytes have been replayed since last recycle
         bool can_recycle = false;
-        if (recyclable_bytes == seg.received_length) {
+        
+        if (recyclable_bytes > seg.received_length) {
+            // We've replayed more than this segment contains, so it's fully replayed
+            // This can happen if we've already moved past this segment in replay
+            can_recycle = true;
+        } else if (recyclable_bytes == seg.received_length) {
             // Exactly all received bytes are replayed (including marker if present)
             // Check if segment reached its size limit
             if (seg.received_length >= seg.segment_size) {
@@ -829,15 +890,17 @@ void LogReplayerManager::RecycleSegments(LogStreamState* stream_state) {
                 char marker = *marker_ptr;
                 
                 if (marker == RedoLogger::SEGMENT_CLOSE_MARKER) {
+                    assert(seg.received_length >= seg.segment_size - kLeafPageSize);
                     can_recycle = true;
                 }
             }
         }
+        // If recyclable_bytes < seg.received_length, we haven't replayed enough yet (handled above)
         
         if (!can_recycle) {
             break;
         }
-        
+        assert(seg.received_length >= seg.segment_size - kLeafPageSize);
         recyclable_bytes -= seg.received_length;
         stream_state->recycled_prefix_bytes += seg.received_length;
         recycled_segments.push_back(seg);

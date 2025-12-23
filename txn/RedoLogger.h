@@ -137,6 +137,7 @@ namespace DSMEngine {
 #endif
                     ) {
             const size_t need = sizeof(RecordHeader) + payload_len;
+            assert(need < kLeafPageSize);
 
             auto& s = GetOrCreateStream(logical_region_id);
 
@@ -147,37 +148,56 @@ namespace DSMEngine {
             hdr.payload_len = payload_len;
 #ifndef NDEBUG
             hdr.log_type = log_type;
-            // // Helper function to get log type string (only in debug mode)
-            // auto GetLogTypeString = [](LogRecordType lt) -> const char* {
-            //     switch (lt) {
-            //         case LOG_UNKNOWN: return "LOG_UNKNOWN";
-            //         case LOG_DATA_PAGE_INIT: return "LOG_DATA_PAGE_INIT";
-            //         case LOG_DATA_PAGE_BITMAP_UPDATE: return "LOG_DATA_PAGE_BITMAP_UPDATE";
-            //         case LOG_DATA_PAGE_UPDATE: return "LOG_DATA_PAGE_UPDATE";
-            //         case LOG_INTERNAL_PAGE_STORE: return "LOG_INTERNAL_PAGE_STORE";
-            //         case LOG_LEAF_PAGE_STORE: return "LOG_LEAF_PAGE_STORE";
-            //         case LOG_LEAF_PAGE_DELETE: return "LOG_LEAF_PAGE_DELETE";
-            //         case LOG_INTERNAL_PAGE_SPLIT_OLD: return "LOG_INTERNAL_PAGE_SPLIT_OLD";
-            //         case LOG_INTERNAL_PAGE_SPLIT_NEW: return "LOG_INTERNAL_PAGE_SPLIT_NEW";
-            //         case LOG_LEAF_PAGE_SPLIT_OLD: return "LOG_LEAF_PAGE_SPLIT_OLD";
-            //         case LOG_LEAF_PAGE_SPLIT_NEW: return "LOG_LEAF_PAGE_SPLIT_NEW";
-            //         case LOG_NEW_ROOT_PAGE: return "LOG_NEW_ROOT_PAGE";
-            //         case LOG_INDEX_PAGE_CHANGE: return "LOG_INDEX_PAGE_CHANGE";
-            //         case LOG_INDEX_PAGE_HEADER_CHANGE: return "LOG_INDEX_PAGE_HEADER_CHANGE";
-            //         case LOG_INDEX_PAGE_CONTENT_CHANGE: return "LOG_INDEX_PAGE_CONTENT_CHANGE";
-            //         default: return "LOG_UNKNOWN";
-            //     }
-            // };
-            // printf("RedoLogger: Append record - logical_region_id=%u, page_gaddr=[nodeID=%u, offset=%lu, val=0x%lx], page_version=%lu, payload_len=%u, log_type=%s\n",
-            //     logical_region_id, page_gaddr.nodeID, page_gaddr.offset, page_gaddr.val, page_version, payload_len, GetLogTypeString(log_type));
-            //     fflush(stdout);
-
+            // Helper function to get log type string (only in debug mode)
+            auto GetLogTypeString = [](LogRecordType lt) -> const char* {
+                switch (lt) {
+                    case LOG_UNKNOWN: return "LOG_UNKNOWN";
+                    case LOG_DATA_PAGE_INIT: return "LOG_DATA_PAGE_INIT";
+                    case LOG_DATA_PAGE_BITMAP_UPDATE: return "LOG_DATA_PAGE_BITMAP_UPDATE";
+                    case LOG_DATA_PAGE_UPDATE: return "LOG_DATA_PAGE_UPDATE";
+                    case LOG_INTERNAL_PAGE_STORE: return "LOG_INTERNAL_PAGE_STORE";
+                    case LOG_LEAF_PAGE_STORE: return "LOG_LEAF_PAGE_STORE";
+                    case LOG_LEAF_PAGE_DELETE: return "LOG_LEAF_PAGE_DELETE";
+                    case LOG_INTERNAL_PAGE_SPLIT_OLD: return "LOG_INTERNAL_PAGE_SPLIT_OLD";
+                    case LOG_INTERNAL_PAGE_SPLIT_NEW: return "LOG_INTERNAL_PAGE_SPLIT_NEW";
+                    case LOG_LEAF_PAGE_SPLIT_OLD: return "LOG_LEAF_PAGE_SPLIT_OLD";
+                    case LOG_LEAF_PAGE_SPLIT_NEW: return "LOG_LEAF_PAGE_SPLIT_NEW";
+                    case LOG_NEW_ROOT_PAGE: return "LOG_NEW_ROOT_PAGE";
+                    case LOG_INDEX_PAGE_CHANGE: return "LOG_INDEX_PAGE_CHANGE";
+                    case LOG_INDEX_PAGE_HEADER_CHANGE: return "LOG_INDEX_PAGE_HEADER_CHANGE";
+                    case LOG_INDEX_PAGE_CONTENT_CHANGE: return "LOG_INDEX_PAGE_CONTENT_CHANGE";
+                    default: return "LOG_UNKNOWN";
+                }
+            };
 #endif
             
             std::lock_guard<SpinMutex> lk(s.mtx);
 
             // Get current tail and flushed_tail positions
             uint64_t current_tail = s.metadata.tail_.load(std::memory_order_acquire);
+            
+#ifndef NDEBUG
+            assert(payload_len < kLeafPageSize);
+            // Print log record information: location (Append function), compute node, log offset
+            // Get replica set to show physical addresses
+            const auto& replicas = rdma_->GetReplicaSet(logical_region_id);
+            printf("RedoLogger::Append (compute_node=%u) - l_id=%u, log_offset=%lu, seg_gptr=0x%lx, p_gaddr=[val=0x%lx], p_v=%lu,  log_type=%s",
+                compute_node_id_, logical_region_id, current_tail, s.current_segment_addr.val, page_gaddr.val, page_version, GetLogTypeString(log_type));
+
+            // Print physical addresses for all replicas
+            if (!replicas.empty()) {
+                printf(", r_phys_addrs=[");
+                for (size_t i = 0; i < replicas.size(); ++i) {
+                    uint64_t physical_addr = rdma_->TranslateLogicalToPhysicalAddress(
+                        logical_region_id, page_gaddr.offset, replicas[i].phys_id);
+                    if (i > 0) printf(" ");
+                    printf("repli%zu:phys_id=%u:0x%lx", i, replicas[i].phys_id, physical_addr);
+                }
+                printf("]");
+            }
+            printf("\n");
+            fflush(stdout);
+#endif
             uint64_t flushed_tail = s.metadata.flushed_tail_.load(std::memory_order_acquire);
             
             // Check if current record fits in the remaining segment capacity
@@ -255,36 +275,15 @@ namespace DSMEngine {
         // Wait for all remote memory nodes to finish replaying all logs
         // This sends RPC queries to all memory nodes and waits for them to confirm replay is complete
         void WaitForAllMemoryNodesReplayComplete() {
-            // Collect all unique logical region IDs (memory nodes) that we have streams for
-            std::set<uint16_t> logical_region_ids;
-            {
-                std::shared_lock<RWSpinMutex> read_lk(streams_mtx_);
-                for (const auto& kv : streams_) {
-                    logical_region_ids.insert(kv.first);
-                }
+            // Get all physical memory node IDs directly from rdma_manager
+            std::vector<uint16_t> memory_node_ids = rdma_->GetAllMemoryNodeIds();
+            
+            if (memory_node_ids.empty()) {
+                return; // No memory nodes to query
             }
             
-            if (logical_region_ids.empty()) {
-                return; // No streams, nothing to wait for
-            }
-            
-            // Collect all unique physical memory nodes across all logical regions
-            // Use a set to automatically deduplicate physical node IDs
-            std::set<uint16_t> unique_physical_nodes;
-            for (uint16_t logical_region_id : logical_region_ids) {
-                const auto& replicas = rdma_->GetReplicaSet(logical_region_id);
-                if (replicas.empty()) {
-                    continue;
-                }
-                
-                // Add all replica nodes (skip primary at index 0) to the set
-                for (size_t i = 1; i < replicas.size(); ++i) {
-                    unique_physical_nodes.insert(replicas[i].phys_id);
-                }
-            }
-            
-            // Send one RPC per unique physical memory node
-            for (uint16_t physical_node_id : unique_physical_nodes) {
+            // Send one RPC per physical memory node
+            for (uint16_t physical_node_id : memory_node_ids) {
                 // Allocate receive buffer for reply BEFORE sending request
                 ibv_mr recv_mr;
                 rdma_->Allocate_Local_RDMA_Slot(recv_mr, Message);
@@ -697,6 +696,11 @@ namespace DSMEngine {
             if (replicas.empty()) {
                 fprintf(stderr, "RedoLogger: no replicas found for logical_region_id=%u\n", logical_region_id);
                 return;
+            }
+            
+            // If there's only the primary replica (no replicated copies), return early
+            if (replicas.size() == 1) {
+                return; // Only primary exists, no replica copies to send RPC to
             }
             
             // Send RPC to replica nodes only (skip primary at index 0)

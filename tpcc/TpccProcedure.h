@@ -100,7 +100,7 @@ namespace DSMEngine {
                     int ol_cnt = 0;
                     order_record->GetColumn(1, &c_id);
                     order_record->GetColumn(6, &ol_cnt);
-                    assert(c_id != 0);
+                    assert(c_id != 0 && c_id <= CUSTOMERS_PER_DISTRICT);
                     c_ids[no_d_id - 1] = c_id;
                     no_o_ol_cnt[no_d_id - 1] = 0;
 #if defined(TO)

@@ -744,7 +744,6 @@ void LRUCache::bulk_insert_free_list(std::pair<LRUHandle *, LRUHandle *> start_e
 
 void LRUCache::SoftFlushAllDirtyPages() {
     std::unique_lock<RWSpinMutex> l(table_mutex_);
-    
     // Count elements in in_use_ list - allow flushing if count is less than 16
     // Entries in in_use_ are actively being used by clients (refs >= 2) and should not be flushed
     // Helper function to get page type string (defined early for use in both in_use_ loop and main loop)
@@ -759,7 +758,7 @@ void LRUCache::SoftFlushAllDirtyPages() {
             default: return "UNKNOWN";
         }
     };
-    
+#ifdef DEBUG
     // Also ensure none of them are in exclusive state (write lock)
     size_t in_use_count = 0;
     for (LRUHandle* e = in_use_.next; e != &in_use_; e = e->next) {
@@ -827,7 +826,7 @@ void LRUCache::SoftFlushAllDirtyPages() {
         fflush(stdout);
         assert(false);
     }
-    
+#endif
     // if (in_use_count > 0) {
     //     assert(false);
     // }
@@ -857,37 +856,38 @@ void LRUCache::SoftFlushAllDirtyPages() {
                 total_charge += h->charge;
             }
 
-                ibv_mr* mr = (ibv_mr*)h->value;
-                if (mr != nullptr && mr->addr != nullptr) {
-                    // Get page type and version - check from appropriate header type
-                    // All pages have p_type at offset 8 (after global_lock)
-                    Page_Type page_type = static_cast<Page_Type>(*reinterpret_cast<uint8_t*>(
-                        reinterpret_cast<char*>(mr->addr) + sizeof(uint64_t)));
-                    
-                    uint64_t page_version = 0;
-                    if (page_type == P_Data) {
-                        DataPage* data_page = reinterpret_cast<DataPage*>(mr->addr);
-                        page_version = data_page->hdr.p_version;
-                        assert(data_page->hdr.this_page_g_ptr == h->gptr);
-                        assert(page_version >= 1);
-                    } else if (page_type == P_Leaf_P || page_type == P_Leaf_S) {
-                        LeafPage* leaf_page = reinterpret_cast<LeafPage*>(mr->addr);
-                        page_version = leaf_page->hdr.p_version;
-                    } else if (page_type == P_Internal_P || page_type == P_Internal_S) {
-                        InternalPage* internal_page = reinterpret_cast<InternalPage*>(mr->addr);
-                        page_version = internal_page->hdr.p_version;
-                    }
-                    
-                    
-                    int remote_lock_status = h->remote_lock_status.load();
-                    size_t refs = h->refs.load();
-                    printf("SoftFlushAllDirtyPages: Checking page type=%s at gptr=[nodeID=%u, offset=%lu, val=0x%lx], page_version=%lu, remote_lock_status=%d, refs=%zu\n",
-                           GetPageTypeString(page_type), h->gptr.nodeID, h->gptr.offset, h->gptr.val, page_version, remote_lock_status, refs);
-                    fflush(stdout);
-                }else {
-                    assert(false);
+            ibv_mr* mr = (ibv_mr*)h->value;
+#ifdef DEBUG
+            if (mr != nullptr && mr->addr != nullptr) {
+                // Get page type and version - check from appropriate header type
+                // All pages have p_type at offset 8 (after global_lock)
+                Page_Type page_type = static_cast<Page_Type>(*reinterpret_cast<uint8_t*>(
+                    reinterpret_cast<char*>(mr->addr) + sizeof(uint64_t)));
+                
+                uint64_t page_version = 0;
+                if (page_type == P_Data) {
+                    DataPage* data_page = reinterpret_cast<DataPage*>(mr->addr);
+                    page_version = data_page->hdr.p_version;
+                    assert(data_page->hdr.this_page_g_ptr == h->gptr);
+                    assert(page_version >= 1);
+                } else if (page_type == P_Leaf_P || page_type == P_Leaf_S) {
+                    LeafPage* leaf_page = reinterpret_cast<LeafPage*>(mr->addr);
+                    page_version = leaf_page->hdr.p_version;
+                } else if (page_type == P_Internal_P || page_type == P_Internal_S) {
+                    InternalPage* internal_page = reinterpret_cast<InternalPage*>(mr->addr);
+                    page_version = internal_page->hdr.p_version;
                 }
-            
+                
+
+                int remote_lock_status = h->remote_lock_status.load();
+                size_t refs = h->refs.load();
+                printf("SoftFlushAllDirtyPages: Checking page type=%s at gptr=[nodeID=%u, offset=%lu, val=0x%lx], page_version=%lu, remote_lock_status=%d, refs=%zu\n",
+                        GetPageTypeString(page_type), h->gptr.nodeID, h->gptr.offset, h->gptr.val, page_version, remote_lock_status, refs);
+                fflush(stdout);
+            }else {
+                assert(false);
+            }
+#endif
             // Only flush entries that are in cache, have write lock, and are not in use (refs == 1)
             if (h->in_cache && h->remote_lock_status.load() == 2 && h->refs.load() == 1) {
                 ibv_mr* mr = (ibv_mr*)h->value;

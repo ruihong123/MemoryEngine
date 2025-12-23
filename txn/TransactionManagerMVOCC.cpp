@@ -467,27 +467,38 @@ namespace DSMEngine{
             // Note: For INSERT_ONLY operations, bitmap and number_of_records updates are already logged
             // in AllocateNewRecord right after AllocateRecord is called, so we don't need to log them here.
             
+            // Calculate tuple offset within the page buffer
+            // tuple_offset_in_page = tuple_gaddr.offset - page_gaddr.offset (relative to page start)
+            size_t tuple_offset_in_page = access->access_addr_.offset - handle->gptr.offset;
+            
             // Only log modified columns (using dirty_col_ids like delta records)
             if (!access->txn_local_tuple_->dirty_col_ids.empty()) {
                 for (auto col_id : access->txn_local_tuple_->dirty_col_ids) {
                     size_t column_size = access->txn_local_tuple_->schema_ptr_->GetColumnSize(col_id);
-                    size_t column_offset = access->txn_local_tuple_->schema_ptr_->GetColumnOffset(col_id);
+                    size_t column_offset_in_tuple = access->txn_local_tuple_->schema_ptr_->GetColumnOffset(col_id);
                     
-                    // Log UPDATE_BYTES for this specific column
-                    encoder.AddUpdateBytes(column_offset, 
-                                         access->txn_local_tuple_->data_ptr_ + column_offset, 
+                    // Calculate total offset: tuple offset in page + column offset in tuple
+                    size_t total_offset_in_page = tuple_offset_in_page + column_offset_in_tuple;
+                    
+                    // Log UPDATE_BYTES for this specific column (offset relative to page buffer)
+                    encoder.AddUpdateBytes(total_offset_in_page, 
+                                         reinterpret_cast<const char*>(page_buffer) + total_offset_in_page, 
                                          column_size);
                 }
                 
                 // For dirty column updates, also log timestamp update separately
                 size_t meta_col_id = access->txn_local_tuple_->schema_ptr_->GetMetaColumnId();
-                size_t meta_offset = access->txn_local_tuple_->schema_ptr_->GetColumnOffset(meta_col_id);
-                size_t wts_offset = meta_offset + offsetof(MetaColumn, Wts_);
-                encoder.AddSetU64LE(wts_offset, commit_ts);
+                size_t meta_offset_in_tuple = access->txn_local_tuple_->schema_ptr_->GetColumnOffset(meta_col_id);
+                size_t wts_offset_in_tuple = meta_offset_in_tuple + offsetof(MetaColumn, Wts_);
+                size_t wts_offset_in_page = tuple_offset_in_page + wts_offset_in_tuple;
+                encoder.AddSetU64LE(wts_offset_in_page, commit_ts);
             } else {
                 // Fallback: log entire record if no dirty tracking (includes MetaColumn with timestamp)
                 size_t record_size = access->txn_local_tuple_->GetRecordSize();
-                encoder.AddUpdateBytes(0, access->txn_local_tuple_->data_ptr_, record_size);
+                // Log entire record at tuple offset within page
+                encoder.AddUpdateBytes(tuple_offset_in_page, 
+                                     reinterpret_cast<const char*>(page_buffer) + tuple_offset_in_page, 
+                                     record_size);
                 // No separate timestamp log needed - it's already included in the full record
             }
             
@@ -1005,7 +1016,7 @@ namespace DSMEngine{
             if(cluster_least_sp_.count(node_id) == 0){
                 cluster_least_sp_[node_id] = least_spn;
             }else{
-                assert(cluster_least_sp_[node_id] <= least_spn);
+                // assert(cluster_least_sp_[node_id] <= least_spn);// not necessary if a compute node pause the execution.
                 cluster_least_sp_[node_id] = least_spn;
             }
         }
@@ -1051,7 +1062,8 @@ namespace DSMEngine{
             std::unique_lock<SpinMutex> psp_lck(pin_sp_mtx);
             uint64_t least_sp_this_node;
             if(pined_snapshot_this_node.empty()){
-                least_sp_this_node = largest_snapshot;
+                // least_sp_this_node = largest_snapshot;
+                least_sp_this_node = UINT64_MAX;
             }else{
                 least_sp_this_node = pined_snapshot_this_node.begin()->first;
             }

@@ -27,23 +27,23 @@ core_dump_dir="/mnt/core_dump"
 
 # Working environment
 proj_dir="/users/Ruihong/MemoryEngine"
-bin_dir="${proj_dir}/debug"
+bin_dir="${proj_dir}/release"
 ssh_opts="-o StrictHostKeyChecking=no"
 
 # Memory and port configuration
 cache_mem_size=8 # 8 GB Local memory size
-remote_mem_size=40 # 55 GB Remote memory size per node
+remote_mem_size=55 # 55 GB Remote memory size per node
 port=$((13000+RANDOM%1000))
 
 # Default benchmark parameters
-default_threads=2 # default 8
-default_warehouses=16 # default 256
+default_threads=1 # default 8
+default_warehouses=256 # default 256
 default_dist_ratio=100
 
 # Benchmark-specific transaction counts (based on 8GB cache warmup estimation)
 # See CACHE_WARMUP_ESTIMATION.md for detailed rationale
 # TPC-C: Larger records (~6.5KB/txn), better locality -> fewer txns needed
-tpcc_txns=200000 #default 2000000
+tpcc_txns=2000000 #default 2000000
 # TATP: Small records (~120B/txn), high cardinality (40M subscribers) -> more txns needed
 tatp_txns=50000000 #default 50000000
 # SmallBank: Small records (~120B/txn), very high cardinality (200M accounts) -> more txns needed
@@ -62,6 +62,7 @@ enable_failure_recovery=false
 # Default TPC-C query ratios (standard TPC-C mix)
 # Frequency weights: Delivery=1, Payment=10, NewOrder=10, OrderStatus=1, StockLevel=1
 # These normalize to approximately: Payment: 43.5%, NewOrder: 43.5%, OrderStatus: 4.3%, Delivery: 4.3%, StockLevel: 4.3%
+# Note: Ratios will be set conditionally in setup_tpcc() based on failure recovery mode
 TPCC_DELIVERY=1
 TPCC_PAYMENT=10
 TPCC_NEW_ORDER=10
@@ -175,14 +176,27 @@ run_tpcc() {
     echo "Running TPCC Benchmark (WITHOUT hot scanner)"
     echo "========================================="
   fi
-  echo "Query Ratios (Standard TPC-C mix): NewOrder=${TPCC_NEW_ORDER}%, Payment=${TPCC_PAYMENT}%, OrderStatus=${TPCC_ORDER_STATUS}%, Delivery=${TPCC_DELIVERY}%, StockLevel=${TPCC_STOCK_LEVEL}%"
-  echo "Transaction count: ${tpcc_txns} (optimized for 8GB cache warmup)"
-  
-  # Failure recovery always enables file logging
+  # Set query ratios based on failure recovery mode
   if [ "$enable_failure_recovery" = true ]; then
+    # Failure recovery test ratios: Delivery=1, Payment=10, NewOrder=10, OrderStatus=40, StockLevel=40
+    TPCC_DELIVERY=1
+    TPCC_PAYMENT=10
+    TPCC_NEW_ORDER=10
+    TPCC_ORDER_STATUS=40
+    TPCC_STOCK_LEVEL=40
+    echo "Query Ratios (Failure Recovery mix): NewOrder=${TPCC_NEW_ORDER}%, Payment=${TPCC_PAYMENT}%, OrderStatus=${TPCC_ORDER_STATUS}%, Delivery=${TPCC_DELIVERY}%, StockLevel=${TPCC_STOCK_LEVEL}%"
     enable_file_logging=true
     suffix="${suffix}_fail"
+  else
+    # Standard TPC-C mix: Delivery=1, Payment=10, NewOrder=10, OrderStatus=1, StockLevel=1
+    TPCC_DELIVERY=1
+    TPCC_PAYMENT=10
+    TPCC_NEW_ORDER=10
+    TPCC_ORDER_STATUS=1
+    TPCC_STOCK_LEVEL=1
+    echo "Query Ratios (Standard TPC-C mix): NewOrder=${TPCC_NEW_ORDER}%, Payment=${TPCC_PAYMENT}%, OrderStatus=${TPCC_ORDER_STATUS}%, Delivery=${TPCC_DELIVERY}%, StockLevel=${TPCC_STOCK_LEVEL}%"
   fi
+  echo "Transaction count: ${tpcc_txns} (optimized for 8GB cache warmup)"
   
   if [ "$enable_file_logging" = true ]; then
     output_file="${output_dir}/tpcc_default${suffix}.log"

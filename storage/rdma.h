@@ -813,10 +813,12 @@ namespace DSMEngine
          *
          */
         size_t GetPhysicalMemNodeNum();
+        std::vector<uint16_t> GetAllMemoryNodeIds() const;
 
         size_t GetLogicalMemNodeNum();
 
         size_t GetComputeNodeNum();
+        std::vector<uint16_t> GetAllComputeNodeIds() const;
 
         uint64_t FetchAddNextTimestamp(int add_value = 1);
 

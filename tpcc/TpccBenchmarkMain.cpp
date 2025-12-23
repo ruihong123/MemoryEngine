@@ -207,7 +207,7 @@ int main(int argc, char *argv[]) {
     std::thread monitoring_thread([&executor, &monitoring_running, start_time]() {
       auto last_report_time = start_time;
       uint64_t last_txn_count = 0;
-      const int report_interval_ms = 100;
+      const int report_interval_ms = 200;
       
       // Continue monitoring until explicitly stopped (runs independently of executor pause state)
       while (monitoring_running.load()) {
@@ -224,10 +224,10 @@ int main(int argc, char *argv[]) {
         
         auto total_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - start_time).count();
         bool is_paused = executor.IsPaused();
-        // printf("[FAILURE_RECOVERY] [%ld ms] Throughput: %.2f tps (total: %lu txns)%s\n", 
-        //        total_elapsed, throughput, current_txn_count,
-        //        is_paused ? " [PAUSED]" : "");
-        // fflush(stdout);
+        printf("[FAILURE_RECOVERY] [%ld ms] Throughput: %.2f tps (total: %lu txns)%s\n", 
+               total_elapsed, throughput, current_txn_count,
+               is_paused ? " [PAUSED]" : "");
+        fflush(stdout);
         
         last_report_time = now;
         last_txn_count = current_txn_count;
@@ -257,14 +257,18 @@ int main(int argc, char *argv[]) {
     }
     
     // All compute nodes pause their executors
-    std::cout << "[FAILURE_RECOVERY] Pausing transaction execution on all compute nodes..." << std::endl;
+    auto elapsed_pause = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - start_time).count();
+    std::cout << "[FAILURE_RECOVERY] [" << elapsed_pause << " ms] Pausing transaction execution on all compute nodes..." << std::endl;
     executor.Pause();
     
     // Step 1: Force flush all remaining redo logs from local memory to remote memory
     // This is critical to ensure all logs are persisted before evicting pages
-    std::cout << "[FAILURE_RECOVERY] Step 1: Flushing all remaining redo logs to remote memory..." << std::endl;
+    auto elapsed_step1 = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - start_time).count();
+    std::cout << "[FAILURE_RECOVERY] [" << elapsed_step1 << " ms] Step 1: Flushing all remaining redo logs to remote memory..." << std::endl;
     default_gallocator->GetRedoLogger(true)->FlushAllBuffers(false);
-    // synchronizer.FenceXComputes();
+    synchronizer.FenceXComputes();// this memory fences are necessary to avoid dangling compute node at executor.Pause().
     
     // Step 1: Release cached root handles for all btree indexes before evicting pages
     // std::cout << "[FAILURE_RECOVERY] Step 1: Releasing cached root handles for all btree indexes..." << std::endl;
@@ -279,21 +283,29 @@ int main(int argc, char *argv[]) {
     // }
     
     // Step 2: All compute nodes evict pages for failed node
-    std::cout << "[FAILURE_RECOVERY] Step 2: Invalidate the cached GCLs for failed node..." << std::endl;
+    auto elapsed_step2 = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - start_time).count();
+    std::cout << "[FAILURE_RECOVERY] [" << elapsed_step2 << " ms] Step 2: Invalidate the cached GCLs for failed node..." << std::endl;
     HardInvalidatePagesForFailedNode(failed_node);
     // synchronizer.FenceXComputes();
     
     // Step 3: Adjust logical groups to remove failed node and promote replica
-    std::cout << "[FAILURE_RECOVERY] Step 3: Adjusting logical groups..." << std::endl;
+    auto elapsed_step3 = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - start_time).count();
+    std::cout << "[FAILURE_RECOVERY] [" << elapsed_step3 << " ms] Step 3: Adjusting logical groups..." << std::endl;
     default_gallocator->rdma_mg->RemoveFailedMemoryNodeFromLogicalGroups(failed_node);
-    synchronizer.FenceXComputes();
+    // synchronizer.FenceXComputes();
     
     // Step 4: Wait for all memory nodes to finish replaying logs
-    std::cout << "[FAILURE_RECOVERY] Step 4: Waiting for all memory nodes to finish replaying logs..." << std::endl;
+    auto elapsed_step4 = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - start_time).count();
+    std::cout << "[FAILURE_RECOVERY] [" << elapsed_step4 << " ms] Step 4: Waiting for all memory nodes to finish replaying logs..." << std::endl;
     default_gallocator->GetRedoLogger(true)->WaitForAllMemoryNodesReplayComplete();
     // synchronizer.FenceXComputes();
     
-    std::cout << "[FAILURE_RECOVERY] Failure recovery complete. All memory nodes finished replaying. Resuming execution..." << std::endl;
+    auto elapsed_complete = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - start_time).count();
+    std::cout << "[FAILURE_RECOVERY] [" << elapsed_complete << " ms] Failure recovery complete. All memory nodes finished replaying. Resuming execution..." << std::endl;
     
     // All compute nodes resume their executors
     executor.Resume();
@@ -308,6 +320,7 @@ int main(int argc, char *argv[]) {
     monitoring_thread.join();
     
     REPORT_PROFILE_TIME(gThreadCount);
+    std::this_thread::sleep_for(std::chrono::seconds(1));
     ExchPerfStatistics(&config, &synchronizer, &executor.GetPerfStatistics());
     
     // Restore original replica type

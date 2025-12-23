@@ -391,9 +391,28 @@ namespace DSMEngine {
     }
 
     size_t RDMA_Manager::GetPhysicalMemNodeNum() { return memory_nodes.size(); }
+    
+    std::vector<uint16_t> RDMA_Manager::GetAllMemoryNodeIds() const {
+        std::vector<uint16_t> node_ids;
+        node_ids.reserve(memory_nodes.size());
+        for (const auto& kv : memory_nodes) {
+            node_ids.push_back(kv.first);
+        }
+        return node_ids;
+    }
+    
     size_t RDMA_Manager::GetLogicalMemNodeNum() { return logical_groups.size(); }
 
     size_t RDMA_Manager::GetComputeNodeNum() { return compute_nodes.size(); }
+    
+    std::vector<uint16_t> RDMA_Manager::GetAllComputeNodeIds() const {
+        std::vector<uint16_t> node_ids;
+        node_ids.reserve(compute_nodes.size());
+        for (const auto& kv : compute_nodes) {
+            node_ids.push_back(kv.first);
+        }
+        return node_ids;
+    }
 
     uint64_t RDMA_Manager::FetchAddNextTimestamp(int add_value) {
         ibv_mr *local_cas_buffer = Get_local_CAS_mr();
@@ -4290,6 +4309,8 @@ namespace DSMEngine {
         if (send_flag != 0) {
             sr.send_flags = send_flag;
         }
+        // Determine target node ID for QP selection based on pool_name
+        uint16_t target_node_id_for_qp;
         switch (pool_name) {
             case Regular_Page: {
                 // For atomic operations: use primary replica only
@@ -4303,6 +4324,9 @@ namespace DSMEngine {
                 sr.wr.atomic.remote_addr = physical_addr;
                 sr.wr.atomic.compare_add = compare; /* expected value in remote address */
                 sr.wr.atomic.swap = swap;
+                
+                // Use primary physical ID for QP selection
+                target_node_id_for_qp = primary_phys_id;
                 break;
             }
             case LockTable: {
@@ -4311,9 +4335,14 @@ namespace DSMEngine {
                     remote_ptr.offset + base_addr_map_lock[remote_ptr.nodeID]);
                 sr.wr.atomic.compare_add = compare; /* expected value in remote address */
                 sr.wr.atomic.swap = swap;
+                
+                // Use logical node ID for LockTable QP selection
+                target_node_id_for_qp = remote_ptr.nodeID;
                 break;
             }
             default:
+                // Fallback to logical node ID
+                target_node_id_for_qp = remote_ptr.nodeID;
                 break;
         }
         /* there is a Receive Request in the responder side, so we won't get any into
@@ -4329,36 +4358,36 @@ namespace DSMEngine {
         ibv_qp *qp;
         if (qp_type == "default") {
             //    assert(false);// Never comes to here
-            qp = static_cast<ibv_qp *>(qp_data_default.at(remote_ptr.nodeID)->Get());
+            qp = static_cast<ibv_qp *>(qp_data_default.at(target_node_id_for_qp)->Get());
             if (qp == NULL) {
-                Remote_Query_Pair_Connection(qp_type, remote_ptr.nodeID);
-                qp = static_cast<ibv_qp *>(qp_data_default.at(remote_ptr.nodeID)->Get());
+                Remote_Query_Pair_Connection(qp_type, target_node_id_for_qp);
+                qp = static_cast<ibv_qp *>(qp_data_default.at(target_node_id_for_qp)->Get());
             }
             rc = ibv_post_send(qp, &sr, &bad_wr);
         } else if (qp_type == "write_local_flush") {
             assert(false);
             qp = static_cast<ibv_qp *>(
-                qp_local_write_flush.at(remote_ptr.nodeID)->Get());
+                qp_local_write_flush.at(target_node_id_for_qp)->Get());
             if (qp == NULL) {
-                Remote_Query_Pair_Connection(qp_type, remote_ptr.nodeID);
+                Remote_Query_Pair_Connection(qp_type, target_node_id_for_qp);
                 qp = static_cast<ibv_qp *>(
-                    qp_local_write_flush.at(remote_ptr.nodeID)->Get());
+                    qp_local_write_flush.at(target_node_id_for_qp)->Get());
             }
             rc = ibv_post_send(qp, &sr, &bad_wr);
         } else if (qp_type == "write_local_compact") {
             assert(false);
             qp = static_cast<ibv_qp *>(
-                qp_local_write_compact.at(remote_ptr.nodeID)->Get());
+                qp_local_write_compact.at(target_node_id_for_qp)->Get());
             if (qp == NULL) {
-                Remote_Query_Pair_Connection(qp_type, remote_ptr.nodeID);
+                Remote_Query_Pair_Connection(qp_type, target_node_id_for_qp);
                 qp = static_cast<ibv_qp *>(
-                    qp_local_write_compact.at(remote_ptr.nodeID)->Get());
+                    qp_local_write_compact.at(target_node_id_for_qp)->Get());
             }
             rc = ibv_post_send(qp, &sr, &bad_wr);
         } else {
             assert(false);
             std::shared_lock<std::shared_mutex> l(qp_cq_map_mutex);
-            qp = res->qp_map.at(remote_ptr.nodeID);
+            qp = res->qp_map.at(target_node_id_for_qp);
             rc = ibv_post_send(qp, &sr, &bad_wr);
             l.unlock();
         }
@@ -4378,7 +4407,7 @@ namespace DSMEngine {
             //  while(std::chrono::high_resolution_clock::now()-start <
             //  std::chrono::nanoseconds(msg_size+200000));
             // wait until the job complete.
-            rc = poll_completion(wc, poll_num, qp_type, true, remote_ptr.nodeID);
+            rc = poll_completion(wc, poll_num, qp_type, true, target_node_id_for_qp);
             if (rc != 0) {
                 std::cout << "RDMA CAS Failed" << std::endl;
                 std::cout << "remote node id is" << remote_ptr.nodeID << std::endl;
@@ -4419,6 +4448,8 @@ namespace DSMEngine {
         if (send_flag != 0) {
             sr.send_flags = send_flag;
         }
+        // Determine target node ID for QP selection based on pool_name
+        uint16_t target_node_id_for_qp;
         switch (pool_name) {
             case Regular_Page: {
                 // For atomic operations: use primary replica only
@@ -4431,6 +4462,9 @@ namespace DSMEngine {
                 sr.wr.atomic.rkey = physical_rkey;
                 sr.wr.atomic.remote_addr = physical_addr;
                 sr.wr.atomic.compare_add = add; /* expected value in remote address */
+                
+                // Use primary physical ID for QP selection
+                target_node_id_for_qp = primary_phys_id;
                 break;
             }
             case LockTable: {
@@ -4438,9 +4472,14 @@ namespace DSMEngine {
                 sr.wr.atomic.remote_addr = reinterpret_cast<uint64_t>(
                     remote_ptr.offset + base_addr_map_lock[remote_ptr.nodeID]);
                 sr.wr.atomic.compare_add = add; /* expected value in remote address */
+                
+                // Use logical node ID for LockTable QP selection
+                target_node_id_for_qp = remote_ptr.nodeID;
                 break;
             }
             default:
+                // Fallback to logical node ID
+                target_node_id_for_qp = remote_ptr.nodeID;
                 break;
         }
         /* there is a Receive Request in the responder side, so we won't get any into
@@ -4456,36 +4495,36 @@ namespace DSMEngine {
         ibv_qp *qp;
         if (qp_type == "default") {
             //    assert(false);// Never comes to here
-            qp = static_cast<ibv_qp *>(qp_data_default.at(remote_ptr.nodeID)->Get());
+            qp = static_cast<ibv_qp *>(qp_data_default.at(target_node_id_for_qp)->Get());
             if (qp == NULL) {
-                Remote_Query_Pair_Connection(qp_type, remote_ptr.nodeID);
-                qp = static_cast<ibv_qp *>(qp_data_default.at(remote_ptr.nodeID)->Get());
+                Remote_Query_Pair_Connection(qp_type, target_node_id_for_qp);
+                qp = static_cast<ibv_qp *>(qp_data_default.at(target_node_id_for_qp)->Get());
             }
             rc = ibv_post_send(qp, &sr, &bad_wr);
         } else if (qp_type == "write_local_flush") {
             //        assert(false);
             qp = static_cast<ibv_qp *>(
-                qp_local_write_flush.at(remote_ptr.nodeID)->Get());
+                qp_local_write_flush.at(target_node_id_for_qp)->Get());
             if (qp == NULL) {
-                Remote_Query_Pair_Connection(qp_type, remote_ptr.nodeID);
+                Remote_Query_Pair_Connection(qp_type, target_node_id_for_qp);
                 qp = static_cast<ibv_qp *>(
-                    qp_local_write_flush.at(remote_ptr.nodeID)->Get());
+                    qp_local_write_flush.at(target_node_id_for_qp)->Get());
             }
             rc = ibv_post_send(qp, &sr, &bad_wr);
         } else if (qp_type == "write_local_compact") {
             assert(false);
             qp = static_cast<ibv_qp *>(
-                qp_local_write_compact.at(remote_ptr.nodeID)->Get());
+                qp_local_write_compact.at(target_node_id_for_qp)->Get());
             if (qp == NULL) {
-                Remote_Query_Pair_Connection(qp_type, remote_ptr.nodeID);
+                Remote_Query_Pair_Connection(qp_type, target_node_id_for_qp);
                 qp = static_cast<ibv_qp *>(
-                    qp_local_write_compact.at(remote_ptr.nodeID)->Get());
+                    qp_local_write_compact.at(target_node_id_for_qp)->Get());
             }
             rc = ibv_post_send(qp, &sr, &bad_wr);
         } else {
             assert(false);
             std::shared_lock<std::shared_mutex> l(qp_cq_map_mutex);
-            qp = res->qp_map.at(remote_ptr.nodeID);
+            qp = res->qp_map.at(target_node_id_for_qp);
             rc = ibv_post_send(qp, &sr, &bad_wr);
             l.unlock();
         }
@@ -4505,7 +4544,7 @@ namespace DSMEngine {
             //  while(std::chrono::high_resolution_clock::now()-start <
             //  std::chrono::nanoseconds(msg_size+200000));
             // wait until the job complete.
-            rc = poll_completion(wc, poll_num, qp_type, true, remote_ptr.nodeID);
+            rc = poll_completion(wc, poll_num, qp_type, true, target_node_id_for_qp);
             if (rc != 0) {
                 std::cout << "RDMA CAS Failed" << std::endl;
                 std::cout << "remote node id is" << remote_ptr.nodeID << std::endl;
@@ -6452,10 +6491,6 @@ namespace DSMEngine {
         // empty)
         const auto &replicas = GetReplicaSet(page_addr.nodeID);
         // uint16_t primary_phys_id = GetPrimaryPhysicalId(page_addr.nodeID);
-        printf("global_write_page_and_Wunlock_Async: page_addr=[nodeID=%u, offset=%lu, val=0x%lx], page_size=%zu, remote_lock_addr=[nodeID=%u, offset=%lu, val=0x%lx], handle=%p, async=%d\n", 
-               page_addr.nodeID, page_addr.offset, page_addr.val, page_size, 
-               remote_lock_addr.nodeID, remote_lock_addr.offset, remote_lock_addr.val, handle, async);
-        fflush(stdout);
 
         // TODO: If we want to use async unlock, we need to enlarge the max outstand
         // work request that the queue pair support.

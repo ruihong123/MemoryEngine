@@ -3,6 +3,7 @@
 
 #include "DDSM.h"
 #include "ClusterConfig.h"
+#include "storage/rdma.h"
 
 namespace DSMEngine {
 class ClusterSync{
@@ -18,15 +19,27 @@ public:
         uint16_t* id;
         uint64_t temp_sync_key = sync_key_xall_ + node_id;
         default_gallocator->memSet((char*)&temp_sync_key, sizeof(uint64_t), (char*)&node_id, sizeof(node_id));
-        uint64_t no_node = config_->GetPartitionNum() + config_->GetMemoryNum();
-        for (int i = 0; i < no_node; i++) {
-            temp_sync_key = sync_key_xall_ + i;
+        
+        // Get all actual compute and memory node IDs from RDMA_Manager
+        RDMA_Manager* rdma_mg = RDMA_Manager::Get_Instance();
+        std::vector<uint16_t> compute_node_ids = rdma_mg->GetAllComputeNodeIds();
+        std::vector<uint16_t> memory_node_ids = rdma_mg->GetAllMemoryNodeIds();
+        
+        // Collect all node IDs
+        std::vector<uint16_t> all_node_ids;
+        all_node_ids.reserve(compute_node_ids.size() + memory_node_ids.size());
+        all_node_ids.insert(all_node_ids.end(), compute_node_ids.begin(), compute_node_ids.end());
+        all_node_ids.insert(all_node_ids.end(), memory_node_ids.begin(), memory_node_ids.end());
+        
+        // Wait for all actual nodes (not assuming equal counts or contiguous IDs)
+        for (uint16_t target_node_id : all_node_ids) {
+            temp_sync_key = sync_key_xall_ + target_node_id;
             size_t get_size = 0;
             id = (uint16_t*)default_gallocator->memGet((char*)&temp_sync_key, sizeof(uint64_t), &get_size);
             assert(get_size == sizeof(uint16_t));
-            assert(*id == i);
+            assert(*id == target_node_id);
         }
-        sync_key_xall_ += no_node;
+        sync_key_xall_ += all_node_ids.size();
     }
     //Sync use partition_id as the key
   void FenceXComputes() {
