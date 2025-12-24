@@ -309,6 +309,11 @@ class DSMEngine_EXPORT Cache {
   // Use with caution - this forcefully removes entries without proper cleanup.
   virtual void HardInvalidateByLogicalId(uint16_t logical_id) = 0;
 
+  // Hard invalidate all cache entries in one pass. More efficient than calling
+  // HardInvalidateByLogicalId() for each logical region.
+  // This invalidates all entries regardless of logical_id by setting remote_lock_status to 0.
+  virtual void HardInvalidateAll() = 0;
+
  private:
   void LRU_Remove(Handle* e);
   void LRU_Append(Handle* e);
@@ -525,6 +530,11 @@ public:
     // Hard invalidate: Invalidate all cache handles whose gptr's nodeID matches the given logical_id
     // by setting remote_lock_status to 0. Handles remain in cache (not evicted or moved to free list).
     void HardInvalidateByLogicalId(uint16_t logical_id);
+
+    // Hard invalidate all cache entries in one pass. More efficient than calling
+    // HardInvalidateByLogicalId() for each logical region.
+    // This invalidates all entries regardless of logical_id by setting remote_lock_status to 0.
+    void HardInvalidateAll();
 
 private:
     void List_Remove(LRUHandle* e);

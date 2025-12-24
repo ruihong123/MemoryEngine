@@ -178,25 +178,25 @@ namespace DSMEngine {
             
 #ifndef NDEBUG
             assert(payload_len < kLeafPageSize);
-            // Print log record information: location (Append function), compute node, log offset
-            // Get replica set to show physical addresses
-            const auto& replicas = rdma_->GetReplicaSet(logical_region_id);
-            printf("RedoLogger::Append (compute_node=%u) - l_id=%u, log_offset=%lu, seg_gptr=0x%lx, p_gaddr=[val=0x%lx], p_v=%lu,  log_type=%s",
-                compute_node_id_, logical_region_id, current_tail, s.current_segment_addr.val, page_gaddr.val, page_version, GetLogTypeString(log_type));
+            // // Print log record information: location (Append function), compute node, log offset
+            // // Get replica set to show physical addresses
+            // const auto& replicas = rdma_->GetReplicaSet(logical_region_id);
+            // printf("RedoLogger::Append (compute_node=%u) - l_id=%u, log_offset=%lu, seg_gptr=0x%lx, p_gaddr=[val=0x%lx], p_v=%lu,  log_type=%s",
+            //     compute_node_id_, logical_region_id, current_tail, s.current_segment_addr.val, page_gaddr.val, page_version, GetLogTypeString(log_type));
 
-            // Print physical addresses for all replicas
-            if (!replicas.empty()) {
-                printf(", r_phys_addrs=[");
-                for (size_t i = 0; i < replicas.size(); ++i) {
-                    uint64_t physical_addr = rdma_->TranslateLogicalToPhysicalAddress(
-                        logical_region_id, page_gaddr.offset, replicas[i].phys_id);
-                    if (i > 0) printf(" ");
-                    printf("repli%zu:phys_id=%u:0x%lx", i, replicas[i].phys_id, physical_addr);
-                }
-                printf("]");
-            }
-            printf("\n");
-            fflush(stdout);
+            // // Print physical addresses for all replicas
+            // if (!replicas.empty()) {
+            //     printf(", r_phys_addrs=[");
+            //     for (size_t i = 0; i < replicas.size(); ++i) {
+            //         uint64_t physical_addr = rdma_->TranslateLogicalToPhysicalAddress(
+            //             logical_region_id, page_gaddr.offset, replicas[i].phys_id);
+            //         if (i > 0) printf(" ");
+            //         printf("repli%zu:phys_id=%u:0x%lx", i, replicas[i].phys_id, physical_addr);
+            //     }
+            //     printf("]");
+            // }
+            // printf("\n");
+            // fflush(stdout);
 #endif
             uint64_t flushed_tail = s.metadata.flushed_tail_.load(std::memory_order_acquire);
             
@@ -603,9 +603,9 @@ namespace DSMEngine {
                 uint64_t physical_addr = rdma_->TranslateLogicalToPhysicalAddress(
                     remote_data_addr.nodeID, remote_data_addr.offset, replica_phys_id);
                 uint32_t rkey = rdma_->GetPhysicalRkey(remote_data_addr.nodeID, replica_phys_id);
-                printf("RedoLogger: Compute node %u writing %zu bytes to replica %u for logical_region_id=%u at physical address 0x%lx with rkey 0x%x\n",
-                       compute_node_id_, to_flush, replica_phys_id, logical_region_id, physical_addr, rkey);
-                fflush(stdout);
+                // printf("RedoLogger: Compute node %u writing %zu bytes to replica %u for logical_region_id=%u at physical address 0x%lx with rkey 0x%x\n",
+                //        compute_node_id_, to_flush, replica_phys_id, logical_region_id, physical_addr, rkey);
+                // fflush(stdout);
                 // RDMA write with imm, encoding both logical_region_id and transferred_size in imm_data
                 int rc = rdma_->RDMA_Write_Imme(reinterpret_cast<void*>(physical_addr), rkey, 
                                                  &local_view, to_flush, "main", 

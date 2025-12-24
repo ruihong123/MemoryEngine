@@ -13,6 +13,7 @@
 #include "rdma.h"
 #include "port/port_posix.h"
 #include "Timer.h"
+#include "DeltaRecord.h"
 #define SINGLE_DELTA_PER_NODE
 
 namespace DSMEngine {
@@ -59,6 +60,8 @@ namespace DSMEngine {
         std::atomic<uint64_t> last_head_;
         std::atomic<uint64_t> last_epoch_;
         std::atomic<uint64_t> last_danger_size_;
+        // Store last recycled delta record metadata (header only, without data payload)
+        DeltaRecord last_recycled_delta_record_metadata_;
         #endif
 
         DeltaSection *inner_section;
@@ -289,9 +292,13 @@ namespace DSMEngine {
                 }
 
                 if (delta_record->next_delta_wts_ < snapshot) {
+                    assert(delta_record->next_delta_wts_  > 0);
                     int record_size = delta_record->current_record_data_size_;
 #ifndef NDEBUG
+                    // Store the last recycled delta record metadata (header only, without data payload)
+                    memcpy(&last_recycled_delta_record_metadata_, delta_record, sizeof(DeltaRecord));
                     memset(inner_section->local_addr_ + inner_section->head_, 2, record_size);
+                    
 #endif
                     std::atomic_thread_fence(std::memory_order_seq_cst);
                     inner_section->head_ += record_size;

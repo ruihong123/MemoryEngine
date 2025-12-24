@@ -41,6 +41,7 @@ extern std::string config_filename;
 extern bool
     enable_latency_recording; // Enable/disable per-transaction latency tracking
 extern bool enable_failure_recovery;  // Enable failure recovery test mode
+extern int failure_recovery_type;  // 0 = memory node failure, 1 = compute node failure
 // To modify tpcc workload
 extern size_t gReadRatio;
 extern size_t gTimeLocality;
@@ -140,8 +141,15 @@ static void ArgumentsParser(int argc, char *argv[]) {
     } else if (argv[i][1] == 'c') {
       num_core = atoi(&argv[i][2]);
       gThreadCount = num_core;
+    } else if (argv[i][1] == 'r' && argv[i][2] == 'e' && argv[i][3] == 'c' && argv[i][4] == '_' && argv[i][5] == 'm' && argv[i][6] == 'e' && argv[i][7] == 'm') {
+      enable_failure_recovery = true;
+      failure_recovery_type = 0;  // Memory node failure
+    } else if (argv[i][1] == 'r' && argv[i][2] == 'e' && argv[i][3] == 'c' && argv[i][4] == '_' && argv[i][5] == 'c' && argv[i][6] == 'o' && argv[i][7] == 'm') {
+      enable_failure_recovery = true;
+      failure_recovery_type = 1;  // Compute node failure
     } else if (argv[i][1] == 'r' && argv[i][2] == 'e' && argv[i][3] == 'c') {
       enable_failure_recovery = true;
+      failure_recovery_type = 0;  // Default to memory node failure for backward compatibility
     } else if (argv[i][1] == 'f') {
       config_filename = std::string(&argv[i][2]);
     } else if (argv[i][1] == 'z') {

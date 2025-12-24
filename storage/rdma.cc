@@ -10774,6 +10774,31 @@ namespace DSMEngine {
                failed_node, logical_regions_to_update.size());
     }
 
+    void RDMA_Manager::HardRemovePrimaryFromAllLogicalGroups() {
+        size_t groups_updated = 0;
+        
+        // For each logical group, remove the primary (first element) and promote first replica
+        for (auto& kv : logical_groups) {
+            auto& group = kv.second;
+            
+            if (group.physical_regions.empty()) {
+                continue; // Skip empty groups
+            }
+            
+            // Remove the primary (first element) only if there are replicas
+            if (group.physical_regions.size() > 1) {
+                // Promote first replica to primary by removing the old primary
+                group.physical_regions.erase(group.physical_regions.begin());
+                groups_updated++;
+            } else {
+                // Only one replica (the primary), do nothing
+                continue;
+            }
+        }
+        
+        printf("Hard removed primary from %zu logical regions\n", groups_updated);
+    }
+
     bool RDMA_Manager::connectMemcached() {
         memcached_server_st *servers = NULL;
         memcached_return rc;

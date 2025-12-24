@@ -1256,6 +1256,8 @@ namespace DSMEngine
         uint16_t GetLastMemoryNodeId() const;
         // Remove failed memory node from logical groups and promote replica to primary
         void RemoveFailedMemoryNodeFromLogicalGroups(uint16_t failed_node);
+        // Hard remove primary copy from all logical groups (for compute node failure recovery)
+        void HardRemovePrimaryFromAllLogicalGroups();
         // Get all logical regions that have primary on the specified node
         std::vector<uint16_t> GetLogicalRegionsWithPrimaryOnNode(uint16_t node_id) const;
 

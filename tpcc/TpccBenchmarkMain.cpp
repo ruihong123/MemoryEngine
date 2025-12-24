@@ -38,6 +38,19 @@ void HardInvalidatePagesForFailedNode(uint16_t failed_node) {
   std::cout << "Finished evicting pages for failed node" << std::endl;
 }
 
+// Helper function to invalidate all pages
+void hardInvalidateAllPages() {
+  auto rdma_mg = default_gallocator->rdma_mg;
+  auto cache = rdma_mg->page_cache_;
+  
+  std::cout << "Invalidating all cache entries" << std::endl;
+  
+  // Use the efficient single-pass invalidation API
+  cache->HardInvalidateAll();
+  
+  std::cout << "Finished invalidating all pages" << std::endl;
+}
+
 extern uint64_t cache_invalidation[MAX_APP_THREAD];
 extern uint64_t cache_hit_valid[MAX_APP_THREAD][8];
 extern uint64_t cache_miss[MAX_APP_THREAD][8];
@@ -175,7 +188,11 @@ int main(int argc, char *argv[]) {
   if (enable_failure_recovery) {
     // Failure recovery test: run for 5 seconds, then trigger failure
     std::cout << "[FAILURE_RECOVERY] Starting failure recovery test..." << std::endl;
-    std::cout << "[FAILURE_RECOVERY] Will run for 5 seconds, then trigger memory node failure" << std::endl;
+    if (failure_recovery_type == 0) {
+      std::cout << "[FAILURE_RECOVERY] Will run for 5 seconds, then trigger memory node failure" << std::endl;
+    } else {
+      std::cout << "[FAILURE_RECOVERY] Will run for 5 seconds, then trigger compute node failure" << std::endl;
+    }
     
     // Create executor for failure recovery test
     TpccExecutor executor(&redirector1, &storage_manager, gThreadCount, enable_logging,
@@ -241,9 +258,18 @@ int main(int argc, char *argv[]) {
     // Failure detection and notification: compute node 0 detects failure and broadcasts it
     uint16_t failed_node = 0; // not a real value, it will be replaced later.
     if (config.IsMaster()) {
-      // Compute node 0 detects failure: find last memory node and mark it as failed
-      failed_node = default_gallocator->rdma_mg->GetLastMemoryNodeId();
-      std::cout << "\n[FAILURE_RECOVERY] Node 0: Detected failure of memory node " << failed_node << std::endl;
+      if (failure_recovery_type == 0) {
+        // Memory node failure: find last memory node and mark it as failed
+        failed_node = default_gallocator->rdma_mg->GetLastMemoryNodeId();
+        std::cout << "\n[FAILURE_RECOVERY] Node 0: Detected failure of memory node " << failed_node << std::endl;
+      } else {
+        // Compute node failure: find last compute node and mark it as failed
+        std::vector<uint16_t> compute_node_ids = default_gallocator->rdma_mg->GetAllComputeNodeIds();
+        if (!compute_node_ids.empty()) {
+          failed_node = *std::max_element(compute_node_ids.begin(), compute_node_ids.end());
+        }
+        std::cout << "\n[FAILURE_RECOVERY] Node 0: Detected failure of compute node " << failed_node << std::endl;
+      }
       std::cout << "[FAILURE_RECOVERY] Node 0: Broadcasting failure notification to all compute nodes..." << std::endl;
     }
     
@@ -252,8 +278,13 @@ int main(int argc, char *argv[]) {
     
     // All compute nodes receive the failure notification
     if (!config.IsMaster()) {
-      std::cout << "\n[FAILURE_RECOVERY] Node " << config.GetMyPartitionId() 
-                << ": Received failure notification for memory node " << failed_node << std::endl;
+      if (failure_recovery_type == 0) {
+        std::cout << "\n[FAILURE_RECOVERY] Node " << config.GetMyPartitionId() 
+                  << ": Received failure notification for memory node " << failed_node << std::endl;
+      } else {
+        std::cout << "\n[FAILURE_RECOVERY] Node " << config.GetMyPartitionId() 
+                  << ": Received failure notification for compute node " << failed_node << std::endl;
+      }
     }
     
     // All compute nodes pause their executors
@@ -270,42 +301,49 @@ int main(int argc, char *argv[]) {
     default_gallocator->GetRedoLogger(true)->FlushAllBuffers(false);
     synchronizer.FenceXComputes();// this memory fences are necessary to avoid dangling compute node at executor.Pause().
     
-    // Step 1: Release cached root handles for all btree indexes before evicting pages
-    // std::cout << "[FAILURE_RECOVERY] Step 1: Releasing cached root handles for all btree indexes..." << std::endl;
-    // for (size_t i = 0; i < storage_manager.GetTableCount(); ++i) {
-    //     Table* table = storage_manager.tables_[i];
-    //     if (table != nullptr) {
-    //         Btr* primary_index = table->GetPrimaryIndex();
-    //         if (primary_index != nullptr) {
-    //             primary_index->release_cached_root_handle();
-    //         }
-    //     }
-    // }
-    
-    // Step 2: All compute nodes evict pages for failed node
-    auto elapsed_step2 = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now() - start_time).count();
-    std::cout << "[FAILURE_RECOVERY] [" << elapsed_step2 << " ms] Step 2: Invalidate the cached GCLs for failed node..." << std::endl;
-    HardInvalidatePagesForFailedNode(failed_node);
-    // synchronizer.FenceXComputes();
-    
-    // Step 3: Adjust logical groups to remove failed node and promote replica
-    auto elapsed_step3 = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now() - start_time).count();
-    std::cout << "[FAILURE_RECOVERY] [" << elapsed_step3 << " ms] Step 3: Adjusting logical groups..." << std::endl;
-    default_gallocator->rdma_mg->RemoveFailedMemoryNodeFromLogicalGroups(failed_node);
-    // synchronizer.FenceXComputes();
-    
-    // Step 4: Wait for all memory nodes to finish replaying logs
-    auto elapsed_step4 = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now() - start_time).count();
-    std::cout << "[FAILURE_RECOVERY] [" << elapsed_step4 << " ms] Step 4: Waiting for all memory nodes to finish replaying logs..." << std::endl;
-    default_gallocator->GetRedoLogger(true)->WaitForAllMemoryNodesReplayComplete();
-    // synchronizer.FenceXComputes();
+    if (failure_recovery_type == 0) {
+      // Memory node failure recovery
+      // Step 2: All compute nodes evict pages for failed node
+      auto elapsed_step2 = std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now() - start_time).count();
+      std::cout << "[FAILURE_RECOVERY] [" << elapsed_step2 << " ms] Step 2: Invalidate the cached GCLs for failed memory node..." << std::endl;
+      HardInvalidatePagesForFailedNode(failed_node);
+      
+      // Step 3: Adjust logical groups to remove failed node and promote replica
+      auto elapsed_step3 = std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now() - start_time).count();
+      std::cout << "[FAILURE_RECOVERY] [" << elapsed_step3 << " ms] Step 3: Adjusting logical groups..." << std::endl;
+      default_gallocator->rdma_mg->RemoveFailedMemoryNodeFromLogicalGroups(failed_node);
+      
+      // Step 4: Wait for all memory nodes to finish replaying logs
+      auto elapsed_step4 = std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now() - start_time).count();
+      std::cout << "[FAILURE_RECOVERY] [" << elapsed_step4 << " ms] Step 4: Waiting for all memory nodes to finish replaying logs..." << std::endl;
+      default_gallocator->GetRedoLogger(true)->WaitForAllMemoryNodesReplayComplete();
+    } else {
+      // Compute node failure recovery
+      // Step 2: Invalidate all pages for failed compute node (on local compute nodes)
+      auto elapsed_step2 = std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now() - start_time).count();
+      std::cout << "[FAILURE_RECOVERY] [" << elapsed_step2 << " ms] Step 2: Invalidating all pages for failed compute node..." << std::endl;
+      hardInvalidateAllPages();
+      
+      // Step 3: Hard remove primary copy from all logical groups
+      auto elapsed_step3 = std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now() - start_time).count();
+      std::cout << "[FAILURE_RECOVERY] [" << elapsed_step3 << " ms] Step 3: Hard removing primary copy from all logical groups..." << std::endl;
+      default_gallocator->rdma_mg->HardRemovePrimaryFromAllLogicalGroups();
+      
+      // Step 4: Wait for all memory nodes to finish replaying logs
+      auto elapsed_step4 = std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now() - start_time).count();
+      std::cout << "[FAILURE_RECOVERY] [" << elapsed_step4 << " ms] Step 4: Waiting for all memory nodes to finish replaying logs..." << std::endl;
+      default_gallocator->GetRedoLogger(true)->WaitForAllMemoryNodesReplayComplete();
+    }
     
     auto elapsed_complete = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - start_time).count();
-    std::cout << "[FAILURE_RECOVERY] [" << elapsed_complete << " ms] Failure recovery complete. All memory nodes finished replaying. Resuming execution..." << std::endl;
+    std::cout << "[FAILURE_RECOVERY] [" << elapsed_complete << " ms] Failure recovery complete. Resuming execution..." << std::endl;
     
     // All compute nodes resume their executors
     executor.Resume();

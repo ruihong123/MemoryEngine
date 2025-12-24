@@ -486,12 +486,16 @@ namespace DSMEngine{
                                          column_size);
                 }
                 
-                // For dirty column updates, also log timestamp update separately
+                // For dirty column updates, also log all metadata field changes
                 size_t meta_col_id = access->txn_local_tuple_->schema_ptr_->GetMetaColumnId();
                 size_t meta_offset_in_tuple = access->txn_local_tuple_->schema_ptr_->GetColumnOffset(meta_col_id);
-                size_t wts_offset_in_tuple = meta_offset_in_tuple + offsetof(MetaColumn, Wts_);
-                size_t wts_offset_in_page = tuple_offset_in_page + wts_offset_in_tuple;
-                encoder.AddSetU64LE(wts_offset_in_page, commit_ts);
+                size_t meta_offset_in_page = tuple_offset_in_page + meta_offset_in_tuple;
+                
+                // Get the updated metadata from txn_local_tuple_ and log the entire MetaColumn structure
+                MetaColumn updated_meta = access->txn_local_tuple_->GetMeta();
+                encoder.AddUpdateBytes(static_cast<uint32_t>(meta_offset_in_page),
+                                      &updated_meta,
+                                      sizeof(MetaColumn));
             } else {
                 // Fallback: log entire record if no dirty tracking (includes MetaColumn with timestamp)
                 size_t record_size = access->txn_local_tuple_->GetRecordSize();
@@ -1016,7 +1020,7 @@ namespace DSMEngine{
             if(cluster_least_sp_.count(node_id) == 0){
                 cluster_least_sp_[node_id] = least_spn;
             }else{
-                // assert(cluster_least_sp_[node_id] <= least_spn);// not necessary if a compute node pause the execution.
+                assert(cluster_least_sp_[node_id] <= least_spn);
                 cluster_least_sp_[node_id] = least_spn;
             }
         }
@@ -1062,8 +1066,8 @@ namespace DSMEngine{
             std::unique_lock<SpinMutex> psp_lck(pin_sp_mtx);
             uint64_t least_sp_this_node;
             if(pined_snapshot_this_node.empty()){
-                // least_sp_this_node = largest_snapshot;
-                least_sp_this_node = UINT64_MAX;
+                least_sp_this_node = largest_snapshot;
+                // least_sp_this_node = UINT64_MAX;
             }else{
                 least_sp_this_node = pined_snapshot_this_node.begin()->first;
             }
@@ -1096,12 +1100,29 @@ namespace DSMEngine{
                 }
             }
             cl_lck.unlock();
-            if (least_sp_across_cluster > last_gc_ts){
+            assert(least_sp_across_cluster <= UINT64_MAX);
+            if (least_sp_across_cluster > last_gc_ts || last_gc_ts == UINT64_MAX){
                 // do garbage collection.
+                assert(least_sp_across_cluster >= last_gc_ts);
                 last_gc_ts = least_sp_across_cluster;
 #ifdef SINGLE_DELTA_PER_NODE
                 ds_for_write->GarbageCollectionBySnapshot(least_sp_across_cluster);
+#ifndef NDEBUG
+                if (ds_for_write->inner_section->head_ == ds_for_write->inner_section->tail_ && ds_for_write->inner_section->tail_!=0) {
+                    printf("current head and tail are the same, head: %lu, tail: %lu, least_sp_across_cluster: %lu\n", 
+                           ds_for_write->inner_section->head_.load(), ds_for_write->inner_section->tail_.load(), least_sp_across_cluster);
+
+                    // Print metadata of last recycled delta record
+                    const DeltaRecord& last_meta = ds_for_write->last_recycled_delta_record_metadata_;
+                    printf("Last recycled delta record metadata: marker='%c', Wts_=%lu, next_delta_wts_=%lu, prev_delta_gaddr=[nodeID=%u, offset=%lu], prev_delta_epoch_=%lu, prev_delta_data_size_=%u, current_record_data_size_=%u\n",
+                           last_meta.marker_, last_meta.Wts_, last_meta.next_delta_wts_,
+                           last_meta.prev_delta_gaddr.nodeID, last_meta.prev_delta_gaddr.offset,
+                           last_meta.prev_delta_epoch_, last_meta.prev_delta_data_size_,
+                           last_meta.current_record_data_size_);
+                    fflush(stdout);
+                }
                 assert(ds_for_write->owner_compute_node_id_ == rdma_mg->node_id);
+#endif
 #else
                 std::shared_lock<std::shared_mutex> lck(delta_map_mtx);
                 for (auto iter = delta_sections.begin(); iter != delta_sections.end(); iter++){

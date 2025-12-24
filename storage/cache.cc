@@ -935,6 +935,28 @@ void LRUCache::HardInvalidateByLogicalId(uint16_t logical_id) {
     }
 }
 
+void LRUCache::HardInvalidateAll() {
+    std::unique_lock<RWSpinMutex> l(table_mutex_);
+    
+    // Invalidate all cache entries in one pass by setting remote_lock_status to 0
+    // This keeps the handles in the cache (not evicted or moved to free list)
+    for (uint32_t i = 0; i < table_.length_; i++) {
+        LRUHandle* h = table_.list_[i];
+        while (h != nullptr) {
+            LRUHandle* next = h->next_hash;
+            if (h->in_cache) {
+                // Hard invalidate: change remote_lock_status from 1 (read) or 2 (write) to 0 (unlocked)
+                // This marks the handle as invalid without removing it from the cache
+                int current_status = h->remote_lock_status.load();
+                if (current_status == 1 || current_status == 2) {
+                    h->remote_lock_status.store(0);
+                }
+            }
+            h = next;
+        }
+    }
+}
+
 
 static const int kNumShardBits = 7;
 static const int kNumShards = 1 << kNumShardBits;
@@ -1079,6 +1101,13 @@ class ShardedLRUCache : public Cache {
     //todo: maybe we can finish it by multiple threads.
     for (int s = 0; s < kNumShards; s++) {
       shard_[s].HardInvalidateByLogicalId(logical_id);
+    }
+  }
+  void HardInvalidateAll() override {
+    // Invalidate all entries across all shards in one pass
+    //todo: maybe we can finish it by multiple threads.
+    for (int s = 0; s < kNumShards; s++) {
+      shard_[s].HardInvalidateAll();
     }
   }
 };

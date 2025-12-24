@@ -117,7 +117,7 @@ class Memory_Node_Keeper {
     void log_segment_request_handler(RDMA_Request* request, std::string& client_ip,
                                      uint8_t target_node_id);
     void log_replay_status_query_handler(RDMA_Request* request, std::string& client_ip,
-                                          uint8_t target_node_id);
+                                         uint8_t target_node_id);
 //  void version_unpin_handler(RDMA_Request* request, std::string& client_ip);
 
   // Memcached helper method for broadcasting metadata (uses RDMA_Manager)
