@@ -28,7 +28,7 @@ core_dump_dir="/mnt/core_dump"
 
 # Working environment
 proj_dir="/users/Ruihong/MemoryEngine"
-bin_dir="${proj_dir}/debug"
+bin_dir="${proj_dir}/release"
 ssh_opts="-o StrictHostKeyChecking=no"
 
 # Memory and port configuration
@@ -38,7 +38,7 @@ port=$((13000+RANDOM%1000))
 
 # Default benchmark parameters
 default_threads=8 # default 8
-default_warehouses=16 # default 256
+default_warehouses=256 # default 256
 default_dist_ratio=100
 
 # Benchmark-specific transaction counts (based on 8GB cache warmup estimation)
@@ -185,8 +185,8 @@ run_tpcc() {
     TPCC_DELIVERY=1
     TPCC_PAYMENT=10
     TPCC_NEW_ORDER=10
-    TPCC_ORDER_STATUS=40
-    TPCC_STOCK_LEVEL=40
+    TPCC_ORDER_STATUS=1
+    TPCC_STOCK_LEVEL=1
     echo "Query Ratios (Failure Recovery mix): NewOrder=${TPCC_NEW_ORDER}%, Payment=${TPCC_PAYMENT}%, OrderStatus=${TPCC_ORDER_STATUS}%, Delivery=${TPCC_DELIVERY}%, StockLevel=${TPCC_STOCK_LEVEL}%"
     enable_file_logging=true
     suffix="${suffix}_fail"
