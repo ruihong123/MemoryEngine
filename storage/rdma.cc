@@ -3177,7 +3177,7 @@ namespace DSMEngine {
         attr.qp_state = IBV_QPS_RTS;
         attr.timeout = 0xe;
         attr.retry_cnt = 5;
-        attr.rnr_retry = 6;
+        attr.rnr_retry = 7;
         attr.sq_psn = 0;
         attr.max_rd_atomic =
                 ATOMIC_OUTSTANDING_SIZE; // allow RDMA atomic andn RDMA read batched.

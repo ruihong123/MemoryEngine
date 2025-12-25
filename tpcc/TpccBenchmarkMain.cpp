@@ -150,19 +150,11 @@ int main(int argc, char *argv[]) {
     default_gallocator->rdma_mg->Set_message_handling_func(func, TwoPC);
   }
   // generate workload
-  IORedirector redirector(gThreadCount);
-  size_t access_pattern = 0;
-  TpccSource sourcer(&tpcc_scale_params, &redirector, num_txn, WORKLOAD_PATTERN,
-                     gThreadCount, dist_ratio, config.GetMyPartitionId());
-  sourcer.Start();
-
   IORedirector redirector1(gThreadCount);
-  TpccSource sourcer1(&tpcc_scale_params, &redirector1, num_txn/4,
+  size_t sourcer1_txn_count = enable_failure_recovery ? (num_txn) : (num_txn/4);
+  TpccSource sourcer1(&tpcc_scale_params, &redirector1, sourcer1_txn_count,
                       WORKLOAD_PATTERN, gThreadCount, dist_ratio,
                       config.GetMyPartitionId());
-  //    TpccSource sourcer1(&tpcc_scale_params, &redirector1, num_txn/1000,
-  //                        WORKLOAD_PATTERN, gThreadCount, dist_ratio,
-  //                        config.GetMyPartitionId());
   sourcer1.Start();
   synchronizer.FenceXComputes();
 
@@ -174,12 +166,19 @@ int main(int argc, char *argv[]) {
   }
 
   {
-    // warm up
-    INIT_PROFILE_TIME(gThreadCount);
-    TpccExecutor executor(&redirector, &storage_manager, gThreadCount, enable_failure_recovery ? true : false);
+    // warm up - use 8 threads for warmup phase
+    constexpr size_t warmup_thread_count = 8;
+    IORedirector warmup_redirector(warmup_thread_count);
+    TpccSource warmup_sourcer(&tpcc_scale_params, &warmup_redirector, num_txn, WORKLOAD_PATTERN,
+                              warmup_thread_count, dist_ratio, config.GetMyPartitionId());
+    warmup_sourcer.Start();
+    synchronizer.FenceXComputes();
+    
+    INIT_PROFILE_TIME(warmup_thread_count);
+    TpccExecutor executor(&warmup_redirector, &storage_manager, warmup_thread_count, enable_failure_recovery ? true : false);
     executor.EnableProgressReporting(true);
     executor.Start();
-    REPORT_PROFILE_TIME(gThreadCount);
+    REPORT_PROFILE_TIME(warmup_thread_count);
   }
   synchronizer.FenceXComputes();
   // clear the cache statistics.

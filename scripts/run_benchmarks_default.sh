@@ -37,14 +37,14 @@ remote_mem_size=55 # 55 GB Remote memory size per node
 port=$((13000+RANDOM%1000))
 
 # Default benchmark parameters
-default_threads=8 # default 8
+default_threads=1 # default 8
 default_warehouses=256 # default 256
 default_dist_ratio=100
 
 # Benchmark-specific transaction counts (based on 8GB cache warmup estimation)
 # See CACHE_WARMUP_ESTIMATION.md for detailed rationale
 # TPC-C: Larger records (~6.5KB/txn), better locality -> fewer txns needed
-tpcc_txns=200000 #default 2000000
+tpcc_txns=2000000 #default 2000000
 # TATP: Small records (~120B/txn), high cardinality (40M subscribers) -> more txns needed
 tatp_txns=50000000 #default 50000000
 # SmallBank: Small records (~120B/txn), very high cardinality (200M accounts) -> more txns needed

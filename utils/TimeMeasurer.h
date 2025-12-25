@@ -30,8 +30,7 @@ class TimeMeasurer {
   }
 
   long long GetElapsedMicroSeconds() {
-    // TODO: change to microseconds
-    return std::chrono::duration_cast<milliseconds>(end_time_ - start_time_)
+    return std::chrono::duration_cast<microseconds>(end_time_ - start_time_)
         .count();
   }
 

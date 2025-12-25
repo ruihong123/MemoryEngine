@@ -278,7 +278,7 @@ void LogReplayerManager::ReplayerThreadFunc(LogicalRegionReplayer* region_replay
     printf("LogReplayer: Region thread started for logical_region=%u\n", region_replayer->logical_region_id);
     
     while (!region_replayer->should_exit.load()) {
-        std::unique_lock<std::mutex> lk(region_replayer->cv_mtx);
+        std::unique_lock<RWSpinMutex> lk(region_replayer->cv_mtx);
         
         // Wait for new data or exit signal
         region_replayer->new_data_cv.wait(lk, [region_replayer, manager] {
@@ -307,7 +307,7 @@ void LogReplayerManager::ReplayerThreadFunc(LogicalRegionReplayer* region_replay
         lk.unlock();
         
         // Track progress to detect if we're bouncing between streams without making progress
-        std::lock_guard<std::mutex> progress_lk(region_replayer->progress_mtx);
+        std::lock_guard<SpinMutex> progress_lk(region_replayer->progress_mtx);
         bool has_streams_with_available_logs = false;
         bool any_stream_made_progress = false;
         
@@ -378,9 +378,7 @@ void LogReplayerManager::ReplayerThreadFunc(LogicalRegionReplayer* region_replay
                                        stuck_header.page_gaddr.val,
                                        stuck_header.page_version,
                                        stuck_header.payload_len);
-#ifndef NDEBUG
                                 fprintf(stdout, ", log_type=%u", static_cast<uint32_t>(stuck_header.log_type));
-#endif
                                 
                                 // Get current page version and page header info
                                 DSMEngine::DataPage* page_ptr = nullptr;
@@ -546,6 +544,7 @@ void LogReplayerManager::ReplayLogData(LogStreamState* stream_state, uint64_t av
             printf("LogReplayer: Error - Invalid physical pointer for segment=0x%lx\n",
                    current_seg->segment_addr.val);
             segments_lk.unlock();
+            assert(false);
             break;
         }
         
@@ -599,12 +598,14 @@ void LogReplayerManager::ReplayLogData(LogStreamState* stream_state, uint64_t av
             if (header->page_version <= current_version) {
                 // Records should never be skipped - this indicates a serious ordering bug
                 assert(false && "Received stale log record - this indicates a serious ordering bug");
+#ifndef NDEBUG
                 // Store stuck record header for debugging
                 {
                     std::lock_guard<std::mutex> lk(stream_state->stuck_record_mtx);
                     stream_state->has_stuck_record = true;
                     stream_state->stuck_record_header = *header;  // Copy the header
                 }
+#endif
                 // Don't skip - abort to catch the bug
                 return;
             } else if (header->page_version == current_version + 1) {
@@ -619,12 +620,14 @@ void LogReplayerManager::ReplayLogData(LogStreamState* stream_state, uint64_t av
                 } else {
                     // ProcessLogRecord failed - this should not happen
                     assert(false && "ProcessLogRecord failed");
+#ifndef NDEBUG
                     // Store stuck record header for debugging
                     {
                         std::lock_guard<std::mutex> lk(stream_state->stuck_record_mtx);
                         stream_state->has_stuck_record = true;
                         stream_state->stuck_record_header = *header;  // Copy the header
                     }
+#endif
                     return;
                 }
             } else {
@@ -632,6 +635,7 @@ void LogReplayerManager::ReplayLogData(LogStreamState* stream_state, uint64_t av
                 // printf("LogReplayer: Future record (page_version=%lu > current+1=%lu) for page=0x%lx - moving to next stream\n",
                 //        header->page_version, current_version + 1, header->page_gaddr.val);
                 // assert(false && "Future record");
+#ifndef NDEBUG
                 // Store stuck record header for debugging (this is where the stream stopped)
                 {
                     std::lock_guard<std::mutex> lk(stream_state->stuck_record_mtx);
@@ -639,6 +643,7 @@ void LogReplayerManager::ReplayLogData(LogStreamState* stream_state, uint64_t av
                     stream_state->stuck_record_header = *header;  // Copy the header
                     assert(header->page_version > current_version +1);
                 }
+#endif
                 
                 // Update state with what we've processed so far
                 total_processed_bytes += processed_bytes;
@@ -654,12 +659,6 @@ void LogReplayerManager::ReplayLogData(LogStreamState* stream_state, uint64_t av
                 // Recycle segments only if we've replayed some logs
                 if (total_records_processed > 0) {
                     RecycleSegments(stream_state);
-                }
-                if (total_records_processed > 0) {
-                    // printf("LogReplayer: Processed %u records (%u applied) (%lu bytes) for compute_node=%u, logical_region=%u before moving to next stream\n",
-                    //        total_records_processed, total_records_processed, total_processed_bytes,
-                    //        stream_state->compute_node_id, stream_state->logical_region_id);
-                    // fflush(stdout);
                 }
                 return;
             }

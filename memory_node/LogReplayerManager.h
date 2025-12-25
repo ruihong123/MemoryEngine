@@ -41,10 +41,11 @@ struct LogStreamState {
     uint64_t recycled_prefix_bytes{0};              // Bytes already recycled from the head
     
     // Debugging: store the header of the record where this stream is stuck
+#ifndef NDEBUG
     std::mutex stuck_record_mtx;  // Protects stuck_record_header
     bool has_stuck_record{false};
     RedoLogger::RecordHeader stuck_record_header{};  // Copy of the header of the stuck record
-    
+#endif
     LogStreamState(uint16_t compute_id, uint16_t region_id)
         : compute_node_id(compute_id), logical_region_id(region_id) {}
 };
@@ -56,11 +57,11 @@ struct LogicalRegionReplayer {
     std::atomic<bool> should_exit{false};
     
     // Condition variable for efficient waiting
-    std::condition_variable new_data_cv;
-    std::mutex cv_mtx;
+    std::condition_variable_any new_data_cv;  // Use condition_variable_any to work with RWSpinMutex
+    RWSpinMutex cv_mtx;
     
     // Progress tracking for deadlock detection
-    std::mutex progress_mtx;  // Protects progress tracking data
+    SpinMutex progress_mtx;  // Protects progress tracking data
     uint32_t iterations_without_progress{0};
     static constexpr uint32_t MAX_ITERATIONS_WITHOUT_PROGRESS = 1000;  // Threshold for abort
     
