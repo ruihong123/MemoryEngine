@@ -5,7 +5,7 @@
 bin=`dirname "$0"`
 bin=`cd "$bin"; pwd`
 SRC_HOME=$bin/..
-BIN_HOME=$bin/../debug
+BIN_HOME=$bin/../release
 home_dir="/users/Ruihong/MemoryEngine"
 
 conf_file_all=$bin/../connection_cloudlab_replica.conf
@@ -528,7 +528,7 @@ done
 }
 
 
-run_node_test() {
+run_any_test() {
 # node test
 echo "**************************run node test****************************"
 result_file=$bin/results/node
@@ -537,10 +537,10 @@ thread_range="8"
 remote_range="100"
 shared_range="100"
 size_grow=0 # 0 not grow, 1 grow with node number
-read_range="50"
-space_range="0"
+read_range="0 50"
+space_range="50"
 time_range="0"
-workload_range="0 1" # 0 uniform, 1 single zipfian, n >1 multispot zipfian.
+workload_range="0" # 0 uniform, 1 single zipfian, n >1 multispot zipfian.
 replication_factors="3"
 zipfian_alpha_range="0.99" #make sure workload = 1 if we want to test zipfian.
 #
@@ -599,4 +599,4 @@ done
 #run_remote_test
 #run_space_test
 #run_shared_test_noeviction
-run_node_test
+run_any_test

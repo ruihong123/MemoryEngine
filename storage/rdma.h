@@ -74,8 +74,7 @@ namespace DSMEngine
     };
 
     static const char* EnumStrings[] = {
-        "Internal_and_Leaf", "LockTable", "Message", "Version_edit", "IndexChunk",
-        "FilterChunk", "FlushBuffer", "DataChunk"
+        "Regular_Page", "LockTable", "Message", "BigPage", "DeltaChunk"
     };
 
     static char config_file_name[100] = "../connection_replication.conf";

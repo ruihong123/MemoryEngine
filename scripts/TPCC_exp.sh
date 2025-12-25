@@ -171,7 +171,7 @@ run_tpcc () {
 
 vary_query_ratio () {
   #read_ratios=(0 30 50 70 90 100)
-  thread_number=(1)
+  thread_number=(8)
   WarehouseNum=(256)
   FREQUENCY_DELIVERY=(100 0 0 0 0 1 33 0 0)
   FREQUENCY_PAYMENT=(0 100 0 0 0 10 33 0 50)
@@ -182,7 +182,7 @@ vary_query_ratio () {
   logging_options=("") # "-log"
   hot_table_scanner_options=("") # "-hot"
   for ware_num in ${WarehouseNum[@]}; do
-    for qr_index in 0 1 2 3 4 5; do
+    for qr_index in 5; do
       for thread_n in ${thread_number[@]}; do
         for logging_opt in "${logging_options[@]}"; do
           for hot_table_scanner_opt in "${hot_table_scanner_options[@]}"; do
