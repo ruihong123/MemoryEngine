@@ -46,7 +46,7 @@ default_dist_ratio=100
 # TPC-C: Larger records (~6.5KB/txn), better locality -> fewer txns needed
 tpcc_txns_default=2000000 #default 2000000
 # TATP: Small records (~120B/txn), high cardinality (40M subscribers) -> more txns needed
-tatp_txns_default=50000000 #default 50000000
+tatp_txns_default=500000 #default 50000000
 # SmallBank: Small records (~120B/txn), very high cardinality (200M accounts) -> more txns needed
 smallbank_txns_default=35000000 #default 35000000
 

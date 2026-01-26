@@ -285,13 +285,11 @@ namespace DSMEngine {
         access->access_type_          = access_type;
         access->access_global_record_ = record;
         access->access_addr_          = tuple_gaddr;
-        if (access_type == READ_WRITE) {
-            // local tuple servers as the roll back tuple, in TO transaction concurrency control.
-            // This has to be done before update the write time stamp.
-            Record* local_tuple = new Record(schema_ptr);
-            local_tuple->CopyFrom(record);
-            access->txn_local_tuple_ = local_tuple;
-        }
+        // Always create a local tuple copy for all access types
+        // For READ_WRITE, it serves as the roll back tuple in TO transaction concurrency control.
+        Record* local_tuple = new Record(schema_ptr);
+        local_tuple->CopyFrom(record);
+        access->txn_local_tuple_ = local_tuple;
         assert(start_timestamp_ < 0x700066737575);
 
         // TODO: need to remember the latch, so that the latch can be released when the transaction abort.
@@ -359,8 +357,8 @@ namespace DSMEngine {
             delete access->access_global_record_;
             access->access_global_record_ = nullptr;
             access->access_addr_          = GlobalAddress::Null();
+            // Always recycle txn_local_tuple_ for all access types
             if (access->txn_local_tuple_ != nullptr) {
-                assert(access->access_type_ == READ_WRITE);
                 delete access->txn_local_tuple_;
                 access->txn_local_tuple_ = nullptr;
             }
@@ -420,7 +418,6 @@ namespace DSMEngine {
                 assert(access->txn_local_tuple_ != nullptr);
                 // TODO: we need to reacquire the exclusive latch of the global record.
                 access->access_global_record_->CopyFrom(access->txn_local_tuple_);
-                delete access->txn_local_tuple_;
             } else if (access->access_type_ == DELETE_ONLY) {
                 access->access_global_record_->SetVisible(true);
             }
@@ -429,6 +426,11 @@ namespace DSMEngine {
             delete access->access_global_record_;
             access->access_global_record_ = nullptr;
             access->access_addr_          = GlobalAddress::Null();
+            // Always recycle txn_local_tuple_ for all access types
+            if (access->txn_local_tuple_ != nullptr) {
+                delete access->txn_local_tuple_;
+                access->txn_local_tuple_ = nullptr;
+            }
         }
         access_list_.Clear();
         //            ClearAllLatches();
