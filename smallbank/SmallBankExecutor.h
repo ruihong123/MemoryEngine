@@ -34,6 +34,7 @@ public:
       return new TransactSavingsProcedure();
     };
     registers_[WRITE_CHECK] = []() { return new WriteCheckProcedure(); };
+    registers_[ANALYTICAL_SCAN] = []() { return new AnalyticalScanProcedure(); };
 
     deregisters_[AMALGAMATE] = [](StoredProcedure *p) { delete p; };
     deregisters_[BALANCE] = [](StoredProcedure *p) { delete p; };
@@ -41,6 +42,7 @@ public:
     deregisters_[SEND_PAYMENT] = [](StoredProcedure *p) { delete p; };
     deregisters_[TRANSACT_SAVINGS] = [](StoredProcedure *p) { delete p; };
     deregisters_[WRITE_CHECK] = [](StoredProcedure *p) { delete p; };
+    deregisters_[ANALYTICAL_SCAN] = [](StoredProcedure *p) { delete p; };
   }
 
 protected:

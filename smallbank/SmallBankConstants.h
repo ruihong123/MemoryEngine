@@ -14,6 +14,7 @@ namespace DSMEngine {
             SEND_PAYMENT,
             TRANSACT_SAVINGS,
             WRITE_CHECK,
+            ANALYTICAL_SCAN,
             kTxnTypeCount
         };
 
@@ -27,12 +28,15 @@ namespace DSMEngine {
         const int NAME_LENGTH          = 64;
 
         // Transaction mix percentages (from SmallBank specification)
+        // Note: ANALYTICAL_SCAN_PERCENT is configurable via command line, default is 0
         const int AMALGAMATE_PERCENT       = 15;
         const int BALANCE_PERCENT          = 15;
         const int DEPOSIT_CHECKING_PERCENT = 15;
         const int SEND_PAYMENT_PERCENT     = 25;
         const int TRANSACT_SAVINGS_PERCENT = 15;
         const int WRITE_CHECK_PERCENT      = 15;
+        // Default analytical scan percentage (can be overridden via command line)
+        const int ANALYTICAL_SCAN_PERCENT_DEFAULT = 0;
 
         // Transaction amount range
         const int TRANSFER_AMOUNT_MIN = 1;

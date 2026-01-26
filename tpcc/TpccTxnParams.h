@@ -121,6 +121,18 @@ class StockLevelParam : public TxnParam {
   int w_id_;
   int d_id_;
 };
+
+class AnalyticalScanParam : public TxnParam {
+ public:
+  AnalyticalScanParam() {
+    type_ = ANALYTICAL_SCAN;
+  }
+  virtual ~AnalyticalScanParam() {
+  }
+
+ public:
+  int w_id_;  // Warehouse ID to scan
+};
 }
 }
 

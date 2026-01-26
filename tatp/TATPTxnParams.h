@@ -92,6 +92,17 @@ namespace DSMEngine {
             uint8_t start_time_;
         };
 
+        class AnalyticalScanParam : public TxnParam {
+        public:
+            AnalyticalScanParam() {
+                type_ = ANALYTICAL_SCAN;
+            }
+            virtual ~AnalyticalScanParam() {}
+
+            int64_t start_subscriber_;  // Starting subscriber ID for scan
+            int64_t num_subscribers_to_scan_;  // Number of subscribers to scan (1% by default)
+        };
+
     } // namespace TATPBenchmark
 } // namespace DSMEngine
 

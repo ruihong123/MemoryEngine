@@ -91,12 +91,20 @@ int main(int argc, char *argv[]) {
   synchronizer.FenceXComputes();
 
   {
-    // warm up
+    // warm up - use 8 threads for warmup phase
+    constexpr size_t warmup_thread_count = 8;
+    IORedirector warmup_redirector(warmup_thread_count);
+    TATPSource warmup_sourcer(&tatp_scale_params, &warmup_redirector, num_txn, 0,
+                              warmup_thread_count);
+    warmup_sourcer.Start();
+    synchronizer.FenceXComputes();
+    
     std::cout << "Warm up phase..." << std::endl;
-    INIT_PROFILE_TIME(gThreadCount);
-    TATPExecutor executor(&redirector, &storage_manager, gThreadCount, false);
+    INIT_PROFILE_TIME(warmup_thread_count);
+    TATPExecutor executor(&warmup_redirector, &storage_manager, warmup_thread_count, false);
+    executor.EnableProgressReporting(true);
     executor.Start();
-    REPORT_PROFILE_TIME(gThreadCount);
+    REPORT_PROFILE_TIME(warmup_thread_count);
   }
 
   synchronizer.FenceXComputes();
@@ -132,6 +140,7 @@ int main(int argc, char *argv[]) {
   synchronizer.Fence_XALLNodes();
   default_gallocator->rdma_mg->join_all_handling_thread();
   std::cout << "over.." << std::endl;
+  free(storage_addr);
   return 0;
 }
 

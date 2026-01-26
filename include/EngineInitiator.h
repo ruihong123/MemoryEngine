@@ -10,6 +10,7 @@
 #include "PerfStatistics.h"
 #include "Profiler.h"
 #include "TableDirectory.h"
+#include <algorithm>
 
 namespace DSMEngine {
 class EngineInitiator {
@@ -41,8 +42,10 @@ class EngineInitiator {
       assert(cache_ptr->GetCapacity()> 10000);
       default_gallocator = new DDSM(cache_ptr, rdma_mg);
       std::cout << "create default gallocator" << std::endl;
-    gallocators = new DDSM*[thread_count_];
-    for (size_t i = 0; i < thread_count_; ++i) {
+    // Allocate at least 8 gallocators to support warm-up phase which uses 8 threads
+    size_t alloc_count = std::max(thread_count_, static_cast<size_t>(8));
+    gallocators = new DDSM*[alloc_count];
+    for (size_t i = 0; i < alloc_count; ++i) {
       gallocators[i] = default_gallocator;
     }
   }

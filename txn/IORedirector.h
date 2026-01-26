@@ -14,8 +14,29 @@ class IORedirector {
     input_batches_ = new std::vector<ParamBatch*>[thread_count];
   }
   ~IORedirector() {
-    delete[] input_batches_;
-    input_batches_ = NULL;
+    if (input_batches_ != nullptr) {
+      // Clean up all batches and their params for each thread
+      for (size_t i = 0; i < thread_count_; ++i) {
+        for (auto* batch : input_batches_[i]) {
+          if (batch != nullptr) {
+            // Delete all TxnParam objects in the batch
+            for (size_t j = 0; j < batch->size(); ++j) {
+              TxnParam* param = batch->get(j);
+              if (param != nullptr) {
+                delete param;
+              }
+            }
+            // Delete the batch itself
+            delete batch;
+          }
+        }
+        // Clear the vector (batches are already deleted)
+        input_batches_[i].clear();
+      }
+      // Delete the array of vectors
+      delete[] input_batches_;
+      input_batches_ = NULL;
+    }
   }
 
   std::vector<ParamBatch*> *GetParameterBatches() {

@@ -15,6 +15,7 @@ namespace DSMEngine {
             UPDATE_LOCATION,
             INSERT_CALL_FORWARDING,
             DELETE_CALL_FORWARDING,
+            ANALYTICAL_SCAN,
             kTxnTypeCount
         };
 

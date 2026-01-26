@@ -38,6 +38,7 @@ namespace DSMEngine {
             memset(secondary_col_sizes_, 0, sizeof(size_t)* 25);
 
             secondary_num_ = 0;
+            printf("shcema_ptr is allocated at %p \n", this);
         }
         ~RecordSchema(){
             for (size_t i = 0; i < column_count_; ++i){
@@ -229,11 +230,76 @@ namespace DSMEngine {
             return hashcode;
         }
         virtual void Serialize(const char*& addr) {
-          //todo: serialize the table name
             size_t off = 0;
-            memcpy((void *) addr, this, sizeof(RecordSchema));
-            off += sizeof(RecordSchema);
-//            memcpy((void *) (addr + off), columns_, sizeof(RecordSchema));
+            // Serialize POD members individually (avoid memcpy on entire object due to std::string members)
+            memcpy((void *) (addr + off), &table_id_, sizeof(size_t));
+            off += sizeof(size_t);
+            
+            // Serialize table_name_ string
+            size_t table_name_len = table_name_.length();
+            memcpy((void *) (addr + off), &table_name_len, sizeof(size_t));
+            off += sizeof(size_t);
+            memcpy((void *) (addr + off), table_name_.c_str(), table_name_len);
+            off += table_name_len;
+            
+            memcpy((void *) (addr + off), &column_count_, sizeof(size_t));
+            off += sizeof(size_t);
+            memcpy((void *) (addr + off), &column_offset_, sizeof(size_t));
+            off += sizeof(size_t);
+            
+            // Primary key fields
+            memcpy((void *) (addr + off), &primary_key_length_, sizeof(size_t));
+            off += sizeof(size_t);
+            memcpy((void *) (addr + off), &primary_col_num_, sizeof(size_t));
+            off += sizeof(size_t);
+            memcpy((void *) (addr + off), &primary_col_length_, sizeof(size_t));
+            off += sizeof(size_t);
+            memcpy((void *) (addr + off), primary_col_ids_, sizeof(size_t) * 5);
+            off += sizeof(size_t) * 5;
+            memcpy((void *) (addr + off), primary_col_sizes_, sizeof(size_t) * 5);
+            off += sizeof(size_t) * 5;
+            
+            // Serialize primary_symbol_ string
+            size_t primary_symbol_len = primary_symbol_.length();
+            memcpy((void *) (addr + off), &primary_symbol_len, sizeof(size_t));
+            off += sizeof(size_t);
+            memcpy((void *) (addr + off), primary_symbol_.c_str(), primary_symbol_len);
+            off += primary_symbol_len;
+            
+            // Partition key fields
+            memcpy((void *) (addr + off), &partition_key_length_, sizeof(size_t));
+            off += sizeof(size_t);
+            memcpy((void *) (addr + off), &partition_col_num_, sizeof(size_t));
+            off += sizeof(size_t);
+            memcpy((void *) (addr + off), &partition_col_length_, sizeof(size_t));
+            off += sizeof(size_t);
+            memcpy((void *) (addr + off), partition_col_ids_, sizeof(size_t) * 5);
+            off += sizeof(size_t) * 5;
+            memcpy((void *) (addr + off), partition_col_sizes_, sizeof(size_t) * 5);
+            off += sizeof(size_t) * 5;
+            
+            // Serialize partition_symbol_ string
+            size_t partition_symbol_len = partition_symbol_.length();
+            memcpy((void *) (addr + off), &partition_symbol_len, sizeof(size_t));
+            off += sizeof(size_t);
+            memcpy((void *) (addr + off), partition_symbol_.c_str(), partition_symbol_len);
+            off += partition_symbol_len;
+            
+            // Secondary index fields
+            memcpy((void *) (addr + off), secondary_key_length_, sizeof(size_t) * 5);
+            off += sizeof(size_t) * 5;
+            memcpy((void *) (addr + off), secondary_col_num_, sizeof(size_t) * 5);
+            off += sizeof(size_t) * 5;
+            memcpy((void *) (addr + off), secondary_col_length_, sizeof(size_t) * 5);
+            off += sizeof(size_t) * 5;
+            memcpy((void *) (addr + off), secondary_col_ids_, sizeof(size_t) * 25);
+            off += sizeof(size_t) * 25;
+            memcpy((void *) (addr + off), secondary_col_sizes_, sizeof(size_t) * 25);
+            off += sizeof(size_t) * 25;
+            memcpy((void *) (addr + off), &secondary_num_, sizeof(size_t));
+            off += sizeof(size_t);
+            
+            // Serialize columns
             for (size_t i = 0; i < column_count_; ++i){
                 memcpy((void *) (addr + off), columns_[i], sizeof(ColumnInfo));
                 off += sizeof(ColumnInfo);
@@ -241,10 +307,76 @@ namespace DSMEngine {
         }
 
         virtual void Deserialize(const char*& addr) {
-          //todo: deserialize the table name
             size_t off = 0;
-            memcpy((void*)this, addr, sizeof(RecordSchema));
-            off += sizeof(RecordSchema);
+            // Deserialize POD members individually (avoid memcpy on entire object due to std::string members)
+            memcpy(&table_id_, (void *) (addr + off), sizeof(size_t));
+            off += sizeof(size_t);
+            
+            // Deserialize table_name_ string
+            size_t table_name_len;
+            memcpy(&table_name_len, (void *) (addr + off), sizeof(size_t));
+            off += sizeof(size_t);
+            table_name_ = std::string((char *)(addr + off), table_name_len);
+            off += table_name_len;
+            
+            memcpy(&column_count_, (void *) (addr + off), sizeof(size_t));
+            off += sizeof(size_t);
+            memcpy(&column_offset_, (void *) (addr + off), sizeof(size_t));
+            off += sizeof(size_t);
+            
+            // Primary key fields
+            memcpy(&primary_key_length_, (void *) (addr + off), sizeof(size_t));
+            off += sizeof(size_t);
+            memcpy(&primary_col_num_, (void *) (addr + off), sizeof(size_t));
+            off += sizeof(size_t);
+            memcpy(&primary_col_length_, (void *) (addr + off), sizeof(size_t));
+            off += sizeof(size_t);
+            memcpy(primary_col_ids_, (void *) (addr + off), sizeof(size_t) * 5);
+            off += sizeof(size_t) * 5;
+            memcpy(primary_col_sizes_, (void *) (addr + off), sizeof(size_t) * 5);
+            off += sizeof(size_t) * 5;
+            
+            // Deserialize primary_symbol_ string
+            size_t primary_symbol_len;
+            memcpy(&primary_symbol_len, (void *) (addr + off), sizeof(size_t));
+            off += sizeof(size_t);
+            primary_symbol_ = std::string((char *)(addr + off), primary_symbol_len);
+            off += primary_symbol_len;
+            
+            // Partition key fields
+            memcpy(&partition_key_length_, (void *) (addr + off), sizeof(size_t));
+            off += sizeof(size_t);
+            memcpy(&partition_col_num_, (void *) (addr + off), sizeof(size_t));
+            off += sizeof(size_t);
+            memcpy(&partition_col_length_, (void *) (addr + off), sizeof(size_t));
+            off += sizeof(size_t);
+            memcpy(partition_col_ids_, (void *) (addr + off), sizeof(size_t) * 5);
+            off += sizeof(size_t) * 5;
+            memcpy(partition_col_sizes_, (void *) (addr + off), sizeof(size_t) * 5);
+            off += sizeof(size_t) * 5;
+            
+            // Deserialize partition_symbol_ string
+            size_t partition_symbol_len;
+            memcpy(&partition_symbol_len, (void *) (addr + off), sizeof(size_t));
+            off += sizeof(size_t);
+            partition_symbol_ = std::string((char *)(addr + off), partition_symbol_len);
+            off += partition_symbol_len;
+            
+            // Secondary index fields
+            memcpy(secondary_key_length_, (void *) (addr + off), sizeof(size_t) * 5);
+            off += sizeof(size_t) * 5;
+            memcpy(secondary_col_num_, (void *) (addr + off), sizeof(size_t) * 5);
+            off += sizeof(size_t) * 5;
+            memcpy(secondary_col_length_, (void *) (addr + off), sizeof(size_t) * 5);
+            off += sizeof(size_t) * 5;
+            memcpy(secondary_col_ids_, (void *) (addr + off), sizeof(size_t) * 25);
+            off += sizeof(size_t) * 25;
+            memcpy(secondary_col_sizes_, (void *) (addr + off), sizeof(size_t) * 25);
+            off += sizeof(size_t) * 25;
+            memcpy(&secondary_num_, (void *) (addr + off), sizeof(size_t));
+            off += sizeof(size_t);
+            
+            // Deserialize columns
             columns_ = new ColumnInfo*[column_count_];
             for (size_t i = 0; i < column_count_; ++i) {
                 columns_[i] = new ColumnInfo();
@@ -254,7 +386,21 @@ namespace DSMEngine {
         }
 
         static size_t GetSerializeSize() {
-            return sizeof(RecordSchema) + kMaxColumnNum*sizeof(ColumnInfo);
+            // Calculate size: POD members + string lengths and data + columns
+            // POD scalar members: table_id_, column_count_, column_offset_, 
+            //   primary_key_length_, primary_col_num_, primary_col_length_,
+            //   partition_key_length_, partition_col_num_, partition_col_length_, secondary_num_
+            size_t pod_scalars = sizeof(size_t) * 10;
+            // POD arrays: primary_col_ids_[5], primary_col_sizes_[5], partition_col_ids_[5], partition_col_sizes_[5],
+            //   secondary_key_length_[5], secondary_col_num_[5], secondary_col_length_[5],
+            //   secondary_col_ids_[5][5], secondary_col_sizes_[5][5]
+            size_t pod_arrays = sizeof(size_t) * (5 + 5 + 5 + 5 + 5 + 5 + 5 + 25 + 25);
+            // String serialization: length (size_t) + data for each string
+            size_t string_overhead = sizeof(size_t) * 3;  // length fields for 3 strings
+            size_t max_string_data = kMaxAttributeLength + 40 + 40;  // table_name_ + primary_symbol_ + partition_symbol_
+            // Columns
+            size_t columns_size = kMaxColumnNum * sizeof(ColumnInfo);
+            return pod_scalars + pod_arrays + string_overhead + max_string_data + columns_size;
         }
          size_t GetMetaColumnId() const {
             return column_count_ - 1;

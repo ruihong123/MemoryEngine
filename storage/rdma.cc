@@ -142,8 +142,8 @@ namespace DSMEngine {
         if (ptr == nullptr) {
             return;
         }
+        delete[] (char*)((ibv_mr*)ptr)->addr;
         ibv_dereg_mr((ibv_mr *) ptr);
-        //  delete (char*)((ibv_mr*)ptr)->addr;
     }
 
     template<typename T>

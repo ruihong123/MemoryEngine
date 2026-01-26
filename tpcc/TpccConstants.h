@@ -14,6 +14,7 @@ enum TupleType
   PAYMENT,
   ORDER_STATUS,
   STOCK_LEVEL,
+  ANALYTICAL_SCAN,
   kProcedureCount
 };
 

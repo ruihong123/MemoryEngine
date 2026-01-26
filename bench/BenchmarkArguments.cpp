@@ -33,5 +33,6 @@ int FREQUENCY_PAYMENT = 20;      // 43
 int FREQUENCY_NEW_ORDER = 20;    // 45
 int FREQUENCY_ORDER_STATUS = 20; // 0
 int FREQUENCY_STOCK_LEVEL = 20;  // 0
+int FREQUENCY_ANALYTICAL_SCAN = 0;  // SmallBank analytical scan frequency (default: 0)
 
 } // namespace DSMEngine

@@ -107,6 +107,7 @@ class Btr {
                 }else{
                     assert(node == nullptr);
                 }
+                handle = nullptr;
             }
             void Get(DynamicCompoundKey& key, void* buff){
                 node->GetDeepByPosition(position_idx, scheme_ptr, key, buff);
@@ -134,6 +135,7 @@ class Btr {
                 if (handle){
                     dsm->SELCC_Shared_UnLock(handle->gptr, handle);
                     handle = nullptr;
+                    node = nullptr;
                 }
 
             }
@@ -165,6 +167,12 @@ class Btr {
         //Btree waiting for serialization. get the root node from memcached
         Btr(DDSM *dsm, Cache *cache_ptr, RecordSchema *record_scheme_ptr);
         // the start pointer of k and the data_ of v shall be same.
+        ~Btr() {
+            if (index_scheme_ptr) {
+                delete index_scheme_ptr;
+                index_scheme_ptr = nullptr;
+            }
+        }
         void insert(const DynamicCompoundKey &k, const Slice &v, RedoLogger* redo_logger = nullptr);
 
         bool remove(const DynamicCompoundKey &k, RedoLogger* redo_logger = nullptr);

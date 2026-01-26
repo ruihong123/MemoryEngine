@@ -412,8 +412,8 @@ namespace DSMEngine {
             if (access->access_type_ == INSERT_ONLY) {
 
                 access->access_global_record_->SetVisible(false);
-                delete access->access_global_record_;
-                access->access_global_record_ = nullptr;
+                // delete access->access_global_record_;
+                // access->access_global_record_ = nullptr;
 
                 // todo: Deallcoate the space of inserted tuples.
             } else if (access->access_type_ == READ_WRITE) {

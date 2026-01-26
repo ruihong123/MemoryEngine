@@ -4,9 +4,11 @@
 
 #include "TpccRandomGenerator.h"
 #include "BenchmarkSource.h"
+#include "BenchmarkArguments.h"
 #include "TpccTxnParams.h"
 #include "TpccKeyGenerator.h"
 #include <ctime>
+#include <cmath>
 
 namespace DSMEngine {
 namespace TpccBenchmark {
@@ -33,6 +35,13 @@ class TpccSource : public BenchmarkSource {
     total_insert_access_count_ = 0;
   }
 
+  ~TpccSource() {
+    if (direct_warehouse_id_ != nullptr) {
+      delete[] direct_warehouse_id_;
+      direct_warehouse_id_ = nullptr;
+    }
+  }
+
  private:
   TpccScaleParams* scale_params_;
   size_t node_id_;
@@ -48,22 +57,43 @@ class TpccSource : public BenchmarkSource {
   virtual void StartGeneration() {
     //srand(time(nullptr));
     srand(node_id_ * time(nullptr));
-    double frequency_weights[5];
+    double frequency_weights[6];
     frequency_weights[0] = FREQUENCY_DELIVERY;
     frequency_weights[1] = FREQUENCY_PAYMENT;
     frequency_weights[2] = FREQUENCY_NEW_ORDER;
     frequency_weights[3] = FREQUENCY_ORDER_STATUS;
     frequency_weights[4] = FREQUENCY_STOCK_LEVEL;
+    
+    // Calculate analytical scan weight to achieve ~1% of total throughput
+    // If enabled, set weight to achieve 1%: weight = (0.01 / 0.99) * standard_total
+    double standard_total = FREQUENCY_DELIVERY + FREQUENCY_PAYMENT + FREQUENCY_NEW_ORDER + 
+                            FREQUENCY_ORDER_STATUS + FREQUENCY_STOCK_LEVEL;
+    if (FREQUENCY_ANALYTICAL_SCAN > 0 && standard_total > 0) {
+      // Calculate weight to achieve ~1%: A = 0.01 * (StandardTotal + A) => A = 0.0101 * StandardTotal
+      frequency_weights[5] = std::max(1.0, std::round(standard_total * 0.0101));
+    } else {
+      frequency_weights[5] = 0;
+    }
 
     double total = 0;
-    for (size_t i = 0; i < 5; ++i) {
+    for (size_t i = 0; i < 6; ++i) {
       total += frequency_weights[i];
     }
-    for (size_t i = 0; i < 5; ++i) {
-      frequency_weights[i] = frequency_weights[i] * 1.0 / total * 100;
-    }
-    for (size_t i = 1; i < 5; ++i) {
-      frequency_weights[i] += frequency_weights[i - 1];
+    if (total > 0) {
+      for (size_t i = 0; i < 6; ++i) {
+        frequency_weights[i] = frequency_weights[i] * 1.0 / total * 100;
+      }
+      for (size_t i = 1; i < 6; ++i) {
+        frequency_weights[i] += frequency_weights[i - 1];
+      }
+    } else {
+      // Default distribution if all zeros
+      frequency_weights[0] = 1.0;
+      frequency_weights[1] = 43.5;
+      frequency_weights[2] = 87.0;
+      frequency_weights[3] = 91.3;
+      frequency_weights[4] = 95.6;
+      frequency_weights[5] = 100.0;
     }
 
     if (source_type_ == RANDOM_SOURCE) {
@@ -86,9 +116,13 @@ class TpccSource : public BenchmarkSource {
           OrderStatusParam *param = NULL;
           param = GenerateOrderStatusParam();
           tuples->push_back(param);
-        } else {
+        } else if (x <= frequency_weights[4]) {
           StockLevelParam *param = NULL;
           param = GenerateStockLevelParam();
+          tuples->push_back(param);
+        } else {
+          AnalyticalScanParam *param = NULL;
+          param = GenerateAnalyticalScanParam();
           tuples->push_back(param);
         }
         if ((i + 1) % gParamBatchSize == 0) {
@@ -96,9 +130,7 @@ class TpccSource : public BenchmarkSource {
           tuples = new ParamBatch(gParamBatchSize);
         }
       }
-      if (tuples->size() != 0) {
-        redirector_ptr_->PushParameterBatch(tuples);
-      }
+      redirector_ptr_->PushParameterBatch(tuples);
     } else if (source_type_ == PARTITION_SOURCE) {
       size_t thread_id = 0;
       ParamBatch *tuples = new ParamBatch(gParamBatchSize);
@@ -136,9 +168,13 @@ class TpccSource : public BenchmarkSource {
           OrderStatusParam *param = NULL;
           param = GenerateOrderStatusParam(warehouse_id);
           tuples->push_back(param);
-        } else {
+        } else if (x <= frequency_weights[4]) {
           StockLevelParam *param = NULL;
           param = GenerateStockLevelParam(warehouse_id);
+          tuples->push_back(param);
+        } else {
+          AnalyticalScanParam *param = NULL;
+          param = GenerateAnalyticalScanParam(warehouse_id);
           tuples->push_back(param);
         }
         if ((i + 1) % gParamBatchSize == 0) {
@@ -150,8 +186,10 @@ class TpccSource : public BenchmarkSource {
       if (tuples->size() != 0) {
         redirector_ptr_->PushParameterBatch(tuples);
       } else {
+        // Empty batch - no params to delete since batch is empty
         delete tuples;
         tuples = NULL;
+        assert(false);
       }
     }
 
@@ -508,6 +546,17 @@ class TpccSource : public BenchmarkSource {
     }
     param->d_id_ = TpccRandomGenerator::GenerateDistrictId(
         scale_params_->num_districts_per_warehouse_);
+    return param;
+  }
+
+  AnalyticalScanParam* GenerateAnalyticalScanParam(const int &w_id = -1) const {
+    AnalyticalScanParam *param = new AnalyticalScanParam();
+    if (w_id == -1) {
+      param->w_id_ = TpccRandomGenerator::GenerateWarehouseId(
+          1, scale_params_->num_warehouses_);
+    } else {
+      param->w_id_ = w_id;
+    }
     return param;
   }
 

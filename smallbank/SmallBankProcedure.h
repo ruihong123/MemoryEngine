@@ -286,6 +286,92 @@ namespace DSMEngine {
             }
         };
 
+        class AnalyticalScanProcedure : public StoredProcedure {
+        public:
+            AnalyticalScanProcedure() {
+                context_.txn_type_ = ANALYTICAL_SCAN;
+            }
+
+            virtual ~AnalyticalScanProcedure() {}
+
+            virtual bool Execute(TxnParam* param, CharArray& ret) {
+                AnalyticalScanParam* scan_param = static_cast<AnalyticalScanParam*>(param);
+
+                RecordSchema* savings_index_schema = transaction_manager_->GetPrimaryIndexSchema(SAVINGS_TABLE_ID);
+                RecordSchema* checking_index_schema = transaction_manager_->GetPrimaryIndexSchema(CHECKING_TABLE_ID);
+
+                // Scan the specified range of accounts using iterators
+                DynamicCompoundKey savings_start_key = SmallBankKeyGenerator::GenerateSavingsKey(scan_param->start_account_, savings_index_schema);
+                DynamicCompoundKey checking_start_key = SmallBankKeyGenerator::GenerateCheckingKey(scan_param->start_account_, checking_index_schema);
+                
+                auto savings_iter = transaction_manager_->CreateScanIteratorFromKey(SAVINGS_TABLE_ID, savings_start_key);
+                auto checking_iter = transaction_manager_->CreateScanIteratorFromKey(CHECKING_TABLE_ID, checking_start_key);
+                
+                int64_t accounts_scanned = 0;
+                
+                // Scan savings accounts using iterator
+                if (savings_iter) {
+                    char savings_key_buf[64];
+                    char savings_value_buf[64];
+                    DynamicCompoundKey savings_key(savings_key_buf, savings_index_schema);
+                    GlobalAddress gaddr;
+                    
+                    while (savings_iter->Valid() && accounts_scanned < scan_param->num_accounts_to_scan_) {
+                        if (savings_iter->GetNext(savings_key, savings_value_buf, gaddr)) {
+                            Record* savings_record = nullptr;
+                            // Read savings record directly using GlobalAddress from iterator
+                            DB_QUERY(ReadRecordByAddress(SAVINGS_TABLE_ID, savings_record, gaddr, READ_ONLY));
+                            
+                            if (savings_record) {
+                                double savings_bal = 0.0;
+                                savings_record->GetColumn(1, &savings_bal);
+#if defined(TO)
+                                Cache::Handle* handle = (Cache::Handle*) savings_record->Get_Handle();
+                                if (handle) {
+                                    transaction_manager_->ReleaseLatchForGCL(handle->gptr, handle);
+                                }
+#endif
+                            }
+                            accounts_scanned++;
+                        }
+                        savings_iter->Next();
+                    }
+                }
+                
+                // Scan checking accounts using iterator
+                accounts_scanned = 0;
+                if (checking_iter) {
+                    char checking_key_buf[64];
+                    char checking_value_buf[64];
+                    DynamicCompoundKey checking_key(checking_key_buf, checking_index_schema);
+                    GlobalAddress gaddr;
+                    
+                    while (checking_iter->Valid() && accounts_scanned < scan_param->num_accounts_to_scan_) {
+                        if (checking_iter->GetNext(checking_key, checking_value_buf, gaddr)) {
+                            Record* checking_record = nullptr;
+                            // Read checking record directly using GlobalAddress from iterator
+                            DB_QUERY(ReadRecordByAddress(CHECKING_TABLE_ID, checking_record, gaddr, READ_ONLY));
+                            
+                            if (checking_record) {
+                                double checking_bal = 0.0;
+                                checking_record->GetColumn(1, &checking_bal);
+#if defined(TO)
+                                Cache::Handle* handle = (Cache::Handle*) checking_record->Get_Handle();
+                                if (handle) {
+                                    transaction_manager_->ReleaseLatchForGCL(handle->gptr, handle);
+                                }
+#endif
+                            }
+                            accounts_scanned++;
+                        }
+                        checking_iter->Next();
+                    }
+                }
+
+                return transaction_manager_->CommitTransaction(ret);
+            }
+        };
+
     } // namespace SmallBankBenchmark
 } // namespace DSMEngine
 

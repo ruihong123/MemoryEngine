@@ -18,7 +18,9 @@
 #include "env_posix.h"
 #include "RedoLogger.h"
 #include "LogCodec.h"
+#include "Btr.h"
 #include <unordered_map>
+#include <memory>
 //#include "log.h"
 #define TWO_PHASE_COMMIT
 #define EARLYABORT
@@ -224,6 +226,115 @@ namespace DSMEngine {
             Records* records, AccessType access_type) {
             printf("not supported for now\n");
             return true;
+        }
+
+        // Scan iterator wrapper that provides convenient access to key and GlobalAddress
+        class ScanIterator {
+        public:
+            ScanIterator(Btr::iterator&& iter, RecordSchema* index_schema)
+                : iter_(std::move(iter)), index_schema_(index_schema) {
+            }
+
+            // Move constructor
+            ScanIterator(ScanIterator&& other) noexcept
+                : iter_(std::move(other.iter_)), index_schema_(other.index_schema_) {
+            }
+
+            // Move assignment - deleted since Btr::iterator doesn't support assignment
+            ScanIterator& operator=(ScanIterator&& other) = delete;
+
+            // Delete copy constructor and assignment
+            ScanIterator(const ScanIterator&) = delete;
+            ScanIterator& operator=(const ScanIterator&) = delete;
+
+            bool Valid() {
+                return iter_.Valid();
+            }
+
+            // Get the current key and GlobalAddress
+            // Returns true if valid, false otherwise
+            // Parameters:
+            //   key: Must be initialized with a buffer (at least GetPrimaryKeyLength() bytes) and schema
+            //   value_buffer: Buffer to hold the key-value pair (at least GetRecordTotalSize() bytes)
+            //   gaddr: Output parameter for the GlobalAddress
+            bool GetNext(DynamicCompoundKey& key, char* value_buffer, GlobalAddress& gaddr) {
+                if (!iter_.Valid()) {
+                    return false;
+                }
+                
+                // Get key-value pair directly from b-tree iterator
+                iter_.Get(key, value_buffer);
+                
+                // Extract GlobalAddress from value buffer (stored after key)
+                memcpy(&gaddr, value_buffer + index_schema_->GetPrimaryKeyLength(), sizeof(GlobalAddress));
+                
+                return true;
+            }
+
+            // Advance to next entry
+            void Next() {
+                iter_.Next();
+            }
+
+            // Get the index schema (useful for callers to allocate buffers)
+            RecordSchema* GetIndexSchema() const {
+                return index_schema_;
+            }
+
+        private:
+            Btr::iterator iter_;
+            RecordSchema* index_schema_;
+        };
+
+        // Create a scan iterator starting from the beginning of the table
+        // Returns nullptr if table doesn't exist or iterator creation fails
+        std::unique_ptr<ScanIterator> CreateScanIterator(size_t table_id) {
+            if (table_id >= storage_manager_->tables_.size() || 
+                storage_manager_->tables_[table_id] == nullptr) {
+                return nullptr;
+            }
+            
+            Btr* primary_index = storage_manager_->tables_[table_id]->GetPrimaryIndex();
+            if (primary_index == nullptr) {
+                return nullptr;
+            }
+            
+            RecordSchema* index_schema = storage_manager_->tables_[table_id]->GetPrimaryIndexSchema();
+            Btr::iterator iter = primary_index->begin();
+            
+            if (!iter.Valid()) {
+                return nullptr;
+            }
+            
+            return std::make_unique<ScanIterator>(std::move(iter), index_schema);
+        }
+
+        // Create a scan iterator starting from a specific key (lower_bound)
+        // Returns nullptr if table doesn't exist or iterator creation fails
+        std::unique_ptr<ScanIterator> CreateScanIteratorFromKey(size_t table_id, const DynamicCompoundKey& start_key) {
+            if (table_id >= storage_manager_->tables_.size() || 
+                storage_manager_->tables_[table_id] == nullptr) {
+                return nullptr;
+            }
+            
+            Btr* primary_index = storage_manager_->tables_[table_id]->GetPrimaryIndex();
+            if (primary_index == nullptr) {
+                return nullptr;
+            }
+            
+            RecordSchema* index_schema = storage_manager_->tables_[table_id]->GetPrimaryIndexSchema();
+            Btr::iterator iter = primary_index->lower_bound(start_key);
+            
+            if (!iter.Valid()) {
+                return nullptr;
+            }
+            
+            return std::make_unique<ScanIterator>(std::move(iter), index_schema);
+        }
+
+        // Public method to read a record directly using GlobalAddress (for use with scan iterators)
+        bool ReadRecordByAddress(size_t table_id, Record*& record, const GlobalAddress& tuple_gaddr, AccessType access_type) {
+            return SelectRecordCC(table_id, record, tuple_gaddr, access_type);
         }
 
         bool CommitTransaction(CharArray& ret_str);

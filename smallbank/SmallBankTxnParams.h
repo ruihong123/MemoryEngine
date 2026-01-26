@@ -73,6 +73,17 @@ namespace DSMEngine {
             double amount_;
         };
 
+        class AnalyticalScanParam : public TxnParam {
+        public:
+            AnalyticalScanParam() {
+                type_ = ANALYTICAL_SCAN;
+            }
+            virtual ~AnalyticalScanParam() {}
+
+            int64_t start_account_;  // Starting account ID for scan
+            int64_t num_accounts_to_scan_;  // Number of accounts to scan (1% of total by default)
+        };
+
     } // namespace SmallBankBenchmark
 } // namespace DSMEngine
 

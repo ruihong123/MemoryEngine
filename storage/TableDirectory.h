@@ -16,7 +16,9 @@ public:
   ~TableDirectory() {
 //    if (tables_) {
 //      assert(table_count_ > 0);
+     assert(table_count_ > 1);
       for (size_t i = 0; i < table_count_; ++i) {
+          printf("table[i] is %p, table id is %lu, shcema is %p", tables_[i], tables_[i]->GetTableId(), tables_[i]->GetSchema());
         delete tables_[i];
         tables_[i] = nullptr;
       } 

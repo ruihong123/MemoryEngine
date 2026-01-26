@@ -396,6 +396,7 @@ int main(int argc, char *argv[]) {
   synchronizer.Fence_XALLNodes();
   default_gallocator->rdma_mg->join_all_handling_thread();
   std::cout << "over.." << std::endl;
+  free(storage_addr);
   return 0;
 }
 

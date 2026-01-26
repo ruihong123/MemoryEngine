@@ -57,6 +57,10 @@ public:
       StockLevelProcedure *procedure = new StockLevelProcedure();
       return procedure;
     };
+    registers_[TupleType::ANALYTICAL_SCAN] = []() {
+      AnalyticalScanProcedure *procedure = new AnalyticalScanProcedure();
+      return procedure;
+    };
 
     deregisters_[TupleType::DELIVERY] = [](StoredProcedure *procedure) {
       delete procedure;
@@ -75,6 +79,10 @@ public:
       procedure = NULL;
     };
     deregisters_[TupleType::STOCK_LEVEL] = [](StoredProcedure *procedure) {
+      delete procedure;
+      procedure = NULL;
+    };
+    deregisters_[TupleType::ANALYTICAL_SCAN] = [](StoredProcedure *procedure) {
       delete procedure;
       procedure = NULL;
     };

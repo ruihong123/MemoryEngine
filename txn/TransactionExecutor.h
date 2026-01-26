@@ -376,7 +376,18 @@ private:
         storage_manager_, this->thread_count_, thread_id, log_enabled_,
         TWOPHASECOMMIT, GetPartitionStart(), GetPartitionEnd(),
         GetNumItemsPerPartition(), GetPartitionKeyBits());
-    StoredProcedure **procedures = new StoredProcedure *[registers_.size()];
+    // Find maximum key to size the array appropriately
+    size_t max_key = 0;
+    for (auto &entry : registers_) {
+      if (entry.first > max_key) {
+        max_key = entry.first;
+      }
+    }
+    StoredProcedure **procedures = new StoredProcedure *[max_key + 1];
+    // Initialize all pointers to nullptr
+    for (size_t i = 0; i <= max_key; ++i) {
+      procedures[i] = nullptr;
+    }
     for (auto &entry : registers_) {
       procedures[entry.first] = entry.second();
       procedures[entry.first]->SetTransactionManager(txn_manager);
@@ -426,6 +437,20 @@ private:
             total_count_.fetch_add(count);
             total_abort_count_.fetch_add(abort_count);
             PROFILE_TIME_END(thread_id, TXN_EXECUTE);
+            // Clean up procedures
+            for (auto &entry : registers_) {
+              if (procedures[entry.first] != nullptr) {
+                auto it = deregisters_.find(entry.first);
+                if (it != deregisters_.end()) {
+                  it->second(procedures[entry.first]);
+                } else {
+                  delete procedures[entry.first];
+                }
+              }
+            }
+            delete[] procedures;
+            delete[] ret.char_ptr_;
+            delete txn_manager;
             //            txn_manager->CleanUp();
             return;
           }
@@ -453,6 +478,20 @@ private:
               total_abort_count_.fetch_add(abort_count);
               PROFILE_TIME_END(thread_id, TXN_ABORT);
               PROFILE_TIME_END(thread_id, TXN_EXECUTE);
+              // Clean up procedures
+              for (auto &entry : registers_) {
+                if (procedures[entry.first] != nullptr) {
+                  auto it = deregisters_.find(entry.first);
+                  if (it != deregisters_.end()) {
+                    it->second(procedures[entry.first]);
+                  } else {
+                    delete procedures[entry.first];
+                  }
+                }
+              }
+              delete[] procedures;
+              delete[] ret.char_ptr_;
+              delete txn_manager;
               // txn_manager->CleanUp();
               return;
             }
@@ -502,6 +541,20 @@ private:
         if (is_finish_ == true) {
           total_count_ += count;
           total_abort_count_ += abort_count;
+          // Clean up procedures
+          for (auto &entry : registers_) {
+            if (procedures[entry.first] != nullptr) {
+              auto it = deregisters_.find(entry.first);
+              if (it != deregisters_.end()) {
+                it->second(procedures[entry.first]);
+              } else {
+                delete procedures[entry.first];
+              }
+            }
+          }
+          delete[] procedures;
+          delete[] ret.char_ptr_;
+          delete txn_manager;
           // txn_manager->CleanUp();
           return;
         }
@@ -515,6 +568,20 @@ private:
     total_abort_count_ += abort_count;
     printf("Thread %zu finished \n", thread_id);
     fflush(stdout);
+    // Clean up procedures
+    for (auto &entry : registers_) {
+      if (procedures[entry.first] != nullptr) {
+        auto it = deregisters_.find(entry.first);
+        if (it != deregisters_.end()) {
+          it->second(procedures[entry.first]);
+        } else {
+          delete procedures[entry.first];
+        }
+      }
+    }
+    delete[] procedures;
+    delete[] ret.char_ptr_;
+    delete txn_manager;
     // txn_manager->CleanUp();
     return;
   }

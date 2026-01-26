@@ -298,6 +298,109 @@ namespace DSMEngine {
             }
         };
 
+        class AnalyticalScanProcedure : public StoredProcedure {
+        public:
+            AnalyticalScanProcedure() {
+                context_.txn_type_ = ANALYTICAL_SCAN;
+            }
+
+            virtual ~AnalyticalScanProcedure() {}
+
+            virtual bool Execute(TxnParam* param, CharArray& ret) {
+                AnalyticalScanParam* scan_param = static_cast<AnalyticalScanParam*>(param);
+
+                RecordSchema* access_index_schema = transaction_manager_->GetPrimaryIndexSchema(ACCESS_INFO_TABLE_ID);
+                RecordSchema* sf_index_schema = transaction_manager_->GetPrimaryIndexSchema(SPECIAL_FACILITY_TABLE_ID);
+                RecordSchema* subscriber_index_schema = transaction_manager_->GetPrimaryIndexSchema(SUBSCRIBER_TABLE_ID);
+
+                Record* record = nullptr;
+
+                // Scan subscribers using iterator starting from start_subscriber_
+                DynamicCompoundKey subscriber_start_key = TATPKeyGenerator::GenerateSubscriberKey(scan_param->start_subscriber_, subscriber_index_schema);
+                auto subscriber_iter = transaction_manager_->CreateScanIteratorFromKey(SUBSCRIBER_TABLE_ID, subscriber_start_key);
+                
+                if (subscriber_iter) {
+                    char subscriber_key_buf[64];
+                    char subscriber_value_buf[64];
+                    DynamicCompoundKey subscriber_key(subscriber_key_buf, subscriber_index_schema);
+                    GlobalAddress gaddr;
+                    int64_t subscribers_scanned = 0;
+                    
+                    while (subscriber_iter->Valid() && subscribers_scanned < scan_param->num_subscribers_to_scan_) {
+                        if (subscriber_iter->GetNext(subscriber_key, subscriber_value_buf, gaddr)) {
+                            // Read subscriber record directly using GlobalAddress from iterator
+                            DB_QUERY(ReadRecordByAddress(SUBSCRIBER_TABLE_ID, record, gaddr, READ_ONLY));
+#if defined(TO)
+                            Cache::Handle* handle = (Cache::Handle*) record->Get_Handle();
+                            if (handle) {
+                                transaction_manager_->ReleaseLatchForGCL(handle->gptr, handle);
+                            }
+#endif
+                            
+                            // Extract subscriber ID from key to scan related tables
+                            // For TATP, subscriber ID is the first field in the key
+                            int64_t s_id = scan_param->start_subscriber_ + subscribers_scanned;
+                            
+                            // Scan access_info for this subscriber using iterator
+                            DynamicCompoundKey access_start_key = TATPKeyGenerator::GenerateAccessInfoKey(s_id, AI_TYPE_MIN, access_index_schema);
+                            auto access_iter = transaction_manager_->CreateScanIteratorFromKey(ACCESS_INFO_TABLE_ID, access_start_key);
+                            if (access_iter) {
+                                char access_key_buf[64];
+                                char access_value_buf[64];
+                                DynamicCompoundKey access_key(access_key_buf, access_index_schema);
+                                GlobalAddress access_gaddr;
+                                uint8_t access_types_scanned = 0;
+                                
+                                while (access_iter->Valid() && access_types_scanned <= (AI_TYPE_MAX - AI_TYPE_MIN)) {
+                                    if (access_iter->GetNext(access_key, access_value_buf, access_gaddr)) {
+                                        DB_QUERY(ReadRecordByAddress(ACCESS_INFO_TABLE_ID, record, access_gaddr, READ_ONLY));
+#if defined(TO)
+                                        Cache::Handle* handle = (Cache::Handle*) record->Get_Handle();
+                                        if (handle) {
+                                            transaction_manager_->ReleaseLatchForGCL(handle->gptr, handle);
+                                        }
+#endif
+                                        access_types_scanned++;
+                                    }
+                                    access_iter->Next();
+                                }
+                            }
+                            
+                            // Scan special_facility for this subscriber using iterator
+                            DynamicCompoundKey sf_start_key = TATPKeyGenerator::GenerateSpecialFacilityKey(s_id, SF_TYPE_MIN, sf_index_schema);
+                            auto sf_iter = transaction_manager_->CreateScanIteratorFromKey(SPECIAL_FACILITY_TABLE_ID, sf_start_key);
+                            if (sf_iter) {
+                                char sf_key_buf[64];
+                                char sf_value_buf[64];
+                                DynamicCompoundKey sf_key(sf_key_buf, sf_index_schema);
+                                GlobalAddress sf_gaddr;
+                                uint8_t sf_types_scanned = 0;
+                                
+                                while (sf_iter->Valid() && sf_types_scanned <= (SF_TYPE_MAX - SF_TYPE_MIN)) {
+                                    if (sf_iter->GetNext(sf_key, sf_value_buf, sf_gaddr)) {
+                                        DB_QUERY(ReadRecordByAddress(SPECIAL_FACILITY_TABLE_ID, record, sf_gaddr, READ_ONLY));
+#if defined(TO)
+                                        Cache::Handle* handle = (Cache::Handle*) record->Get_Handle();
+                                        if (handle) {
+                                            transaction_manager_->ReleaseLatchForGCL(handle->gptr, handle);
+                                        }
+#endif
+                                        sf_types_scanned++;
+                                    }
+                                    sf_iter->Next();
+                                }
+                            }
+                            
+                            subscribers_scanned++;
+                        }
+                        subscriber_iter->Next();
+                    }
+                }
+
+                return transaction_manager_->CommitTransaction(ret);
+            }
+        };
+
     } // namespace TATPBenchmark
 } // namespace DSMEngine
 

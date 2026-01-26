@@ -709,6 +709,120 @@ namespace DSMEngine {
             }
         };
 
+        class AnalyticalScanProcedure : public StoredProcedure {
+        public:
+            AnalyticalScanProcedure() {
+                context_.txn_type_ = ANALYTICAL_SCAN;
+            }
+
+            virtual ~AnalyticalScanProcedure() {
+            }
+
+            virtual bool Execute(TxnParam *param, CharArray &ret) {
+                AnalyticalScanParam *scan_param = static_cast<AnalyticalScanParam *>(param);
+                int w_id = scan_param->w_id_;
+
+                RecordSchema *district_schema = transaction_manager_->GetPrimaryIndexSchema(DISTRICT_TABLE_ID);
+                RecordSchema *stock_schema = transaction_manager_->GetPrimaryIndexSchema(STOCK_TABLE_ID);
+                RecordSchema *warehouse_schema = transaction_manager_->GetPrimaryIndexSchema(WAREHOUSE_TABLE_ID);
+                RecordSchema *customer_schema = transaction_manager_->GetPrimaryIndexSchema(CUSTOMER_TABLE_ID);
+
+                Record *record = nullptr;
+
+                // Scan districts for the warehouse using iterator
+                DynamicCompoundKey district_start_key = GetDistrictPrimaryKey(1, w_id, district_schema);
+                auto district_iter = transaction_manager_->CreateScanIteratorFromKey(DISTRICT_TABLE_ID, district_start_key);
+                if (district_iter) {
+                    char district_key_buf[64];
+                    char district_value_buf[64];
+                    DynamicCompoundKey district_key(district_key_buf, district_schema);
+                    GlobalAddress gaddr;
+                    int districts_scanned = 0;
+                    while (district_iter->Valid() && districts_scanned < DISTRICTS_PER_WAREHOUSE) {
+                        if (district_iter->GetNext(district_key, district_value_buf, gaddr)) {
+                            // Read the record directly using GlobalAddress from iterator (avoids b-tree lookup)
+                            DB_QUERY(ReadRecordByAddress(DISTRICT_TABLE_ID, record, gaddr, READ_ONLY));
+#if defined(TO)
+                            Cache::Handle *handle = (Cache::Handle *) record->Get_Handle();
+                            if (handle) {
+                                transaction_manager_->ReleaseLatchForGCL(handle->gptr, handle);
+                            }
+#endif
+                            districts_scanned++;
+                        }
+                        district_iter->Next();
+                    }
+                }
+
+                // Scan stock for the warehouse using iterator
+                // Note: We scan a sample of stock items (e.g., first 1000) to keep transaction reasonable
+                int stock_sample_size = std::min(1000, NUM_ITEMS);
+                DynamicCompoundKey stock_start_key = GetStockPrimaryKey(1, w_id, stock_schema);
+                auto stock_iter = transaction_manager_->CreateScanIteratorFromKey(STOCK_TABLE_ID, stock_start_key);
+                if (stock_iter) {
+                    char stock_key_buf[64];
+                    char stock_value_buf[64];
+                    DynamicCompoundKey stock_key(stock_key_buf, stock_schema);
+                    GlobalAddress gaddr;
+                    int stock_scanned = 0;
+                    while (stock_iter->Valid() && stock_scanned < stock_sample_size) {
+                        if (stock_iter->GetNext(stock_key, stock_value_buf, gaddr)) {
+                            // Read the record directly using GlobalAddress from iterator (avoids b-tree lookup)
+                            DB_QUERY(ReadRecordByAddress(STOCK_TABLE_ID, record, gaddr, READ_ONLY));
+#if defined(TO)
+                            Cache::Handle *handle = (Cache::Handle *) record->Get_Handle();
+                            if (handle) {
+                                transaction_manager_->ReleaseLatchForGCL(handle->gptr, handle);
+                            }
+#endif
+                            stock_scanned++;
+                        }
+                        stock_iter->Next();
+                    }
+                }
+
+                // Scan warehouse record (single record, no iterator needed)
+                DynamicCompoundKey warehouse_key = GetWarehousePrimaryKey(w_id, warehouse_schema);
+                DB_QUERY(SearchRecord(WAREHOUSE_TABLE_ID, warehouse_key, record, READ_ONLY));
+#if defined(TO)
+                Cache::Handle *handle = (Cache::Handle *) record->Get_Handle();
+                if (handle) {
+                    transaction_manager_->ReleaseLatchForGCL(handle->gptr, handle);
+                }
+#endif
+
+                // Scan customers for the warehouse using iterator (sample from each district)
+                int customer_sample_per_district = std::min(100, CUSTOMERS_PER_DISTRICT);
+                for (int d_id = 1; d_id <= DISTRICTS_PER_WAREHOUSE; ++d_id) {
+                    DynamicCompoundKey customer_start_key = GetCustomerPrimaryKey(1, d_id, w_id, customer_schema);
+                    auto customer_iter = transaction_manager_->CreateScanIteratorFromKey(CUSTOMER_TABLE_ID, customer_start_key);
+                    if (customer_iter) {
+                        char customer_key_buf[64];
+                        char customer_value_buf[64];
+                        DynamicCompoundKey customer_key(customer_key_buf, customer_schema);
+                        GlobalAddress gaddr;
+                        int customers_scanned = 0;
+                        while (customer_iter->Valid() && customers_scanned < customer_sample_per_district) {
+                            if (customer_iter->GetNext(customer_key, customer_value_buf, gaddr)) {
+                                // Read the record directly using GlobalAddress from iterator (avoids b-tree lookup)
+                                DB_QUERY(ReadRecordByAddress(CUSTOMER_TABLE_ID, record, gaddr, READ_ONLY));
+#if defined(TO)
+                                Cache::Handle *handle = (Cache::Handle *) record->Get_Handle();
+                                if (handle) {
+                                    transaction_manager_->ReleaseLatchForGCL(handle->gptr, handle);
+                                }
+#endif
+                                customers_scanned++;
+                            }
+                            customer_iter->Next();
+                        }
+                    }
+                }
+
+                return transaction_manager_->CommitTransaction(ret);
+            }
+        };
+
     }
 }
 #endif

@@ -42,6 +42,9 @@ public:
     registers_[DELETE_CALL_FORWARDING] = []() {
       return new DeleteCallForwardingProcedure();
     };
+    registers_[ANALYTICAL_SCAN] = []() {
+      return new AnalyticalScanProcedure();
+    };
 
     deregisters_[GET_SUBSCRIBER_DATA] = [](StoredProcedure *p) { delete p; };
     deregisters_[GET_NEW_DESTINATION] = [](StoredProcedure *p) { delete p; };
@@ -50,6 +53,7 @@ public:
     deregisters_[UPDATE_LOCATION] = [](StoredProcedure *p) { delete p; };
     deregisters_[INSERT_CALL_FORWARDING] = [](StoredProcedure *p) { delete p; };
     deregisters_[DELETE_CALL_FORWARDING] = [](StoredProcedure *p) { delete p; };
+    deregisters_[ANALYTICAL_SCAN] = [](StoredProcedure *p) { delete p; };
   }
 
 protected:

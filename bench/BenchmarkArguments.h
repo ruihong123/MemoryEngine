@@ -53,6 +53,7 @@ extern int FREQUENCY_PAYMENT;      // 43
 extern int FREQUENCY_NEW_ORDER;    // 45
 extern int FREQUENCY_ORDER_STATUS; // 0
 extern int FREQUENCY_STOCK_LEVEL;  // 0
+extern int FREQUENCY_ANALYTICAL_SCAN;  // SmallBank analytical scan frequency (default: 0)
 static void PrintUsage() {
   std::cout << "==========[USAGE]==========" << std::endl;
   std::cout << "\t-pINT: PORT(required)" << std::endl;
@@ -164,6 +165,9 @@ static void ArgumentsParser(int argc, char *argv[]) {
       FREQUENCY_STOCK_LEVEL = atoi(&argv[i][4]);
     } else if (argv[i][1] == 'r' && argv[i][2] == 'd' && argv[i][3] == 'e') {
       FREQUENCY_DELIVERY = atoi(&argv[i][4]);
+    } else if (argv[i][1] == 'r' && argv[i][2] == 'a' && argv[i][3] == 's') {
+      // Enable analytical scan (will be set to ~5% weight internally)
+      FREQUENCY_ANALYTICAL_SCAN = 1; // Flag to enable, actual weight calculated per benchmark
     } else if (argv[i][1] == 'r') {
       gReadRatio = atoi(&argv[i][2]);
       gStandard = false;

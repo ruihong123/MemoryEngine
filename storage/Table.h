@@ -48,6 +48,12 @@ namespace DSMEngine {
                 delete primary_index_;
                 primary_index_ = nullptr;
             }
+            if (schema_ptr_) {
+                printf("This table is %p, table id is %lu deallocate shcema_ptr %p \n", this, table_id_, schema_ptr_);
+                fflush(stdout);
+                delete schema_ptr_;
+                schema_ptr_ = nullptr;
+            }
         }
         RecordSchema* GetPrimaryIndexSchema() {
             return primary_index_->index_scheme_ptr;
@@ -198,6 +204,7 @@ namespace DSMEngine {
         }
 
         void Deserialize(const char*& addr) {
+            assert(!schema_ptr_);
             size_t off = 0;
             memcpy(&table_id_, (void*) (addr + off), sizeof(size_t));
             off += sizeof(size_t);

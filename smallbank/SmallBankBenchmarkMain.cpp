@@ -93,13 +93,21 @@ int main(int argc, char *argv[]) {
   synchronizer.FenceXComputes();
 
   {
-    // warm up
+    // warm up - use 8 threads for warmup phase
+    constexpr size_t warmup_thread_count = 8;
+    IORedirector warmup_redirector(warmup_thread_count);
+    SmallBankSource warmup_sourcer(&smallbank_scale_params, &warmup_redirector, num_txn, 0,
+                                   warmup_thread_count);
+    warmup_sourcer.Start();
+    synchronizer.FenceXComputes();
+    
     std::cout << "Warm up phase..." << std::endl;
-    INIT_PROFILE_TIME(gThreadCount);
-    SmallBankExecutor executor(&redirector, &storage_manager, gThreadCount,
+    INIT_PROFILE_TIME(warmup_thread_count);
+    SmallBankExecutor executor(&warmup_redirector, &storage_manager, warmup_thread_count,
                                false);
+    executor.EnableProgressReporting(true);
     executor.Start();
-    REPORT_PROFILE_TIME(gThreadCount);
+    REPORT_PROFILE_TIME(warmup_thread_count);
   }
 
   synchronizer.FenceXComputes();
@@ -134,6 +142,7 @@ int main(int argc, char *argv[]) {
   synchronizer.Fence_XALLNodes();
   default_gallocator->rdma_mg->join_all_handling_thread();
   std::cout << "over.." << std::endl;
+  free(storage_addr);
   return 0;
 }
 
