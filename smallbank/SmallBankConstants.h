@@ -27,14 +27,16 @@ namespace DSMEngine {
         const int BALANCE_MAX          = 50000;
         const int NAME_LENGTH          = 64;
 
-        // Transaction mix percentages (from SmallBank specification)
+        // Transaction mix frequency weights (from SmallBank specification)
+        // Using frequency weights instead of percentages to avoid overflow when calculating 1/1000
+        // Base multiplier: 1000 (sum = 100000 for standard transactions)
         // Note: ANALYTICAL_SCAN_PERCENT is configurable via command line, default is 0
-        const int AMALGAMATE_PERCENT       = 15;
-        const int BALANCE_PERCENT          = 15;
-        const int DEPOSIT_CHECKING_PERCENT = 15;
-        const int SEND_PAYMENT_PERCENT     = 25;
-        const int TRANSACT_SAVINGS_PERCENT = 15;
-        const int WRITE_CHECK_PERCENT      = 15;
+        const int AMALGAMATE_PERCENT       = 15000;
+        const int BALANCE_PERCENT          = 15000;
+        const int DEPOSIT_CHECKING_PERCENT = 15000;
+        const int SEND_PAYMENT_PERCENT     = 25000;
+        const int TRANSACT_SAVINGS_PERCENT = 15000;
+        const int WRITE_CHECK_PERCENT      = 15000;
         // Default analytical scan percentage (can be overridden via command line)
         const int ANALYTICAL_SCAN_PERCENT_DEFAULT = 0;
 

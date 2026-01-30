@@ -56,14 +56,16 @@ namespace DSMEngine {
         const int END_TIME_MAX            = 24;
         const int CF_NUMBERX_LENGTH       = 15;
 
-        // Transaction mix percentages (from TATP specification)
-        const int GET_SUBSCRIBER_DATA_PERCENT    = 35;
-        const int GET_NEW_DESTINATION_PERCENT    = 10;
-        const int GET_ACCESS_DATA_PERCENT        = 35;
-        const int UPDATE_SUBSCRIBER_DATA_PERCENT = 2;
-        const int UPDATE_LOCATION_PERCENT        = 14;
-        const int INSERT_CALL_FORWARDING_PERCENT = 2;
-        const int DELETE_CALL_FORWARDING_PERCENT = 2;
+        // Transaction mix frequency weights (from TATP specification)
+        // Using frequency weights instead of percentages to avoid overflow when calculating 1/1000
+        // Base multiplier: 10000 (sum = 100000 for standard transactions)
+        const int GET_SUBSCRIBER_DATA_PERCENT    = 35000;
+        const int GET_NEW_DESTINATION_PERCENT    = 10000;
+        const int GET_ACCESS_DATA_PERCENT        = 35000;
+        const int UPDATE_SUBSCRIBER_DATA_PERCENT = 2000;
+        const int UPDATE_LOCATION_PERCENT        = 14000;
+        const int INSERT_CALL_FORWARDING_PERCENT = 2000;
+        const int DELETE_CALL_FORWARDING_PERCENT = 2000;
 
         // BIT types for subscriber
         const int VLR_LOCATION_MIN = 1;

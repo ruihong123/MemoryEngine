@@ -1,14 +1,21 @@
 #!/bin/bash
 # Testing script to run TPCC, TATP, and SmallBank benchmarks with default query ratios
-# Usage: ./run_benchmarks_default.sh [benchmark_name] [--hot] [--no-hot] [--both] [--rec]
-#   If benchmark_name is specified, runs only that benchmark (tpcc|tatp|smallbank)
-#   If not specified, runs all three benchmarks sequentially
+# Usage: ./run_benchmarks_default.sh [benchmark_name] [--hot] [--no-hot] [--both] [--rec] [--analytical-scan]
+#   benchmark_name: tpcc, tatp, or smallbank (optional, runs all three if not specified)
+#   Examples:
+#     ./run_benchmarks_default.sh                    # Run all three benchmarks
+#     ./run_benchmarks_default.sh tpcc               # Run only TPCC
+#     ./run_benchmarks_default.sh tatp               # Run only TATP
+#     ./run_benchmarks_default.sh smallbank           # Run only SmallBank
+#     ./run_benchmarks_default.sh tatp --hot         # Run TATP with hot scanner
+#     ./run_benchmarks_default.sh smallbank --both    # Run SmallBank both with and without hot scanner
 #   --hot: Enable hot table scanner / long-running scan queries (default: disabled)
 #   --no-hot: Disable hot table scanner (explicitly, this is the default)
 #   --both: Run each benchmark both with and without hot scanner (runs twice)
 #   --rec_memory: Enable memory node failure recovery test (uses connection_cloudlab_2replicas.conf and enables file logging, default: disabled)
 #   --rec_compute: Enable compute node failure recovery test (uses connection_cloudlab_2replicas.conf and enables file logging, default: disabled)
 #          NOTE: Failure recovery is currently only supported for TPCC benchmark
+#   --analytical-scan: Enable analytical scan queries (1/1000 of total throughput for all benchmarks)
 
 set -o nounset
 bin=`dirname "$0"`
@@ -28,7 +35,7 @@ core_dump_dir="/mnt/core_dump"
 
 # Working environment
 proj_dir="/users/Ruihong/MemoryEngine"
-bin_dir="${proj_dir}/debug"
+bin_dir="${proj_dir}/release"
 ssh_opts="-o StrictHostKeyChecking=no"
 
 # Memory and port configuration
@@ -38,19 +45,19 @@ port=$((13000+RANDOM%1000))
 
 # Default benchmark parameters
 default_threads=8 # default 8
-default_warehouses=16 # default 256
+default_warehouses=256 # default 256
 default_dist_ratio=100
 
 # Benchmark-specific transaction counts (based on 8GB cache warmup estimation)
 # See CACHE_WARMUP_ESTIMATION.md for detailed rationale
 # TPC-C: Larger records (~6.5KB/txn), better locality -> fewer txns needed
-tpcc_txns_default=2000000 #default 2000000
+tpcc_txns_default=2000000 #default 2000000 HTAP default 2000000
 # TATP: Small records (~120B/txn), high cardinality (40M subscribers) -> more txns needed
-tatp_txns_default=500000 #default 50000000
+tatp_txns_default=1000000 #default 50000000 HTAP 1000000
 # SmallBank: Small records (~120B/txn), very high cardinality (200M accounts) -> more txns needed
-smallbank_txns_default=35000000 #default 35000000
+smallbank_txns_default=1000000 #default 35000000 HTAP 1000000
 
-# Initialize actual transaction counts (will be adjusted if analytical scan is enabled)
+# Initialize actual transaction counts
 tpcc_txns=$tpcc_txns_default
 tatp_txns=$tatp_txns_default
 smallbank_txns=$smallbank_txns_default
@@ -208,11 +215,7 @@ run_tpcc() {
     TPCC_STOCK_LEVEL=1
     echo "Query Ratios (Standard TPC-C mix): NewOrder=${TPCC_NEW_ORDER}%, Payment=${TPCC_PAYMENT}%, OrderStatus=${TPCC_ORDER_STATUS}%, Delivery=${TPCC_DELIVERY}%, StockLevel=${TPCC_STOCK_LEVEL}%"
   fi
-  if [ "$enable_analytical_scan" = true ]; then
-    echo "Transaction count: ${tpcc_txns} (1/10th of default due to analytical scan)"
-  else
-    echo "Transaction count: ${tpcc_txns} (optimized for 8GB cache warmup)"
-  fi
+  echo "Transaction count: ${tpcc_txns} (optimized for 8GB cache warmup)"
   
   if [ "$enable_file_logging" = true ]; then
     output_file="${output_dir}/tpcc_default${suffix}.log"
@@ -224,7 +227,7 @@ run_tpcc() {
   # Add analytical scan flag if enabled
   if [ "$enable_analytical_scan" = true ]; then
     benchmark_args="${benchmark_args} -ras"
-    echo "Analytical scan: ENABLED (~1% of throughput)"
+    echo "Analytical scan: ENABLED (1/1000 of throughput)"
   else
     echo "Analytical scan: DISABLED"
   fi
@@ -282,8 +285,8 @@ run_tpcc() {
   # Start master node
   echo "Starting master node on $master_host"
   ssh ${ssh_opts} ${master_host} "echo '$core_dump_dir/core$master_host' | sudo tee /proc/sys/kernel/core_pattern"
-  echo "[DEBUG] $master_host: ssh ${ssh_opts} ${master_host} \"ulimit -S -c unlimited && $script_compute -sn$master_host -nid0 > ${output_file}\""
-  ssh ${ssh_opts} ${master_host} "ulimit -S -c unlimited && $script_compute -sn$master_host -nid0 > ${output_file}" &
+  echo "[DEBUG] $master_host: ssh ${ssh_opts} ${master_host} \"ulimit -S -c unlimited && $script_compute -sn$master_host -nid0 | tee -a ${output_file}\""
+  ssh ${ssh_opts} ${master_host} "ulimit -S -c unlimited && $script_compute -sn$master_host -nid0 | tee -a ${output_file}" &
   
   # Start worker nodes
   for ((i=1;i<${#compute_nodes[@]};i++)); do
@@ -334,15 +337,11 @@ run_tatp() {
     echo "========================================="
   fi
   if [ "$enable_analytical_scan" = true ]; then
-    echo "Query Ratios: GetSubscriberData=34.65%, GetNewDestination=9.9%, GetAccessData=34.65%, UpdateSubscriberData=1.98%, UpdateLocation=13.86%, InsertCallForwarding=1.98%, DeleteCallForwarding=1.98%, AnalyticalScan=1.0%"
+    echo "Query Ratios: GetSubscriberData=34.965%, GetNewDestination=9.99%, GetAccessData=34.965%, UpdateSubscriberData=1.998%, UpdateLocation=13.986%, InsertCallForwarding=1.998%, DeleteCallForwarding=1.998%, AnalyticalScan=0.1%"
   else
     echo "Query Ratios: GetSubscriberData=35%, GetNewDestination=10%, GetAccessData=35%, UpdateSubscriberData=2%, UpdateLocation=14%, InsertCallForwarding=2%, DeleteCallForwarding=2%"
   fi
-  if [ "$enable_analytical_scan" = true ]; then
-    echo "Transaction count: ${tatp_txns} (1/10th of default due to analytical scan)"
-  else
-    echo "Transaction count: ${tatp_txns} (optimized for 8GB cache warmup)"
-  fi
+  echo "Transaction count: ${tatp_txns} (optimized for 8GB cache warmup)"
   
   if [ "$enable_file_logging" = true ]; then
     output_file="${output_dir}/tatp_default${suffix}.log"
@@ -354,7 +353,7 @@ run_tatp() {
   # Add analytical scan flag if enabled
   if [ "$enable_analytical_scan" = true ]; then
     benchmark_args="${benchmark_args} -ras"
-    echo "Analytical scan: ENABLED (~1% of throughput)"
+    echo "Analytical scan: ENABLED (1/1000 of throughput)"
   else
     echo "Analytical scan: DISABLED"
   fi
@@ -449,15 +448,11 @@ run_smallbank() {
     echo "========================================="
   fi
   if [ "$enable_analytical_scan" = true ]; then
-    echo "Query Ratios: Amalgamate=14.85%, Balance=14.85%, DepositChecking=14.85%, SendPayment=24.75%, TransactSavings=14.85%, WriteCheck=14.85%, AnalyticalScan=1.0%"
+    echo "Query Ratios: Amalgamate=14.985%, Balance=14.985%, DepositChecking=14.985%, SendPayment=24.975%, TransactSavings=14.985%, WriteCheck=14.985%, AnalyticalScan=0.1%"
   else
     echo "Query Ratios: Amalgamate=15%, Balance=15%, DepositChecking=15%, SendPayment=25%, TransactSavings=15%, WriteCheck=15%"
   fi
-  if [ "$enable_analytical_scan" = true ]; then
-    echo "Transaction count: ${smallbank_txns} (1/10th of default due to analytical scan)"
-  else
-    echo "Transaction count: ${smallbank_txns} (optimized for 8GB cache warmup)"
-  fi
+  echo "Transaction count: ${smallbank_txns} (optimized for 8GB cache warmup)"
   
   if [ "$enable_file_logging" = true ]; then
     output_file="${output_dir}/smallbank_default${suffix}.log"
@@ -469,7 +464,7 @@ run_smallbank() {
   # Add analytical scan flag if enabled
   if [ "$enable_analytical_scan" = true ]; then
     benchmark_args="${benchmark_args} -ras"
-    echo "Analytical scan: ENABLED (~1% of throughput)"
+    echo "Analytical scan: ENABLED (1/1000 of throughput)"
   else
     echo "Analytical scan: DISABLED"
   fi
@@ -565,10 +560,6 @@ main() {
         ;;
       --analytical-scan)
         enable_analytical_scan=true
-        # Reduce transaction counts to 1/10th when analytical scan is enabled
-        tpcc_txns=$((tpcc_txns_default / 10))
-        tatp_txns=$((tatp_txns_default / 10))
-        smallbank_txns=$((smallbank_txns_default / 10))
         shift
         ;;
       tpcc|tatp|smallbank)
@@ -582,16 +573,30 @@ main() {
         ;;
       *)
         echo "Unknown option: $1"
-        echo "Usage: $0 [benchmark_name] [--hot] [--no-hot] [--both] [--rec_memory|--rec_compute] [--analytical-scan WEIGHT]"
-        echo "  benchmark_name: tpcc, tatp, or smallbank (optional, runs all if not specified)"
+        echo ""
+        echo "Usage: $0 [benchmark_name] [--hot] [--no-hot] [--both] [--rec_memory|--rec_compute] [--analytical-scan]"
+        echo ""
+        echo "Arguments:"
+        echo "  benchmark_name: tpcc, tatp, or smallbank (optional, runs all three if not specified)"
+        echo ""
+        echo "Examples:"
+        echo "  $0                                    # Run all three benchmarks"
+        echo "  $0 tpcc                               # Run only TPCC benchmark"
+        echo "  $0 tatp                               # Run only TATP benchmark"
+        echo "  $0 smallbank                          # Run only SmallBank benchmark"
+        echo "  $0 tatp --hot                         # Run TATP with hot scanner enabled"
+        echo "  $0 smallbank --both                   # Run SmallBank both with and without hot scanner"
+        echo "  $0 tpcc --analytical-scan             # Run TPCC with analytical scan queries enabled"
+        echo ""
+        echo "Options:"
         echo "  --hot: Enable hot table scanner (long-running scan queries)"
         echo "  --no-hot: Disable hot table scanner (default)"
         echo "  --both: Run each benchmark both with and without hot scanner (runs twice)"
         echo "  --rec_memory: Enable memory node failure recovery test (uses connection_cloudlab_2replicas.conf and enables file logging)"
         echo "  --rec_compute: Enable compute node failure recovery test (uses connection_cloudlab_2replicas.conf and enables file logging)"
         echo "         NOTE: Failure recovery is currently only supported for TPCC benchmark"
-        echo "  --analytical-scan: Enable analytical scan queries (~1% of total throughput for all benchmarks)"
-        echo "         When enabled, analytical queries are automatically mixed at ~1% of total query throughput"
+        echo "  --analytical-scan: Enable analytical scan queries (1/1000 of total throughput for all benchmarks)"
+        echo "         When enabled, analytical queries are automatically mixed at 1/1000 (0.1%) of total query throughput"
         exit 1
         ;;
     esac

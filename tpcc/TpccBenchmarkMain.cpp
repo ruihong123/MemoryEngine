@@ -64,6 +64,7 @@ void clear_cache_statistics() {
 #if defined(MVOCC)
     delta_pull_num[i] = 0;
     roll_back_num[i] = 0;
+    tuple_read_num[i] = 0;
 #endif
     for (int j = 0; j < 8; ++j) {
       cache_hit_valid[i][j] = 0;

@@ -32,6 +32,7 @@ namespace DSMEngine {
     // extern TpccBenchmark::TpccScaleParams tpcc_scale_params;
     extern uint64_t delta_pull_num[MAX_APP_THREAD];
     extern uint64_t roll_back_num[MAX_APP_THREAD];
+    extern uint64_t tuple_read_num[MAX_APP_THREAD];
     enum ISOLATION_LEVEL {
         READ_COMMITTED     = 1,
         READ_UNCOMMITTED   = 2,
@@ -335,6 +336,18 @@ namespace DSMEngine {
         // Public method to read a record directly using GlobalAddress (for use with scan iterators)
         bool ReadRecordByAddress(size_t table_id, Record*& record, const GlobalAddress& tuple_gaddr, AccessType access_type) {
             return SelectRecordCC(table_id, record, tuple_gaddr, access_type);
+        }
+
+        // Clean up the last SCAN_READ record's local tuple after use (for analytical queries to avoid heap explosion)
+        // The global record is already deleted in SelectRecordCC, so we only need to delete the local tuple here
+        // This is efficient as it directly accesses the last access entry without looping
+        void CleanupLastScanReadRecord() {
+            if (access_list_.access_count_ == 0) return;
+            Access* access = access_list_.GetAccess(access_list_.access_count_ - 1);
+            if (access->access_type_ == SCAN_READ && access->txn_local_tuple_ != nullptr) {
+                delete access->txn_local_tuple_;
+                access->txn_local_tuple_ = nullptr;
+            }
         }
 
         bool CommitTransaction(CharArray& ret_str);

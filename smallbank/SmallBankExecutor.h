@@ -103,7 +103,7 @@ protected:
                                  
                                  // Read savings record
                                  DynamicCompoundKey key = SmallBankKeyGenerator::GenerateSavingsKey(cust, savings_schema);
-                                 if (!mgr.SearchRecord(SAVINGS_TABLE_ID, key, record, READ_ONLY)) {
+                                 if (!mgr.SearchRecord(SAVINGS_TABLE_ID, key, record, SCAN_READ)) {
                                    *in_scan = false;
                                    return false; // Transaction aborted
                                  }
@@ -131,7 +131,7 @@ protected:
                                  
                                  // Read checking record
                                  DynamicCompoundKey key = SmallBankKeyGenerator::GenerateCheckingKey(cust, checking_schema);
-                                 if (!mgr.SearchRecord(CHECKING_TABLE_ID, key, record, READ_ONLY)) {
+                                 if (!mgr.SearchRecord(CHECKING_TABLE_ID, key, record, SCAN_READ)) {
                                    *in_scan = false;
                                    return false; // Transaction aborted
                                  }

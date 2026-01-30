@@ -58,48 +58,55 @@ class TpccSource : public BenchmarkSource {
     //srand(time(nullptr));
     srand(node_id_ * time(nullptr));
     double frequency_weights[6];
-    frequency_weights[0] = FREQUENCY_DELIVERY;
-    frequency_weights[1] = FREQUENCY_PAYMENT;
-    frequency_weights[2] = FREQUENCY_NEW_ORDER;
-    frequency_weights[3] = FREQUENCY_ORDER_STATUS;
-    frequency_weights[4] = FREQUENCY_STOCK_LEVEL;
+    // Convert frequency values to frequency weights (multiply by 1000) to support 1/1000 precision
+    // This avoids overflow when calculating 1/1000 analytical scan frequency
+    frequency_weights[0] = FREQUENCY_DELIVERY * 1000;
+    frequency_weights[1] = FREQUENCY_PAYMENT * 1000;
+    frequency_weights[2] = FREQUENCY_NEW_ORDER * 1000;
+    frequency_weights[3] = FREQUENCY_ORDER_STATUS * 1000;
+    frequency_weights[4] = FREQUENCY_STOCK_LEVEL * 1000;
     
-    // Calculate analytical scan weight to achieve ~1% of total throughput
-    // If enabled, set weight to achieve 1%: weight = (0.01 / 0.99) * standard_total
-    double standard_total = FREQUENCY_DELIVERY + FREQUENCY_PAYMENT + FREQUENCY_NEW_ORDER + 
-                            FREQUENCY_ORDER_STATUS + FREQUENCY_STOCK_LEVEL;
+    // Calculate analytical scan weight to achieve 1/1000 of total throughput
+    // Standard TPCC total = (FREQUENCY_DELIVERY + FREQUENCY_PAYMENT + ...) * 1000
+    double standard_total = frequency_weights[0] + frequency_weights[1] + frequency_weights[2] + 
+                            frequency_weights[3] + frequency_weights[4];
     if (FREQUENCY_ANALYTICAL_SCAN > 0 && standard_total > 0) {
-      // Calculate weight to achieve ~1%: A = 0.01 * (StandardTotal + A) => A = 0.0101 * StandardTotal
-      frequency_weights[5] = std::max(1.0, std::round(standard_total * 0.0101));
+      // Calculate weight to achieve 1/1000: A = 0.001 * (StandardTotal + A) => A ≈ 0.001 * StandardTotal
+      // With standard_total typically 23000 (for 1+10+10+1+1), this gives A ≈ 23
+      frequency_weights[5] = std::max(1.0, std::round(standard_total * 0.001));
     } else {
       frequency_weights[5] = 0;
     }
 
+    // Calculate total and create cumulative distribution (not normalized to 100)
+    // This allows proper representation of 1/1000 (0.1%) frequencies
     double total = 0;
     for (size_t i = 0; i < 6; ++i) {
       total += frequency_weights[i];
     }
     if (total > 0) {
-      for (size_t i = 0; i < 6; ++i) {
-        frequency_weights[i] = frequency_weights[i] * 1.0 / total * 100;
-      }
+      // Create cumulative distribution using actual frequency weights
       for (size_t i = 1; i < 6; ++i) {
         frequency_weights[i] += frequency_weights[i - 1];
       }
     } else {
-      // Default distribution if all zeros
-      frequency_weights[0] = 1.0;
-      frequency_weights[1] = 43.5;
-      frequency_weights[2] = 87.0;
-      frequency_weights[3] = 91.3;
-      frequency_weights[4] = 95.6;
-      frequency_weights[5] = 100.0;
+      // Default distribution if all zeros (cumulative frequency weights)
+      // Standard TPC-C mix: Delivery=1, Payment=10, NewOrder=10, OrderStatus=1, StockLevel=1
+      // Scaled by 1000: 1000, 10000, 10000, 1000, 1000
+      frequency_weights[0] = 1000.0;
+      frequency_weights[1] = 11000.0;  // 1000 + 10000
+      frequency_weights[2] = 21000.0;  // 11000 + 10000
+      frequency_weights[3] = 22000.0; // 21000 + 1000
+      frequency_weights[4] = 23000.0; // 22000 + 1000
+      frequency_weights[5] = 23000.0; // No analytical scan in default
+      total = 23000.0;
     }
 
     if (source_type_ == RANDOM_SOURCE) {
       ParamBatch *tuples = new ParamBatch(gParamBatchSize);
       for (size_t i = 0; i < num_txn_; ++i) {
-        int x = TpccRandomGenerator::GenerateInteger(1, 100);
+        // Generate random number in range [1, total] to support frequencies smaller than 1%
+        int x = TpccRandomGenerator::GenerateInteger(1, static_cast<int>(total));
         if (x <= frequency_weights[0]) {
           DeliveryParam *param = NULL;
           param = GenerateDeliveryParam();

@@ -20,6 +20,7 @@ namespace DSMEngine{
         std::thread* TransactionManager::gc_thread = nullptr;
         uint64_t delta_pull_num[MAX_APP_THREAD];
         uint64_t roll_back_num[MAX_APP_THREAD];
+        uint64_t tuple_read_num[MAX_APP_THREAD];
 #ifdef SINGLE_DELTA_PER_NODE
         // todo: we need to make the mulitple writable delta sections per compute node, for our log-as-replica design.
         DeltaSectionWrap* TransactionManager::ds_for_write = nullptr;
@@ -221,6 +222,34 @@ namespace DSMEngine{
 //                uint64_t wts = record->GetWTS();
             default_gallocator->SELCC_Shared_Lock(page_buff, page_gaddr, handle);
 
+        } else if (effective_access_type == SCAN_READ) {
+            // SCAN_READ: Assert pure read transaction and cache the lock handle
+            assert(pure_read_txn);
+            // Check if we already have a lock handle for this page (reuse if same page)
+            if (locked_handles_.find(page_gaddr.val) == locked_handles_.end()) {
+                // Release old handle if we have one (at most 1 handle cached for scanning)
+                if (!locked_handles_.empty()) {
+                    assert(locked_handles_.size() == 1);
+                    auto old_iter = locked_handles_.begin();
+                    assert(old_iter->second.second == SCAN_READ);
+                    default_gallocator->SELCC_Shared_UnLock(old_iter->second.first->gptr, old_iter->second.first);
+                    locked_handles_.clear();
+                }
+                // Acquire shared lock and store handle
+                default_gallocator->SELCC_Shared_Lock(page_buff, page_gaddr, handle);
+                uint64_t page_addr_val = static_cast<uint64_t>(page_gaddr);
+                locked_handles_.insert({page_addr_val, {handle, SCAN_READ}});
+                // At most 1 handle cached for scanning
+                assert(locked_handles_.size() <= 1);
+            } else {
+                // Reuse existing handle for the same page
+                handle = locked_handles_.at(page_gaddr.val).first;
+#if ACCESS_MODE == 1
+                page_buff = ((ibv_mr*) handle->value)->addr;
+#elif ACCESS_MODE == 0
+                page_buff = handle->value;
+#endif
+            }
         } else  {
             if (pure_read_txn){
                 pure_read_txn = false;
@@ -234,7 +263,6 @@ namespace DSMEngine{
         tuple_buffer = (char*)page_buff + (tuple_gaddr.offset - handle->gptr.offset);
 
 //        record->Set_Handle(handle);
-
         Access* access = access_list_.NewAccess();
         access->access_type_ = effective_access_type;
         access->access_global_record_ = new Record(schema_ptr, tuple_buffer);
@@ -249,10 +277,14 @@ namespace DSMEngine{
 #ifdef EARLYABORT
         if (isolation_level ==SERIALIZABLE){
             if (!pure_read_txn && (have_rolled_back) && (ts > snapshot_ts)){
+                assert(effective_access_type != SCAN_READ);
                 if (effective_access_type == READ_ONLY) {
 //                uint64_t wts = record->GetWTS();
                     default_gallocator->SELCC_Shared_UnLock(page_gaddr, handle);
 
+                } else if (effective_access_type == SCAN_READ) {
+                    // SCAN_READ locks are handled in AbortTransaction via locked_handles_
+                    // No need to unlock here as it will be released in AbortTransaction
                 } else {
                     //Read_Write, Delete_Only, Insert_Only
                     default_gallocator->SELCC_Exclusive_UnLock(page_gaddr, handle);
@@ -269,7 +301,7 @@ namespace DSMEngine{
 
         }
         if (isolation_level ==SNAPSHOT_ISOLATION){
-            if ( ts > snapshot_ts && effective_access_type == READ_WRITE){
+            if ( effective_access_type == READ_WRITE && ts > snapshot_ts){
                 // if (have_rolled_back) {
                     //Read_Write, Delete_Only, Insert_Only
                     default_gallocator->SELCC_Exclusive_UnLock(page_gaddr, handle);
@@ -313,10 +345,15 @@ namespace DSMEngine{
                     // Release the latch
                     if (effective_access_type == READ_ONLY) {
                         default_gallocator->SELCC_Shared_UnLock(page_gaddr, handle);
+                    } else if (effective_access_type == SCAN_READ) {
+                        // SCAN_READ locks are cached and will be released during commit/abort
+                        // No need to unlock here
                     } else  {
                         //Read_Write, Delete_Only, Insert_Only
                         default_gallocator->SELCC_Exclusive_UnLock(page_gaddr, handle);
                     }
+                    // Count this tuple read (even though tuple doesn't exist at snapshot)
+                    tuple_read_num[thread_id_]++;
                     return true;
                 }
                 assert(prev_delta != GlobalAddress::Null());
@@ -376,6 +413,7 @@ namespace DSMEngine{
                             // Pull updates from remote node
                             if (delta_section->owner_compute_node_id_ != RDMA_Manager::Get_Instance()->node_id) {
                                 delta_section->PullUpdates();
+                                delta_pull_num[thread_id_]++;
                             }
                         }
                     }else{
@@ -418,6 +456,8 @@ namespace DSMEngine{
                 ts = record->GetWTS();
             }
             assert(buffer_is_not_all_zero(record->data_ptr_, schema_ptr->GetRecordTotalSize()));
+            // Count this tuple read (after rollback loop completes)
+            tuple_read_num[thread_id_]++;
 
         if (effective_access_type == DELETE_ONLY) {
             record->PutWTS(UINT64_MAX);
@@ -426,6 +466,15 @@ namespace DSMEngine{
         if (effective_access_type == READ_ONLY) {
 //                uint64_t wts = record->GetWTS();
             default_gallocator->SELCC_Shared_UnLock(page_gaddr, handle);
+
+        } else if (effective_access_type == SCAN_READ) {
+            // SCAN_READ locks are cached and will be released during commit/abort
+            // Delete global record immediately to avoid heap explosion
+            // The local record (txn_local_tuple_) will be deleted by the caller after use
+            if (access->access_global_record_ != nullptr) {
+                delete access->access_global_record_;
+                access->access_global_record_ = nullptr;
+            }
 
         } else  {
             //Read_Write, Delete_Only, Insert_Only
@@ -558,15 +607,23 @@ namespace DSMEngine{
             // Clean up access records
             for (size_t i = 0; i < access_list_.access_count_; ++i) {
                 Access* access = access_list_.GetAccess(i);
-                delete access->access_global_record_;
-                access->access_global_record_ = nullptr;
-                access->access_addr_ = GlobalAddress::Null();
+                if(access->access_global_record_ != nullptr){
+                    delete access->access_global_record_;
+                    access->access_global_record_ = nullptr;
+                }
                 if (access->txn_local_tuple_ != nullptr) {
                     delete access->txn_local_tuple_;
                     access->txn_local_tuple_ = nullptr;
                 }
+                access->access_addr_ = GlobalAddress::Null();
             }
             access_list_.Clear();
+            // Release SCAN_READ locks if any
+            for (auto iter : locked_handles_) {
+                assert(iter.second.second == SCAN_READ);
+                default_gallocator->SELCC_Shared_UnLock(iter.second.first->gptr, iter.second.first);
+            }
+            locked_handles_.clear();
             ClearStates();
             PROFILE_TIME_END(thread_id_, CC_COMMIT);
             return true;
@@ -593,6 +650,7 @@ namespace DSMEngine{
                 page_gaddr = TOPAGE(tuple_gaddr);
                 AccessType access_type = access->access_type_;
                 RecordSchema *schema_ptr = storage_manager_->tables_[access->access_global_record_->GetTableId()]->GetSchema();
+                assert(access_type != SCAN_READ);
                 //TODO: check the l
                 if (access_type == DELETE_ONLY) {
                     //todo: check whether the record version now is larger than the local record, if so,
@@ -751,6 +809,7 @@ namespace DSMEngine{
                    iter.second.second == DELETE_ONLY ||
                    iter.second.second == INSERT_ONLY ||
                    iter.second.second == READ_WRITE);
+            assert(iter.second.second != SCAN_READ);
             if (iter.second.second == READ_ONLY){
                 default_gallocator->SELCC_Shared_UnLock(iter.second.first->gptr, iter.second.first);
             }
@@ -797,6 +856,7 @@ namespace DSMEngine{
                        iter.second.second == DELETE_ONLY ||
                        iter.second.second == INSERT_ONLY ||
                        iter.second.second == READ_WRITE);
+                assert(iter.second.second != SCAN_READ);
                 if (iter.second.second == READ_ONLY){
                     default_gallocator->SELCC_Shared_UnLock(iter.second.first->gptr, iter.second.first);
                 }

@@ -11,14 +11,14 @@ namespace DSMEngine {
         void* page_buff;
         Cache::Handle* handle;
         if (locked_handles_.find(page_gaddr) == locked_handles_.end()) {
-            if (access_type == READ_ONLY) {
+            if (access_type == READ_ONLY || access_type == SCAN_READ) {
                 PROFILE_TIME_START(thread_id_, LOCK_READ);
                 default_gallocator->SELCC_Shared_Lock(page_buff, page_gaddr, handle);
                 assert((tuple_gaddr.offset - handle->gptr.offset) > STRUCT_OFFSET(DataPage, data_));
                 tuple_buffer = (char*) page_buff + (tuple_gaddr.offset - handle->gptr.offset);
                 locked_handles_.insert({page_gaddr, {handle, access_type}});
                 assert(page_gaddr != GlobalAddress::Null());
-                assert(access_type < READ_WRITE);
+                assert(access_type < READ_WRITE || access_type == SCAN_READ);
                 PROFILE_TIME_END(thread_id_, LOCK_READ);
             } else {
                 // DELETE_ONLY, READ_WRITE
@@ -35,7 +35,8 @@ namespace DSMEngine {
         } else {
             handle = locked_handles_.at(page_gaddr).first;
             // TODO: update the hierachical lock atomically, if the lock is shared lock
-            if (access_type > READ_ONLY && locked_handles_[page_gaddr].second == READ_ONLY) {
+            if (access_type > READ_ONLY && access_type != SCAN_READ && 
+                (locked_handles_[page_gaddr].second == READ_ONLY || locked_handles_[page_gaddr].second == SCAN_READ)) {
                 assert(false);
                 default_gallocator->SELCC_Lock_Upgrade(page_buff, page_gaddr, handle);
                 locked_handles_[page_gaddr].second = access_type;
@@ -293,7 +294,7 @@ namespace DSMEngine {
         assert(start_timestamp_ < 0x700066737575);
 
         // TODO: need to remember the latch, so that the latch can be released when the transaction abort.
-        if (access_type == READ_ONLY) {
+        if (access_type == READ_ONLY || access_type == SCAN_READ) {
 
 
             // TODO: totally rewrite the code below it's totally wrong.
@@ -354,6 +355,9 @@ namespace DSMEngine {
             }
             //        printf("this access index is %zu\n",i);
             //            fflush(stdout);
+            // Clean up access_global_record_ (created in SelectRecordCC at line 280)
+            // access_global_record_ should always exist for any access in the list
+            assert(access->access_global_record_ != nullptr);
             delete access->access_global_record_;
             access->access_global_record_ = nullptr;
             access->access_addr_          = GlobalAddress::Null();
@@ -377,69 +381,71 @@ namespace DSMEngine {
 
     void TransactionManager::AbortTransaction() {
         PROFILE_TIME_START(thread_id_, CC_ABORT);
+        
+        // Phase 1: Sort accesses by address to acquire locks in order (avoid deadlock)
         std::map<uint64_t, Access*> sorted_access;
-        // lock the access list in order to avoid deadlock.
         for (size_t i = 0; i < access_list_.access_count_; ++i) {
-            Access* access             = access_list_.GetAccess(i);
-            GlobalAddress tuple_g_addr = access->access_addr_;
-            sorted_access.insert({tuple_g_addr, access});
+            Access* access = access_list_.GetAccess(i);
+            // Use conversion operator to avoid accessing packed field directly
+            // Packed struct members can't bind references, so we convert the whole object
+            uint64_t addr_val = static_cast<uint64_t>(access->access_addr_);
+            sorted_access.insert({addr_val, access});
         }
+        
+        // Phase 2: Acquire locks in order and perform rollback operations
         for (auto iter : sorted_access) {
             Access* access = iter.second;
-            GlobalAddress page_gaddr;
-            Cache::Handle* handle;
-            char* tuple_buffer;
-            if (access->access_type_ != READ_ONLY) {
-                // Refetch the tuple.
+            assert(access->access_global_record_ != nullptr);
+            
+            if (access->access_type_ != READ_ONLY && access->access_type_ != SCAN_READ) {
+                // Acquire exclusive latch for rollback
                 GlobalAddress& tuple_gaddr = access->access_addr_;
-                page_gaddr                 = TOPAGE(tuple_gaddr);
+                GlobalAddress page_gaddr = TOPAGE(tuple_gaddr);
                 assert(page_gaddr.offset - tuple_gaddr.offset > STRUCT_OFFSET(DataPage, data_));
-                RecordSchema* schema_ptr =
-                    storage_manager_->tables_[access->access_global_record_->GetTableId()]->GetSchema();
-                //                    void*  page_buff;
-
-                // No matter write or read we need acquire exclusive latch.
-                //                    default_gallocator->SELCC_Exclusive_Lock(page_buff, page_gaddr, handle);
+                
+                char* tuple_buffer;
+                Cache::Handle* handle;
                 AcquireXLatchForTuple(tuple_buffer, tuple_gaddr, handle);
-                //                    assert((tuple_gaddr.offset - handle->gptr.offset) > STRUCT_OFFSET(DataPage,
-                //                    data_)); tuple_buffer = (char*)page_buff + (tuple_gaddr.offset -
-                //                    handle->gptr.offset);
+                
+                // Reset record buffer to point to the tuple in the page
                 access->access_global_record_->ReSetRecordBuff(
                     tuple_buffer, access->access_global_record_->GetRecordSize(), false);
-            }
-            if (access->access_type_ == INSERT_ONLY) {
-
-                access->access_global_record_->SetVisible(false);
-                // delete access->access_global_record_;
-                // access->access_global_record_ = nullptr;
-
-                // todo: Deallcoate the space of inserted tuples.
-            } else if (access->access_type_ == READ_WRITE) {
-                assert(access->txn_local_tuple_ != nullptr);
-                // TODO: we need to reacquire the exclusive latch of the global record.
-                access->access_global_record_->CopyFrom(access->txn_local_tuple_);
-            } else if (access->access_type_ == DELETE_ONLY) {
-                access->access_global_record_->SetVisible(true);
-            }
-            //                default_gallocator->SELCC_Exclusive_UnLock(page_gaddr, handle);
-
-            delete access->access_global_record_;
-            access->access_global_record_ = nullptr;
-            access->access_addr_          = GlobalAddress::Null();
-            // Always recycle txn_local_tuple_ for all access types
-            if (access->txn_local_tuple_ != nullptr) {
-                delete access->txn_local_tuple_;
-                access->txn_local_tuple_ = nullptr;
+                
+                // Perform rollback operations based on access type
+                if (access->access_type_ == INSERT_ONLY) {
+                    access->access_global_record_->SetVisible(false);
+                    // todo: Deallocate the space of inserted tuples.
+                } else if (access->access_type_ == READ_WRITE) {
+                    assert(access->txn_local_tuple_ != nullptr);
+                    access->access_global_record_->CopyFrom(access->txn_local_tuple_);
+                } else if (access->access_type_ == DELETE_ONLY) {
+                    access->access_global_record_->SetVisible(true);
+                }
             }
         }
-        access_list_.Clear();
-        //            ClearAllLatches();
+        
+        // Phase 3: Release all locks
         for (auto iter : locked_handles_) {
             default_gallocator->SELCC_Exclusive_UnLock(iter.second.first->gptr, iter.second.first);
         }
         if (!locked_handles_.empty()) {
             locked_handles_.clear();
         }
+        
+        // Phase 4: Clean up access records individually
+        for (size_t i = 0; i < access_list_.access_count_; ++i) {
+            Access* access = access_list_.GetAccess(i);
+            assert(access->access_global_record_ != nullptr);
+            delete access->access_global_record_;
+            access->access_global_record_ = nullptr;
+            access->access_addr_ = GlobalAddress::Null();
+            if (access->txn_local_tuple_ != nullptr) {
+                delete access->txn_local_tuple_;
+                access->txn_local_tuple_ = nullptr;
+            }
+        }
+        
+        access_list_.Clear();
         is_first_access_ = true;
         PROFILE_TIME_END(thread_id_, CC_ABORT);
     }

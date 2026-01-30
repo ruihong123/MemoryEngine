@@ -49,8 +49,8 @@ namespace DSMEngine {
                 primary_index_ = nullptr;
             }
             if (schema_ptr_) {
-                printf("This table is %p, table id is %lu deallocate shcema_ptr %p \n", this, table_id_, schema_ptr_);
-                fflush(stdout);
+                // printf("This table is %p, table id is %lu deallocate shcema_ptr %p \n", this, table_id_, schema_ptr_);
+                // fflush(stdout);
                 delete schema_ptr_;
                 schema_ptr_ = nullptr;
             }

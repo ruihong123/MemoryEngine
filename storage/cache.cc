@@ -1241,11 +1241,14 @@ LocalBuffer::LocalBuffer(const CacheConfig &cache_config) {
                 }
 #endif
 //                w_l.unlock();
-                rw_mtx.unlock();
-                asm volatile ("sfence\n" : : );
-                asm volatile ("lfence\n" : : );
-                asm volatile ("mfence\n" : : );
-                rw_mtx.lock_shared();
+                assert(remote_lock_status.load() > 0);
+                // rw_mtx.unlock();
+                rw_mtx.downgrade();
+                // asm volatile ("sfence\n" : : );
+                // asm volatile ("lfence\n" : : );
+                // asm volatile ("mfence\n" : : );
+                // rw_mtx.lock_shared();
+                assert(remote_lock_status.load() > 0);
 #ifdef LOCAL_LOCK_DEBUG
                 {
                     std::unique_lock<std::mutex> lck(holder_id_mtx);
@@ -1257,6 +1260,7 @@ LocalBuffer::LocalBuffer(const CacheConfig &cache_config) {
                 cache_hit_valid[RDMA_Manager::thread_id][0]++;
             }
             mr = (ibv_mr*)value;
+            assert(remote_lock_status.load() > 0);
 
 
 
@@ -1362,14 +1366,15 @@ LocalBuffer::LocalBuffer(const CacheConfig &cache_config) {
                 }
 #endif
 //                w_l.unlock();
-                rw_mtx.unlock();
-                asm volatile ("sfence\n" : : );
-                asm volatile ("lfence\n" : : );
-                asm volatile ("mfence\n" : : );
-                if (!rw_mtx.try_shared_lock()){
-
-                    return false;
-                }
+                // rw_mtx.unlock();
+                // asm volatile ("sfence\n" : : );
+                // asm volatile ("lfence\n" : : );
+                // asm volatile ("mfence\n" : : );
+                // if (!rw_mtx.try_shared_lock()){
+                //
+                //     return false;
+                // }
+                rw_mtx.downgrade();
 //                rw_mtx.lock_shared();
 #ifdef LOCAL_LOCK_DEBUG
                 {

@@ -39,46 +39,48 @@ namespace DSMEngine {
                 frequency_weights[5] = INSERT_CALL_FORWARDING_PERCENT;
                 frequency_weights[6] = DELETE_CALL_FORWARDING_PERCENT;
                 
-                // Calculate analytical scan weight to achieve ~1% of total throughput
-                // Standard TATP total = 35+10+35+2+14+2+2 = 100
+                // Calculate analytical scan weight to achieve 1/1000 of total throughput
+                // Standard TATP total = 35000+10000+35000+2000+14000+2000+2000 = 100000
                 double standard_total = GET_SUBSCRIBER_DATA_PERCENT + GET_NEW_DESTINATION_PERCENT + 
                                        GET_ACCESS_DATA_PERCENT + UPDATE_SUBSCRIBER_DATA_PERCENT + 
                                        UPDATE_LOCATION_PERCENT + INSERT_CALL_FORWARDING_PERCENT + 
                                        DELETE_CALL_FORWARDING_PERCENT;
                 if (FREQUENCY_ANALYTICAL_SCAN > 0 && standard_total > 0) {
-                    // Calculate weight to achieve ~1%: A = 0.01 * (StandardTotal + A) => A = 0.0101 * StandardTotal
-                    frequency_weights[7] = std::max(1.0, std::round(standard_total * 0.0101));
+                    // Calculate weight to achieve 1/1000: A = 0.001 * (StandardTotal + A) => A ≈ 0.001 * StandardTotal
+                    // With standard_total = 100000, this gives A ≈ 100
+                    frequency_weights[7] = std::max(1.0, std::round(standard_total * 0.001));
                 } else {
                     frequency_weights[7] = 0;
                 }
 
-                // Normalize to percentages (0-100)
+                // Calculate total and create cumulative distribution (not normalized to 100)
+                // This allows proper representation of 1/1000 (0.1%) frequencies
                 double total = 0;
                 for (size_t i = 0; i < 8; ++i) {
                     total += frequency_weights[i];
                 }
                 if (total > 0) {
-                    for (size_t i = 0; i < 8; ++i) {
-                        frequency_weights[i] = frequency_weights[i] * 100.0 / total;
-                    }
-                    // Create cumulative distribution
+                    // Create cumulative distribution using actual frequency weights
                     for (size_t i = 1; i < 8; ++i) {
                         frequency_weights[i] += frequency_weights[i - 1];
                     }
                 } else {
-                    // Default distribution if all zeros
-                    frequency_weights[0] = 35.0;
-                    frequency_weights[1] = 45.0;
-                    frequency_weights[2] = 80.0;
-                    frequency_weights[3] = 82.0;
-                    frequency_weights[4] = 96.0;
-                    frequency_weights[5] = 98.0;
-                    frequency_weights[6] = 100.0;
-                    frequency_weights[7] = 100.0;
+                    // Default distribution if all zeros (cumulative frequency weights)
+                    // Using original percentage values scaled by 1000: 35, 10, 35, 2, 14, 2, 2
+                    frequency_weights[0] = 35000.0;
+                    frequency_weights[1] = 45000.0;  // 35000 + 10000
+                    frequency_weights[2] = 80000.0;   // 45000 + 35000
+                    frequency_weights[3] = 82000.0;  // 80000 + 2000
+                    frequency_weights[4] = 96000.0;  // 82000 + 14000
+                    frequency_weights[5] = 98000.0;  // 96000 + 2000
+                    frequency_weights[6] = 100000.0; // 98000 + 2000
+                    frequency_weights[7] = 100000.0; // No analytical scan in default
+                    total = 100000.0;
                 }
 
                 for (size_t i = 0; i < num_txn_; ++i) {
-                    int rand_num    = random_gen_.GenerateInteger(1, 100);
+                    // Generate random number in range [1, total] to support frequencies smaller than 1%
+                    int rand_num = random_gen_.GenerateInteger(1, static_cast<int>(total));
                     TxnParam* param = nullptr;
 
                     if (rand_num <= frequency_weights[0]) {

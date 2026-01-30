@@ -472,6 +472,34 @@ class SpinMutex {
             uint64_t desired = (cur - READER_COUNT_INCREMENT) | WRITER_ACTIVE_MASK;
             return state.compare_exchange_strong(cur, desired, std::memory_order_acq_rel);
         }
+
+        // Atomically downgrade an exclusive lock to a shared lock.
+        // The caller must already hold an exclusive lock.
+        void downgrade() {
+            uint64_t cur = state.load(std::memory_order_acq_rel);
+            // Assert that the lock is in exclusive state (writer active, no readers).
+            assert((cur & WRITER_ACTIVE_MASK) && "downgrade() called without holding exclusive lock!");
+            assert((cur & READER_COUNT_MASK) == 0 && "downgrade() called while readers are present!");
+            
+            // Atomically convert exclusive lock to shared lock:
+            // Clear the writer active flag and add one reader count.
+            // Also clear the writer waiting flag if it was set.
+            uint64_t desired = (cur & ~WRITER_ACTIVE_MASK & ~WRITER_WAITING_MASK) + READER_COUNT_INCREMENT;
+            
+            // Retry if compare_exchange fails. This can happen if:
+            // 1. Another thread sets/clears WRITER_WAITING_MASK while we hold the exclusive lock
+            // 2. The waiting bit state changes between our load() and compare_exchange_strong()
+            // This is expected behavior - we retry with the updated state.
+            while (!state.compare_exchange_strong(cur, desired, std::memory_order_acq_rel)) {
+                // If compare_exchange fails, cur is updated to the current state.
+                // Verify we still hold the exclusive lock (must be true - if not, it's a bug).
+                assert((cur & WRITER_ACTIVE_MASK) && "downgrade() failed - exclusive lock was released!");
+                assert((cur & READER_COUNT_MASK) == 0 && "downgrade() failed - readers appeared unexpectedly!");
+                // Recalculate desired state with updated cur (waiting bit may have changed)
+                desired = (cur & ~WRITER_ACTIVE_MASK & ~WRITER_WAITING_MASK) + READER_COUNT_INCREMENT;
+            }
+        }
+
         bool islocked(){
             return state.load(std::memory_order_relaxed) & WRITER_ACTIVE_MASK;
         }

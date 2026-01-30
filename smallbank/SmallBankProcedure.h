@@ -320,7 +320,7 @@ namespace DSMEngine {
                         if (savings_iter->GetNext(savings_key, savings_value_buf, gaddr)) {
                             Record* savings_record = nullptr;
                             // Read savings record directly using GlobalAddress from iterator
-                            DB_QUERY(ReadRecordByAddress(SAVINGS_TABLE_ID, savings_record, gaddr, READ_ONLY));
+                            DB_QUERY(ReadRecordByAddress(SAVINGS_TABLE_ID, savings_record, gaddr, SCAN_READ));
                             
                             if (savings_record) {
                                 double savings_bal = 0.0;
@@ -331,6 +331,10 @@ namespace DSMEngine {
                                     transaction_manager_->ReleaseLatchForGCL(handle->gptr, handle);
                                 }
 #endif
+                                // Clean up the local record after use to avoid heap explosion
+                                // The global record is already deleted in SelectRecordCC
+                                transaction_manager_->CleanupLastScanReadRecord();
+                                savings_record = nullptr;
                             }
                             accounts_scanned++;
                         }
@@ -350,7 +354,7 @@ namespace DSMEngine {
                         if (checking_iter->GetNext(checking_key, checking_value_buf, gaddr)) {
                             Record* checking_record = nullptr;
                             // Read checking record directly using GlobalAddress from iterator
-                            DB_QUERY(ReadRecordByAddress(CHECKING_TABLE_ID, checking_record, gaddr, READ_ONLY));
+                            DB_QUERY(ReadRecordByAddress(CHECKING_TABLE_ID, checking_record, gaddr, SCAN_READ));
                             
                             if (checking_record) {
                                 double checking_bal = 0.0;
@@ -361,12 +365,19 @@ namespace DSMEngine {
                                     transaction_manager_->ReleaseLatchForGCL(handle->gptr, handle);
                                 }
 #endif
+                                // Clean up the local record after use to avoid heap explosion
+                                // The global record is already deleted in SelectRecordCC
+                                transaction_manager_->CleanupLastScanReadRecord();
+                                checking_record = nullptr;
                             }
                             accounts_scanned++;
                         }
                         checking_iter->Next();
                     }
                 }
+                // printf("Analytical Scan: Node %d, Thread %zu, Accounts scanned: %ld\n", 
+                //        default_gallocator->GetID(), thread_id_, accounts_scanned);
+                // fflush(stdout);
 
                 return transaction_manager_->CommitTransaction(ret);
             }

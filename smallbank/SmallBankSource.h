@@ -38,43 +38,45 @@ namespace DSMEngine {
                 frequency_weights[4] = TRANSACT_SAVINGS_PERCENT;
                 frequency_weights[5] = WRITE_CHECK_PERCENT;
                 
-                // Calculate analytical scan weight to achieve ~1% of total throughput
-                // Standard SmallBank total = 15+15+15+25+15+15 = 100
+                // Calculate analytical scan weight to achieve 1/1000 of total throughput
+                // Standard SmallBank total = 15000+15000+15000+25000+15000+15000 = 100000
                 double standard_total = AMALGAMATE_PERCENT + BALANCE_PERCENT + DEPOSIT_CHECKING_PERCENT + 
                                        SEND_PAYMENT_PERCENT + TRANSACT_SAVINGS_PERCENT + WRITE_CHECK_PERCENT;
                 if (FREQUENCY_ANALYTICAL_SCAN > 0 && standard_total > 0) {
-                    // Calculate weight to achieve ~1%: A = 0.01 * (StandardTotal + A) => A = 0.0101 * StandardTotal
-                    frequency_weights[6] = std::max(1.0, std::round(standard_total * 0.0101));
+                    // Calculate weight to achieve 1/1000: A = 0.001 * (StandardTotal + A) => A ≈ 0.001 * StandardTotal
+                    // With standard_total = 100000, this gives A ≈ 100
+                    frequency_weights[6] = std::max(1.0, std::round(standard_total * 0.001));
                 } else {
                     frequency_weights[6] = 0;
                 }
 
-                // Normalize to percentages (0-100)
+                // Calculate total and create cumulative distribution (not normalized to 100)
+                // This allows proper representation of 1/1000 (0.1%) frequencies
                 double total = 0;
                 for (size_t i = 0; i < 7; ++i) {
                     total += frequency_weights[i];
                 }
                 if (total > 0) {
-                    for (size_t i = 0; i < 7; ++i) {
-                        frequency_weights[i] = frequency_weights[i] * 100.0 / total;
-                    }
-                    // Create cumulative distribution
+                    // Create cumulative distribution using actual frequency weights
                     for (size_t i = 1; i < 7; ++i) {
                         frequency_weights[i] += frequency_weights[i - 1];
                     }
                 } else {
-                    // Default distribution if all zeros
-                    frequency_weights[0] = AMALGAMATE_PERCENT;
-                    frequency_weights[1] = AMALGAMATE_PERCENT + BALANCE_PERCENT;
-                    frequency_weights[2] = frequency_weights[1] + DEPOSIT_CHECKING_PERCENT;
-                    frequency_weights[3] = frequency_weights[2] + SEND_PAYMENT_PERCENT;
-                    frequency_weights[4] = frequency_weights[3] + TRANSACT_SAVINGS_PERCENT;
-                    frequency_weights[5] = frequency_weights[4] + WRITE_CHECK_PERCENT;
-                    frequency_weights[6] = 100.0;
+                    // Default distribution if all zeros (cumulative frequency weights)
+                    // Using original percentage values scaled by 1000: 15, 15, 15, 25, 15, 15
+                    frequency_weights[0] = 15000.0;
+                    frequency_weights[1] = 30000.0;  // 15000 + 15000
+                    frequency_weights[2] = 45000.0;  // 30000 + 15000
+                    frequency_weights[3] = 70000.0;  // 45000 + 25000
+                    frequency_weights[4] = 85000.0;  // 70000 + 15000
+                    frequency_weights[5] = 100000.0; // 85000 + 15000
+                    frequency_weights[6] = 100000.0;  // No analytical scan in default
+                    total = 100000.0;
                 }
 
                 for (size_t i = 0; i < num_txn_; ++i) {
-                    int rand_num    = random_gen_.GenerateInteger(1, 100);
+                    // Generate random number in range [1, total] to support frequencies smaller than 1%
+                    int rand_num = random_gen_.GenerateInteger(1, static_cast<int>(total));
                     TxnParam* param = nullptr;
 
                     if (rand_num <= frequency_weights[0]) {

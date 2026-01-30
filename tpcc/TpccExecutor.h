@@ -167,7 +167,7 @@ protected:
                                  
                                  // Read district record
                                  DynamicCompoundKey key = GetDistrictPrimaryKey(d, wh, district_schema);
-                                 if (!mgr.SearchRecord(DISTRICT_TABLE_ID, key, record, READ_ONLY)) {
+                                 if (!mgr.SearchRecord(DISTRICT_TABLE_ID, key, record, SCAN_READ)) {
                                    *in_scan = false;
                                    return false; // Transaction aborted
                                  }
@@ -205,7 +205,7 @@ protected:
                                  
                                  // Read stock record
                                  DynamicCompoundKey key = GetStockPrimaryKey(item, wh, stock_schema);
-                                 if (!mgr.SearchRecord(STOCK_TABLE_ID, key, record, READ_ONLY)) {
+                                 if (!mgr.SearchRecord(STOCK_TABLE_ID, key, record, SCAN_READ)) {
                                    *in_scan = false;
                                    return false; // Transaction aborted
                                  }
@@ -241,7 +241,7 @@ protected:
                                  
                                  // Read warehouse record
                                  DynamicCompoundKey key = GetWarehousePrimaryKey(wh, warehouse_schema);
-                                 if (!mgr.SearchRecord(WAREHOUSE_TABLE_ID, key, record, READ_ONLY)) {
+                                 if (!mgr.SearchRecord(WAREHOUSE_TABLE_ID, key, record, SCAN_READ)) {
                                    *in_scan = false;
                                    return false; // Transaction aborted
                                  }
@@ -273,7 +273,7 @@ protected:
                                  
                                  // Read customer record
                                  DynamicCompoundKey key = GetCustomerPrimaryKey(c, d, wh, customer_schema);
-                                 if (!mgr.SearchRecord(CUSTOMER_TABLE_ID, key, record, READ_ONLY)) {
+                                 if (!mgr.SearchRecord(CUSTOMER_TABLE_ID, key, record, SCAN_READ)) {
                                    *in_scan = false;
                                    return false; // Transaction aborted
                                  }

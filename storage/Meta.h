@@ -23,10 +23,11 @@ enum LockType : size_t {
   WRITE_LOCK,
 };
 enum AccessType : size_t {
+  SCAN_READ,    // blocking read for hot table scanner and analytical queries
   READ_ONLY,   // prepageRead
   INSERT_ONLY, // prepageWrite
   DELETE_ONLY,
-  READ_WRITE // prepageUpdate
+  READ_WRITE,  // prepageUpdate
 
 };
 enum SourceType : size_t { RANDOM_SOURCE, PARTITION_SOURCE };

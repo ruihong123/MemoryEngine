@@ -741,13 +741,17 @@ namespace DSMEngine {
                     while (district_iter->Valid() && districts_scanned < DISTRICTS_PER_WAREHOUSE) {
                         if (district_iter->GetNext(district_key, district_value_buf, gaddr)) {
                             // Read the record directly using GlobalAddress from iterator (avoids b-tree lookup)
-                            DB_QUERY(ReadRecordByAddress(DISTRICT_TABLE_ID, record, gaddr, READ_ONLY));
+                            DB_QUERY(ReadRecordByAddress(DISTRICT_TABLE_ID, record, gaddr, SCAN_READ));
 #if defined(TO)
                             Cache::Handle *handle = (Cache::Handle *) record->Get_Handle();
                             if (handle) {
                                 transaction_manager_->ReleaseLatchForGCL(handle->gptr, handle);
                             }
 #endif
+                            // Clean up the local record after use to avoid heap explosion
+                            // The global record is already deleted in SelectRecordCC
+                            transaction_manager_->CleanupLastScanReadRecord();
+                            record = nullptr;
                             districts_scanned++;
                         }
                         district_iter->Next();
@@ -768,13 +772,17 @@ namespace DSMEngine {
                     while (stock_iter->Valid() && stock_scanned < stock_sample_size) {
                         if (stock_iter->GetNext(stock_key, stock_value_buf, gaddr)) {
                             // Read the record directly using GlobalAddress from iterator (avoids b-tree lookup)
-                            DB_QUERY(ReadRecordByAddress(STOCK_TABLE_ID, record, gaddr, READ_ONLY));
+                            DB_QUERY(ReadRecordByAddress(STOCK_TABLE_ID, record, gaddr, SCAN_READ));
 #if defined(TO)
                             Cache::Handle *handle = (Cache::Handle *) record->Get_Handle();
                             if (handle) {
                                 transaction_manager_->ReleaseLatchForGCL(handle->gptr, handle);
                             }
 #endif
+                            // Clean up the local record after use to avoid heap explosion
+                            // The global record is already deleted in SelectRecordCC
+                            transaction_manager_->CleanupLastScanReadRecord();
+                            record = nullptr;
                             stock_scanned++;
                         }
                         stock_iter->Next();
@@ -783,13 +791,19 @@ namespace DSMEngine {
 
                 // Scan warehouse record (single record, no iterator needed)
                 DynamicCompoundKey warehouse_key = GetWarehousePrimaryKey(w_id, warehouse_schema);
-                DB_QUERY(SearchRecord(WAREHOUSE_TABLE_ID, warehouse_key, record, READ_ONLY));
+                DB_QUERY(SearchRecord(WAREHOUSE_TABLE_ID, warehouse_key, record, SCAN_READ));
 #if defined(TO)
                 Cache::Handle *handle = (Cache::Handle *) record->Get_Handle();
                 if (handle) {
                     transaction_manager_->ReleaseLatchForGCL(handle->gptr, handle);
                 }
 #endif
+                // Clean up the local record after use to avoid heap explosion
+                // The global record is already deleted in SelectRecordCC
+                if (record != nullptr) {
+                    transaction_manager_->CleanupLastScanReadRecord();
+                    record = nullptr;
+                }
 
                 // Scan customers for the warehouse using iterator (sample from each district)
                 int customer_sample_per_district = std::min(100, CUSTOMERS_PER_DISTRICT);
@@ -805,13 +819,17 @@ namespace DSMEngine {
                         while (customer_iter->Valid() && customers_scanned < customer_sample_per_district) {
                             if (customer_iter->GetNext(customer_key, customer_value_buf, gaddr)) {
                                 // Read the record directly using GlobalAddress from iterator (avoids b-tree lookup)
-                                DB_QUERY(ReadRecordByAddress(CUSTOMER_TABLE_ID, record, gaddr, READ_ONLY));
+                                DB_QUERY(ReadRecordByAddress(CUSTOMER_TABLE_ID, record, gaddr, SCAN_READ));
 #if defined(TO)
                                 Cache::Handle *handle = (Cache::Handle *) record->Get_Handle();
                                 if (handle) {
                                     transaction_manager_->ReleaseLatchForGCL(handle->gptr, handle);
                                 }
 #endif
+                                // Clean up the local record after use to avoid heap explosion
+                                // The global record is already deleted in SelectRecordCC
+                                transaction_manager_->CleanupLastScanReadRecord();
+                                record = nullptr;
                                 customers_scanned++;
                             }
                             customer_iter->Next();

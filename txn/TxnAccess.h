@@ -9,7 +9,7 @@
 namespace DSMEngine {
 struct Access {
   Access()
-      : access_global_record_(nullptr), access_addr_(GlobalAddress::Null()) {
+      : access_global_record_(nullptr),txn_local_tuple_(nullptr), access_addr_(GlobalAddress::Null()) {
   }
   AccessType access_type_;
   Record* access_global_record_ = nullptr;

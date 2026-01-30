@@ -329,13 +329,17 @@ namespace DSMEngine {
                     while (subscriber_iter->Valid() && subscribers_scanned < scan_param->num_subscribers_to_scan_) {
                         if (subscriber_iter->GetNext(subscriber_key, subscriber_value_buf, gaddr)) {
                             // Read subscriber record directly using GlobalAddress from iterator
-                            DB_QUERY(ReadRecordByAddress(SUBSCRIBER_TABLE_ID, record, gaddr, READ_ONLY));
+                            DB_QUERY(ReadRecordByAddress(SUBSCRIBER_TABLE_ID, record, gaddr, SCAN_READ));
 #if defined(TO)
                             Cache::Handle* handle = (Cache::Handle*) record->Get_Handle();
                             if (handle) {
                                 transaction_manager_->ReleaseLatchForGCL(handle->gptr, handle);
                             }
 #endif
+                            // Clean up the local record after use to avoid heap explosion
+                            // The global record is already deleted in SelectRecordCC
+                            transaction_manager_->CleanupLastScanReadRecord();
+                            record = nullptr;
                             
                             // Extract subscriber ID from key to scan related tables
                             // For TATP, subscriber ID is the first field in the key
@@ -353,13 +357,17 @@ namespace DSMEngine {
                                 
                                 while (access_iter->Valid() && access_types_scanned <= (AI_TYPE_MAX - AI_TYPE_MIN)) {
                                     if (access_iter->GetNext(access_key, access_value_buf, access_gaddr)) {
-                                        DB_QUERY(ReadRecordByAddress(ACCESS_INFO_TABLE_ID, record, access_gaddr, READ_ONLY));
+                                        DB_QUERY(ReadRecordByAddress(ACCESS_INFO_TABLE_ID, record, access_gaddr, SCAN_READ));
 #if defined(TO)
                                         Cache::Handle* handle = (Cache::Handle*) record->Get_Handle();
                                         if (handle) {
                                             transaction_manager_->ReleaseLatchForGCL(handle->gptr, handle);
                                         }
 #endif
+                                        // Clean up the local record after use to avoid heap explosion
+                                        // The global record is already deleted in SelectRecordCC
+                                        transaction_manager_->CleanupLastScanReadRecord();
+                                        record = nullptr;
                                         access_types_scanned++;
                                     }
                                     access_iter->Next();
@@ -378,13 +386,17 @@ namespace DSMEngine {
                                 
                                 while (sf_iter->Valid() && sf_types_scanned <= (SF_TYPE_MAX - SF_TYPE_MIN)) {
                                     if (sf_iter->GetNext(sf_key, sf_value_buf, sf_gaddr)) {
-                                        DB_QUERY(ReadRecordByAddress(SPECIAL_FACILITY_TABLE_ID, record, sf_gaddr, READ_ONLY));
+                                        DB_QUERY(ReadRecordByAddress(SPECIAL_FACILITY_TABLE_ID, record, sf_gaddr, SCAN_READ));
 #if defined(TO)
                                         Cache::Handle* handle = (Cache::Handle*) record->Get_Handle();
                                         if (handle) {
                                             transaction_manager_->ReleaseLatchForGCL(handle->gptr, handle);
                                         }
 #endif
+                                        // Clean up the local record after use to avoid heap explosion
+                                        // The global record is already deleted in SelectRecordCC
+                                        transaction_manager_->CleanupLastScanReadRecord();
+                                        record = nullptr;
                                         sf_types_scanned++;
                                     }
                                     sf_iter->Next();

@@ -5306,9 +5306,16 @@ namespace DSMEngine {
         //        is %d\n", page_addr, page_buffer->addr, thread_id);
 
         //        printf("global read lock at %p \n", page_addr);
+        bool printed = false;
     retry:
         if (r_times > 0 && retry_cnt >= r_times) {
             return false;
+        }
+        if (retry_cnt >= 1000000 && !printed) {
+            printf("Node %d, thread %d was blocked at page_address %lu (retry_cnt=%lu)\n", 
+                   RDMA_Manager::node_id, RDMA_Manager::thread_id, page_addr.val, retry_cnt);
+            fflush(stdout);
+            printed = true;
         }
         //        retry_cnt++;
         if (retry_cnt++ % INVALIDATION_INTERVAL == 1) {

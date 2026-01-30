@@ -127,7 +127,7 @@ namespace DSMEngine {
         Cache::Handle* handle;
         char* tuple_buffer;
         // TODO: need to remember the latch, so that the latch can be released when the transaction abort.
-        if (access_type == READ_ONLY) {
+        if (access_type == READ_ONLY || access_type == SCAN_READ) {
             //                uint64_t wts = record->GetWTS();
             default_gallocator->SELCC_Shared_Lock(page_buff, page_gaddr, handle);
 
@@ -151,7 +151,7 @@ namespace DSMEngine {
         if (access_type == DELETE_ONLY) {
             record->SetVisible(false);
         }
-        if (access_type == READ_ONLY) {
+        if (access_type == READ_ONLY || access_type == SCAN_READ) {
             //                uint64_t wts = record->GetWTS();
             default_gallocator->SELCC_Shared_UnLock(page_gaddr, handle);
 
@@ -211,7 +211,7 @@ namespace DSMEngine {
                 } else {
                     handle = locked_handles_.at(page_gaddr).first;
                     // TODO: update the hierachical lock atomically, if the lock is shared lock
-                    if (locked_handles_[page_gaddr].second == READ_ONLY) {
+                    if (locked_handles_[page_gaddr].second == READ_ONLY || locked_handles_[page_gaddr].second == SCAN_READ) {
                         assert(false);
                         default_gallocator->SELCC_Lock_Upgrade(page_buff, page_gaddr, handle);
                         locked_handles_[page_gaddr].second = access_type;
@@ -294,9 +294,10 @@ namespace DSMEngine {
         }
         access_list_.Clear();
         for (auto iter : locked_handles_) {
-            assert(iter.second.second == READ_ONLY || iter.second.second == DELETE_ONLY
-                   || iter.second.second == INSERT_ONLY || iter.second.second == READ_WRITE);
-            if (iter.second.second == READ_ONLY) {
+            assert(iter.second.second == READ_ONLY || iter.second.second == SCAN_READ ||
+                   iter.second.second == DELETE_ONLY || iter.second.second == INSERT_ONLY || 
+                   iter.second.second == READ_WRITE);
+            if (iter.second.second == READ_ONLY || iter.second.second == SCAN_READ) {
                 default_gallocator->SELCC_Shared_UnLock(iter.second.first->gptr, iter.second.first);
             } else {
                 default_gallocator->SELCC_Exclusive_UnLock(iter.second.first->gptr, iter.second.first);
@@ -322,9 +323,10 @@ namespace DSMEngine {
         access_list_.Clear();
         // Clear the grabbed SELCC latch.
         for (auto iter : locked_handles_) {
-            assert(iter.second.second == READ_ONLY || iter.second.second == DELETE_ONLY
-                   || iter.second.second == INSERT_ONLY || iter.second.second == READ_WRITE);
-            if (iter.second.second == READ_ONLY) {
+            assert(iter.second.second == READ_ONLY || iter.second.second == SCAN_READ ||
+                   iter.second.second == DELETE_ONLY || iter.second.second == INSERT_ONLY || 
+                   iter.second.second == READ_WRITE);
+            if (iter.second.second == READ_ONLY || iter.second.second == SCAN_READ) {
                 default_gallocator->SELCC_Shared_UnLock(iter.second.first->gptr, iter.second.first);
             } else {
                 default_gallocator->SELCC_Exclusive_UnLock(iter.second.first->gptr, iter.second.first);

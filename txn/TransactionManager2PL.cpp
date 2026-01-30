@@ -79,16 +79,16 @@ namespace DSMEngine {
         //    GlobalAddress page_addr = TOPAGE(tuple_gaddr);
         char* tuple_buffer;
         if (locked_handles_.find(page_gaddr) == locked_handles_.end()) {
-            if (access_type == READ_ONLY) {
+            if (access_type == READ_ONLY || access_type == SCAN_READ) {
                 PROFILE_TIME_START(thread_id_, LOCK_READ);
-                // Hot scanner thread (thread_id_ == thread_count_) uses blocking locks for long-running reads
-                // All other threads use try locks
-                bool is_hot_scanner = (thread_id_ == thread_count_);
-                if (is_hot_scanner) {
-                    // Use blocking lock for hot scanner thread - will retry until success
+                if (access_type == SCAN_READ) {
+                    // SCAN_READ uses blocking lock for hot table scanner and analytical queries
                     default_gallocator->SELCC_Shared_Lock(page_buff, page_gaddr, handle);
+                    // reader_pre_access already ensures remote_lock_status > 0 before returning
+                    // (see cache.cc:1260), so this assertion is redundant but kept for safety
+                    assert(handle->remote_lock_status.load() > 0);
                 } else {
-                    // Use try lock for normal transactions
+                    // READ_ONLY uses try lock for normal transactions
                     if (!default_gallocator->TrySELCC_Shared_Lock(page_buff, page_gaddr, handle)) {
                         this->AbortTransaction();
                         return false;
@@ -128,8 +128,10 @@ namespace DSMEngine {
 
         } else {
             handle = locked_handles_.at(page_gaddr).first;
+            assert(handle->remote_lock_status!=0);
             // TODO: update the hierachical lock atomically, if the lock is shared lock
-            if (access_type > READ_ONLY && locked_handles_[page_gaddr].second == READ_ONLY) {
+            if (access_type > READ_ONLY && 
+                (locked_handles_[page_gaddr].second == READ_ONLY || locked_handles_[page_gaddr].second == SCAN_READ)) {
                 assert(false);
                 default_gallocator->SELCC_Lock_Upgrade(page_buff, page_gaddr, handle);
                 locked_handles_[page_gaddr].second = access_type;
@@ -159,6 +161,7 @@ namespace DSMEngine {
             local_tuple->CopyFrom(record);
             access->txn_local_tuple_ = local_tuple;
         }
+        assert(handle->remote_lock_status!=0);
         PROFILE_TIME_END(thread_id_, CC_SELECT);
         return true;
         //    }
@@ -187,10 +190,11 @@ namespace DSMEngine {
         //      assert(locked_handles_.size() == access_list_.access_count_);
         assert(locked_handles_.size() > 0);
         for (auto iter : locked_handles_) {
-            assert(iter.second.second == READ_ONLY || iter.second.second == DELETE_ONLY
-                   || iter.second.second == INSERT_ONLY || iter.second.second == READ_WRITE);
+            assert(iter.second.second == READ_ONLY || iter.second.second == SCAN_READ ||
+                   iter.second.second == DELETE_ONLY || iter.second.second == INSERT_ONLY || 
+                   iter.second.second == READ_WRITE);
             GlobalAddress page_addr = iter.second.first->gptr;
-            if (iter.second.second == READ_ONLY) {
+            if (iter.second.second == READ_ONLY || iter.second.second == SCAN_READ) {
                 assert(iter.second.first->remote_lock_status >= 1);
 
                 default_gallocator->SELCC_Shared_UnLock(iter.second.first->gptr, iter.second.first);
@@ -282,10 +286,11 @@ namespace DSMEngine {
         //      assert(locked_handles_.size() == access_list_.access_count_);
         // assert(locked_handles_.size() > 0);
         for (auto iter : locked_handles_) {
-            assert(iter.second.second == READ_ONLY || iter.second.second == DELETE_ONLY
-                   || iter.second.second == INSERT_ONLY || iter.second.second == READ_WRITE);
+            assert(iter.second.second == READ_ONLY || iter.second.second == SCAN_READ ||
+                   iter.second.second == DELETE_ONLY || iter.second.second == INSERT_ONLY || 
+                   iter.second.second == READ_WRITE);
             GlobalAddress page_addr = iter.second.first->gptr;
-            if (iter.second.second == READ_ONLY) {
+            if (iter.second.second == READ_ONLY || iter.second.second == SCAN_READ) {
                 assert(iter.second.first->remote_lock_status >= 1);
 
                 default_gallocator->SELCC_Shared_UnLock(iter.second.first->gptr, iter.second.first);
@@ -370,9 +375,10 @@ namespace DSMEngine {
         }
 
         for (auto iter : locked_handles_) {
-            assert(iter.second.second == READ_ONLY || iter.second.second == DELETE_ONLY
-                   || iter.second.second == INSERT_ONLY || iter.second.second == READ_WRITE);
-            if (iter.second.second == READ_ONLY) {
+            assert(iter.second.second == READ_ONLY || iter.second.second == SCAN_READ ||
+                   iter.second.second == DELETE_ONLY || iter.second.second == INSERT_ONLY || 
+                   iter.second.second == READ_WRITE);
+            if (iter.second.second == READ_ONLY || iter.second.second == SCAN_READ) {
                 assert(iter.second.first->remote_lock_status >= 1);
                 default_gallocator->SELCC_Shared_UnLock(iter.second.first->gptr, iter.second.first);
             } else {

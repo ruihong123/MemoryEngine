@@ -83,22 +83,26 @@ struct PerfStatistics {
     std::cout
         << "==================== perf statistics summary ===================="
         << std::endl;
+    std::cout.flush();  // Explicitly flush std::cout buffer
     double abort_rate = agg_total_abort_count_ * 1.0 / (agg_total_count_ + 1);
     printf(
         "this node id: %hu, "
         "agg_total_count\t%lld\nagg_total_abort_count\t%lld\nabort_rate\t%lf\n",
         RDMA_Manager::node_id, agg_total_count_, agg_total_abort_count_,
         abort_rate);
+    fflush(stdout);  // Explicitly flush printf buffer
     printf("FREQUENCY_DELIVERY is %d\nFREQUENCY_PAYMENT IS "
            "%d\nFREQUENCY_NEW_ORDER is %d\nFREQUENCY_ORDER_STATUS is "
            "%d\nFREQUENCY_STOCK_LEVEL is %d\n",
            FREQUENCY_DELIVERY, FREQUENCY_PAYMENT, FREQUENCY_NEW_ORDER,
            FREQUENCY_ORDER_STATUS, FREQUENCY_STOCK_LEVEL);
+    fflush(stdout);  // Explicitly flush printf buffer
     printf("per_node_elapsed_time\t%lf\ntotal_throughput\t%lf\nper_node_"
            "throughput\t%lf\nper_core_throughput\t%lf\n",
            agg_elapsed_time_ * 1.0 / agg_node_num_, agg_throughput_,
            agg_throughput_ / agg_node_num_,
            agg_throughput_ / agg_thread_count_);
+    fflush(stdout);  // Explicitly flush printf buffer
     if (agg_hot_scan_count_ > 0) {
       // Recalculate aggregated throughput from total count and average elapsed time
       double avg_elapsed_time = agg_elapsed_time_ * 1.0 / agg_node_num_;
@@ -109,6 +113,7 @@ struct PerfStatistics {
       double hot_scan_abort_rate = agg_hot_scan_abort_count_ * 1.0 / (agg_hot_scan_count_ + agg_hot_scan_abort_count_);
       printf("hot_scan_total_count\t%lld\nhot_scan_throughput\t%lf\nhot_scan_abort_count\t%lld\nhot_scan_abort_rate\t%lf\nhot_scan_avg_latency\t%lf\n",
              agg_hot_scan_count_, agg_hot_scan_throughput, agg_hot_scan_abort_count_, hot_scan_abort_rate, agg_hot_scan_avg_latency_);
+      fflush(stdout);  // Explicitly flush printf buffer
     }
     uint64_t invalidation_num = 0;
     uint64_t hit_valid_num = 0;
@@ -116,6 +121,7 @@ struct PerfStatistics {
 #if defined(MVOCC)
     uint64_t delta_pull_count = 0;
     uint64_t roll_back_count = 0;
+    uint64_t tuple_read_count = 0;
 #endif
     for (int i = 0; i < MAX_APP_THREAD; ++i) {
       invalidation_num = cache_invalidation[i] + invalidation_num;
@@ -124,6 +130,7 @@ struct PerfStatistics {
 #if defined(MVOCC)
       delta_pull_count = delta_pull_count + delta_pull_num[i];
       roll_back_count = roll_back_num[i] + roll_back_count;
+      tuple_read_count = tuple_read_num[i] + tuple_read_count;
 #endif
     }
     printf("cache invalidation messages are %lu, cache hit numbers are %lu, "
@@ -131,9 +138,18 @@ struct PerfStatistics {
            invalidation_num, hit_valid_num, miss_num,
            agg_thread_count_ /
                agg_throughput_); // agg_thread_count_/agg_throughput_
+    fflush(stdout);  // Explicitly flush printf buffer
 #if defined(MVOCC)
-    printf("delta_pull count is %lu, roll back count is %lu \n",
-           delta_pull_count, roll_back_count);
+    printf("delta_pull count is %lu, roll back count is %lu, tuple read count is %lu\n",
+           delta_pull_count, roll_back_count, tuple_read_count);
+    fflush(stdout);  // Explicitly flush printf buffer
+    if (tuple_read_count > 0) {
+      double avg_rollbacks_per_read = (double)roll_back_count / tuple_read_count;
+      printf("average rollbacks per tuple read: %.4f\n", avg_rollbacks_per_read);
+    } else {
+      printf("average rollbacks per tuple read: N/A (no tuple reads)\n");
+    }
+    fflush(stdout);  // Explicitly flush printf buffer
 #endif
 
     /*std::cout << "agg_total_count=" << agg_total_count_ <<",
@@ -144,7 +160,8 @@ struct PerfStatistics {
    << agg_throughput_ / agg_node_num_ << "K tps." << ",per core throughput=" <<
    agg_throughput_ / agg_thread_count_ << std::endl;*/
     std::cout << "==================== end ====================" << std::endl;
-    fflush(stdout);
+    std::cout.flush();  // Explicitly flush std::cout buffer
+    fflush(stdout);  // Explicitly flush printf buffer
 
     // Print latency statistics
     PrintLatencyStats();

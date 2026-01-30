@@ -120,7 +120,7 @@ protected:
                                  
                                  // Read access_info record
                                  DynamicCompoundKey key = TATPKeyGenerator::GenerateAccessInfoKey(sub, ai_type, access_schema);
-                                 if (!mgr.SearchRecord(ACCESS_INFO_TABLE_ID, key, record, READ_ONLY)) {
+                                 if (!mgr.SearchRecord(ACCESS_INFO_TABLE_ID, key, record, SCAN_READ)) {
                                    *in_scan = false;
                                    return false; // Transaction aborted
                                  }
@@ -158,7 +158,7 @@ protected:
                                  
                                  // Read special_facility record
                                  DynamicCompoundKey key = TATPKeyGenerator::GenerateSpecialFacilityKey(sub, sf_type, sf_schema);
-                                 if (!mgr.SearchRecord(SPECIAL_FACILITY_TABLE_ID, key, record, READ_ONLY)) {
+                                 if (!mgr.SearchRecord(SPECIAL_FACILITY_TABLE_ID, key, record, SCAN_READ)) {
                                    *in_scan = false;
                                    return false; // Transaction aborted
                                  }

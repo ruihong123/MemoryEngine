@@ -23,6 +23,7 @@ extern uint64_t cache_miss[MAX_APP_THREAD][8];
 #if defined(MVOCC)
 extern uint64_t delta_pull_num[MAX_APP_THREAD];
 extern uint64_t roll_back_num[MAX_APP_THREAD];
+extern uint64_t tuple_read_num[MAX_APP_THREAD];
 #endif
 
 void clear_cache_statistics() {
@@ -31,6 +32,7 @@ void clear_cache_statistics() {
 #if defined(MVOCC)
     DSMEngine::delta_pull_num[i] = 0;
     DSMEngine::roll_back_num[i] = 0;
+    DSMEngine::tuple_read_num[i] = 0;
 #endif
     for (int j = 0; j < 8; ++j) {
       cache_hit_valid[i][j] = 0;
